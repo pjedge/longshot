@@ -12,8 +12,7 @@ mod realignment;
 mod util;
 
 use call_genotypes::call_genotypes;
-use util::{GenomicInterval, u8_to_string, dna_vec};
-use bio::stats::Prob;
+use util::{u8_to_string, dna_vec};
 
 fn main() {
 

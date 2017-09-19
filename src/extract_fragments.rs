@@ -220,6 +220,13 @@ pub fn find_anchors(bam_record: &Record,
     if (interval.tid) != Some(bam_record.tid() as u32) ||
        (interval.start_pos as i32) >= bam_record.cigar().end_pos() ||
        (interval.end_pos as i32) < bam_record.pos() {
+        println!("{} {} {} {} endpos:{}",
+                 String::from_utf8(bam_record.qname().to_vec()).unwrap(),
+                 bam_record.cigar(),
+                 interval.start_pos,
+                 interval.end_pos,
+                 bam_record.cigar().end_pos());
+
         return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
                 "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
             ));
@@ -404,10 +411,6 @@ pub fn find_anchors(bam_record: &Record,
 
 }
 
-struct short_hap {
-    int_rep: u32, // represent a short haplotype as an integer -- variant at position i
-}
-
 fn extract_var_cluster(read_seq: &Vec<char>,
                        ref_seq: &Vec<char>,
                        var_cluster: Vec<PotentialVar>,
@@ -468,7 +471,15 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
         // we now want to score hap_window
         let score: LogProb =
-            realignment::sum_all_alignments(&read_window, &hap_window, 0.9, 0.01, 0.05, 0.3, 20);
+            realignment::sum_all_alignments_numerically_stable(&read_window,
+                                                               &hap_window,
+                                                               LogProb::from(Prob(0.9)),
+                                                               LogProb::from(Prob(0.01)),
+                                                               LogProb::from(Prob(0.05)),
+                                                               LogProb::from(Prob(0.3)),
+                                                               20);
+
+        //realignment::sum_all_alignments(&read_window, &hap_window, 0.9, 0.01, 0.05, 0.3, 20);
 
         for var in 0..n_vars {
             if in_hap(var, hap) {
@@ -495,6 +506,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             // sum of haplotype scores that had a '0' here over the total sum of scores
             let qual = allele_scores0[v] - score_total;
 
+            //println!("qual: {}", qual.exp());
             calls.push(FragCall {
                            var_ix: var_cluster[v].ix,
                            allele: '1',
@@ -602,7 +614,7 @@ pub fn extract_fragments(bamfile_name: &String,
         }
 
         let start_pos = record.pos();
-        let end_pos = record.cigar().end_pos();
+        let end_pos = record.cigar().end_pos() - 1;
 
         let interval = GenomicInterval {
             tid: Some(tid as u32),

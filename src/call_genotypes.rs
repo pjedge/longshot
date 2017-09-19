@@ -2,12 +2,17 @@
 use bio::stats::{PHREDProb, LogProb, Prob};
 use util::{PotentialVar, VarList, Fragment, FragCall, dna_vec, parse_target_names};
 
+
+static MAX_P_MISCALL_F64: f64 = 0.1;
+
 fn generate_realigned_pileup(flist: Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
 
     for fragment in flist {
         for call in fragment.calls {
-            pileup_lst[call.var_ix].push(call);
+            if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+                pileup_lst[call.var_ix].push(call);
+            }
         }
     }
     pileup_lst
@@ -16,9 +21,9 @@ fn generate_realigned_pileup(flist: Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 fn compute_posteriors(pileup: Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
 
     // compute probabilities of data given each genotype
-    let mut prob00 = LogProb::ln_zero();
-    let mut prob01 = LogProb::ln_zero();
-    let mut prob11 = LogProb::ln_zero();
+    let mut prob00 = LogProb::ln_one();
+    let mut prob01 = LogProb::ln_one();
+    let mut prob11 = LogProb::ln_one();
     let ln_half = LogProb::from(Prob(0.5));
 
     for call in pileup {
@@ -58,20 +63,21 @@ fn compute_posteriors(pileup: Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
 pub fn call_genotype(pileup: Vec<FragCall>, var: PotentialVar) {
 
     let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(pileup);
+
     let mut genotype: String = "./.".to_string();
-    let mut GQ: PHREDProb = PHREDProb::from(Prob(1.0));
+    let mut genotype_qual: f64 = 0.0;
 
     if post00 > post01 && post00 > post11 {
         let p_call_wrong = LogProb::ln_add_exp(post01, post11);
-        GQ = PHREDProb::from(p_call_wrong);
+        genotype_qual = *PHREDProb::from(p_call_wrong);
         genotype = "0/0".to_string();
     } else if post01 > post00 && post01 > post11 {
         let p_call_wrong = LogProb::ln_add_exp(post00, post11);
-        GQ = PHREDProb::from(p_call_wrong);
+        genotype_qual = *PHREDProb::from(p_call_wrong);
         genotype = "0/1".to_string();
     } else {
         let p_call_wrong = LogProb::ln_add_exp(post00, post01);
-        GQ = PHREDProb::from(p_call_wrong);
+        genotype_qual = *PHREDProb::from(p_call_wrong);
         genotype = "1/1".to_string();
     }
 
@@ -81,7 +87,7 @@ pub fn call_genotype(pileup: Vec<FragCall>, var: PotentialVar) {
              var.ref_allele,
              var.var_allele,
              genotype,
-             *GQ);
+             genotype_qual);
 
 }
 
