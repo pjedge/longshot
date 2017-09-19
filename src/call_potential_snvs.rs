@@ -4,38 +4,19 @@ use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use bio::io::fasta;
 use std::char;
+use util::{PotentialVar, VarList, parse_target_names};
 
 static VARLIST_CAPACITY: usize = 1000000;
 
-pub struct PotentialVar {
-    chrom: String,
-    pos0: usize,
-    ref_allele: String,
-    var_allele: String,
-}
+pub fn call_potential_snvs(bam_file: &String,
+                           fasta_file: &String,
+                           min_alt_count: u32,
+                           min_alt_frac: f32,
+                           max_coverage: u32,
+                           min_mapq: u8)
+                           -> VarList {
 
-pub fn parse_target_names(bam_file: String) -> Vec<String> {
-    let bam = bam::Reader::from_path(bam_file).unwrap();
-    let header_view = bam.header();
-    let target_names_dec: Vec<&[u8]> = header_view.target_names();
-    let mut target_names: Vec<String> = vec![];
-
-    for t_name_dec in target_names_dec {
-        let mut name_vec: Vec<char> = vec![];
-        for decr in t_name_dec {
-            let dec: u8 = *decr;
-            name_vec.push(dec as char);
-        }
-        let name_string: String = name_vec.into_iter().collect();
-        target_names.push(name_string);
-    }
-
-    target_names
-}
-
-pub fn call_potential_snvs(bam_file: String, fasta_file: String) -> Vec<PotentialVar> {
-
-    let target_names = parse_target_names(bam_file.clone());
+    let target_names = parse_target_names(&bam_file);
 
     let bam = bam::Reader::from_path(bam_file).unwrap();
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
@@ -51,15 +32,26 @@ pub fn call_potential_snvs(bam_file: String, fasta_file: String) -> Vec<Potentia
         let pileup = p.unwrap();
         let tid: usize = pileup.tid() as usize;
 
+        if pileup.depth() > max_coverage {
+            continue;
+        }
+
         if tid != prev_tid {
             fasta.read_all(&target_names[tid], &mut ref_seq).expect("Failed to read fasta sequence record.");
         }
-        //println!("{}:{} depth {}", pileup.tid(), pileup.pos(), pileup.depth());
 
         let mut counts = [0; 5]; // A,C,G,T,N
 
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
+
+            let record = alignment.record();
+            // may be faster to implement this as bitwise operation on raw flag in the future?
+            if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+               record.is_quality_check_failed() ||
+               record.is_duplicate() || record.is_supplementary() {
+                continue;
+            }
             if !alignment.is_del() && !alignment.is_refskip() {
 
                 let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
@@ -76,41 +68,43 @@ pub fn call_potential_snvs(bam_file: String, fasta_file: String) -> Vec<Potentia
             }
         }
 
-
-        //println!("counts[A]: {}", counts[0]);
-        //println!("counts[C]: {}", counts[1]);
-        //println!("counts[G]: {}", counts[2]);
-        //println!("counts[T]: {}", counts[3]);
-        //println!("counts[N]: {}", counts[4]);
-        //println!("---------------------\n");
-
-        let mut var_allele = "N".to_string();
-        let mut max_count = -1;
+        //let mut var_allele = "N".to_string();
+        let mut max_count = 0;
         let mut max_base = 'N';
+        //let mut base_cov = 0;
+        let ref_allele: String =
+            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
 
         for i in 0..5 {
-            if counts[i] > max_count {
+            //base_cov += counts[i];
+            if counts[i] > max_count && bases[i].to_string() != ref_allele {
                 max_count = counts[i];
                 max_base = bases[i];
             }
         }
-        //println!("{}", max_base);
 
-        let ref_allele: String =
-            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-        //let pos0: usize = pileup.pos() as usize;
+        let alt_frac: f32 = (max_count as f32) / (pileup.depth() as f32); //(max_count as f32) / (base_cov as f32);
 
-        if max_count > 3 && !(max_base.to_string() == ref_allele) {
-            var_allele = max_base.to_string();
+        if max_base != 'N' && max_count >= min_alt_count && alt_frac >= min_alt_frac &&
+           !(max_base.to_string() == ref_allele) {
+            let var_allele = max_base.to_string();
 
-            println!("{}\t{}\t{}\t{}",
-                     target_names[tid].clone(),
-                     pileup.pos(),
-                     ref_allele,
-                     var_allele);
+            //println!("A:{};C:{};G:{};T:{};N:{};",
+            //         counts[0],
+            //         counts[1],
+            //         counts[2],
+            //         counts[3],
+            //         counts[4]);
+
+            //println!("{}\t{}\t{}\t{}",
+            //         target_names[tid].clone(),
+            //         pileup.pos() + 1,
+            //         ref_allele,
+            //         var_allele);
 
             let tid: usize = pileup.tid() as usize;
             let new_var = PotentialVar {
+                ix: 0, // this will be set automatically
                 chrom: target_names[tid].clone(),
                 pos0: pileup.pos() as usize,
                 ref_allele: ref_allele,
@@ -122,5 +116,5 @@ pub fn call_potential_snvs(bam_file: String, fasta_file: String) -> Vec<Potentia
 
         prev_tid = tid;
     }
-    varlist
+    VarList::new(varlist)
 }
