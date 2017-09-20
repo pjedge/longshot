@@ -439,12 +439,9 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     //        .to_vec();
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
-    assert!((anchors.right_anchor_read as usize) + 1 < read_seq.len());
-
     let read_window: Vec<char> = read_seq[(anchors.left_anchor_read as usize)..
     (anchors.right_anchor_read as usize) + 1]
             .to_vec();
-
 
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: usize = 0;
