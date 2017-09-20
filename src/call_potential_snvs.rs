@@ -12,6 +12,7 @@ pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
                            min_alt_count: u32,
                            min_alt_frac: f32,
+                           min_coverage: u32,
                            max_coverage: u32,
                            min_mapq: u8)
                            -> VarList {
@@ -32,7 +33,7 @@ pub fn call_potential_snvs(bam_file: &String,
         let pileup = p.unwrap();
         let tid: usize = pileup.tid() as usize;
 
-        if pileup.depth() > max_coverage {
+        if pileup.depth() > max_coverage || pileup.depth() < min_coverage {
             continue;
         }
 
@@ -46,6 +47,7 @@ pub fn call_potential_snvs(bam_file: &String,
         for alignment in pileup.alignments() {
 
             let record = alignment.record();
+
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
                record.is_quality_check_failed() ||
@@ -85,8 +87,8 @@ pub fn call_potential_snvs(bam_file: &String,
 
         let alt_frac: f32 = (max_count as f32) / (pileup.depth() as f32); //(max_count as f32) / (base_cov as f32);
 
-        if max_base != 'N' && max_count >= min_alt_count && alt_frac >= min_alt_frac &&
-           !(max_base.to_string() == ref_allele) {
+        if ref_allele != "N" && max_base != 'N' && max_count >= min_alt_count &&
+           alt_frac >= min_alt_frac && !(max_base.to_string() == ref_allele) {
             let var_allele = max_base.to_string();
 
             //println!("A:{};C:{};G:{};T:{};N:{};",

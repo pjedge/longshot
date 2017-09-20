@@ -6,16 +6,21 @@ use rust_htslib::bam::record::Record;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
-use util::{PotentialVar, VarList, Fragment, FragCall, dna_vec, parse_target_names};
-use bio::stats::{LogProb, Prob};
+use util::*;
+use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use realignment;
 
 use util::GenomicInterval;
+static VERBOSE: bool = false;
 
+static NUMERICALLY_STABLE_ALIGNMENT: bool = false;
 static COMPLEXITY_K: usize = 5;
 static SHORT_HAP_SNV_DISTANCE: usize = 20;
-static SHORT_HAP_MAX_SNVS: usize = 5;
+static SHORT_HAP_MAX_SNVS: usize = 10;
+static MIN_ALIGNMENT_LENGTH: usize = 15;
+static MAX_ALIGNMENT_LENGTH: usize = 200;
+static BAND_WIDTH: usize = 20;
 
 // returns true if kmers in seq are unique, else false
 fn check_kmers_unique(seq: &Vec<char>, k: usize) -> (bool) {
@@ -220,12 +225,6 @@ pub fn find_anchors(bam_record: &Record,
     if (interval.tid) != Some(bam_record.tid() as u32) ||
        (interval.start_pos as i32) >= bam_record.cigar().end_pos() ||
        (interval.end_pos as i32) < bam_record.pos() {
-        println!("{} {} {} {} endpos:{}",
-                 String::from_utf8(bam_record.qname().to_vec()).unwrap(),
-                 bam_record.cigar(),
-                 interval.start_pos,
-                 interval.end_pos,
-                 bam_record.cigar().end_pos());
 
         return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
                 "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
@@ -277,7 +276,6 @@ pub fn find_anchors(bam_record: &Record,
         }
     }
 
-
     // step backwards to find left anchor
     let mut match_len_left = 0;
     let mut seen_indel_left = false;
@@ -292,10 +290,6 @@ pub fn find_anchors(bam_record: &Record,
                     left_anchor_read = cigarpos_list[i].read_pos + match_len_left - anchor_length;
                     let l: usize = left_anchor_ref as usize - COMPLEXITY_K;
                     let r: usize = (left_anchor_ref + anchor_length) as usize + COMPLEXITY_K;
-                    //println!("found possible left anchor: {} {} {}",
-                    //         l,
-                    //         r,
-                    //         String::from_utf8((&ref_seq[l..r + 1]).to_vec()).unwrap());
 
                     if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
 
@@ -312,10 +306,6 @@ pub fn find_anchors(bam_record: &Record,
                                         cigarpos_list[i].ref_pos);
                     let l: usize = left_anchor_ref as usize - COMPLEXITY_K;
                     let r: usize = (left_anchor_ref + anchor_length) as usize + COMPLEXITY_K;
-                    //println!("found possible left anchor: {} {} {}",
-                    //         l,
-                    //         r,
-                    //         String::from_utf8((&ref_seq[l..r + 1]).to_vec()).unwrap());
 
                     if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
 
@@ -355,10 +345,13 @@ pub fn find_anchors(bam_record: &Record,
                 match_len_right += l;
                 if seen_indel_right && match_len_right > anchor_length {
                     // we have found a sufficiently long match and it's NOT the cigar op containing interval.end_pos
-                    right_anchor_ref = cigarpos_list[i].ref_pos + anchor_length;
-                    right_anchor_read = cigarpos_list[i].read_pos + anchor_length;
+                    right_anchor_ref = cigarpos_list[i].ref_pos + l - match_len_right +
+                                       anchor_length;
+                    right_anchor_read = cigarpos_list[i].read_pos + l - match_len_right +
+                                        anchor_length;
                     let l: usize = (right_anchor_ref - anchor_length) as usize - COMPLEXITY_K;
                     let r: usize = right_anchor_ref as usize + COMPLEXITY_K;
+
                     if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
                         found_anchor_right = true;
                         break;
@@ -401,6 +394,14 @@ pub fn find_anchors(bam_record: &Record,
         return Ok(None); // failed to find a right anchor
     }
 
+    let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
+    let read_window_len = (right_anchor_read - left_anchor_read) as usize;
+    if ref_window_len < MIN_ALIGNMENT_LENGTH || read_window_len < MIN_ALIGNMENT_LENGTH ||
+       ref_window_len > MAX_ALIGNMENT_LENGTH || read_window_len > MAX_ALIGNMENT_LENGTH {
+
+        return Ok(None);
+    }
+
     // return anchor pos
     Ok(Some(AnchorPositions {
                 left_anchor_ref: left_anchor_ref,
@@ -414,7 +415,8 @@ pub fn find_anchors(bam_record: &Record,
 fn extract_var_cluster(read_seq: &Vec<char>,
                        ref_seq: &Vec<char>,
                        var_cluster: Vec<PotentialVar>,
-                       anchors: AnchorPositions)
+                       anchors: AnchorPositions,
+                       align_params: AlignmentParameters)
                        -> Vec<FragCall> {
 
     let mut calls: Vec<FragCall> = vec![];
@@ -427,6 +429,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     let read_window: Vec<char> = read_seq[(anchors.left_anchor_read as usize)..
     (anchors.right_anchor_read as usize) + 1]
             .to_vec();
+
 
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: usize = 0;
@@ -441,6 +444,20 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     let mut allele_scores0: Vec<LogProb> = vec![LogProb::ln_zero(); n_vars];
     let mut allele_scores1: Vec<LogProb> = vec![LogProb::ln_zero(); n_vars];
     let mut score_total: LogProb = LogProb::ln_zero();
+
+    if VERBOSE {
+        for var in var_cluster.clone() {
+            println!("{} {} {} {}",
+                     var.chrom,
+                     var.pos0,
+                     var.ref_allele,
+                     var.var_allele);
+        }
+        let read_seq_str: String = read_window.clone().into_iter().collect();
+        println!("read: {}", read_seq_str);
+    }
+
+
 
     for hap in 0..n_haps {
 
@@ -470,16 +487,17 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
 
         // we now want to score hap_window
-        let score: LogProb =
-            realignment::sum_all_alignments_numerically_stable(&read_window,
-                                                               &hap_window,
-                                                               LogProb::from(Prob(0.9)),
-                                                               LogProb::from(Prob(0.01)),
-                                                               LogProb::from(Prob(0.05)),
-                                                               LogProb::from(Prob(0.3)),
-                                                               20);
-
-        //realignment::sum_all_alignments(&read_window, &hap_window, 0.9, 0.01, 0.05, 0.3, 20);
+        let score: LogProb = match NUMERICALLY_STABLE_ALIGNMENT {
+            true => {
+                realignment::sum_all_alignments_numerically_stable(&read_window,
+                                                                   &hap_window,
+                                                                   align_params.ln(),
+                                                                   BAND_WIDTH)
+            }
+            false => {
+                realignment::sum_all_alignments(&read_window, &hap_window, align_params, BAND_WIDTH)
+            }
+        };
 
         for var in 0..n_vars {
             if in_hap(var, hap) {
@@ -488,6 +506,10 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 allele_scores0[var] = LogProb::ln_add_exp(allele_scores0[var], score);
             }
         }
+        if VERBOSE {
+            let hap_seq_str: String = hap_window.into_iter().collect();
+            println!("hap:{} {} {}", hap, hap_seq_str, *PHREDProb::from(score));
+        }
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
 
@@ -495,6 +517,9 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             max_score = score;
             max_hap = hap;
         }
+    }
+    if VERBOSE {
+        println!("--------------------------------------");
     }
 
     for v in 0..n_vars {
@@ -506,7 +531,6 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             // sum of haplotype scores that had a '0' here over the total sum of scores
             let qual = allele_scores0[v] - score_total;
 
-            //println!("qual: {}", qual.exp());
             calls.push(FragCall {
                            var_ix: var_cluster[v].ix,
                            allele: '1',
@@ -532,7 +556,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
 pub fn extract_fragment(bam_record: &Record,
                         vars: Vec<PotentialVar>,
-                        ref_seq: &Vec<char>)
+                        ref_seq: &Vec<char>,
+                        align_params: AlignmentParameters)
                         -> Fragment {
 
 
@@ -552,11 +577,11 @@ pub fn extract_fragment(bam_record: &Record,
                (var.pos0 - var_cluster[var_cluster.len() - 1].pos0 < SHORT_HAP_SNV_DISTANCE &&
                 var_cluster.len() <= SHORT_HAP_MAX_SNVS) {
                 var_cluster.push(var);
-                continue;
             } else {
 
                 cluster_lst.push(var_cluster.clone());
                 var_cluster.clear();
+                var_cluster.push(var);
             }
         }
         if var_cluster.len() > 0 {
@@ -577,7 +602,7 @@ pub fn extract_fragment(bam_record: &Record,
         match find_anchors(bam_record, interval, 10, &ref_seq)
               .expect("CIGAR or Anchor Error while finding anchor sequences."){
             Some(anchors) => {
-                for call in extract_var_cluster(&read_seq, ref_seq, var_cluster, anchors) {
+                for call in extract_var_cluster(&read_seq, ref_seq, var_cluster, anchors, align_params) {
                     fragment.calls.push(call);
                 }
             },
@@ -590,7 +615,8 @@ pub fn extract_fragment(bam_record: &Record,
 
 pub fn extract_fragments(bamfile_name: &String,
                          fastafile_name: &String,
-                         varlist: &VarList)
+                         varlist: &VarList,
+                         align_params: AlignmentParameters)
                          -> Vec<Fragment> {
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
@@ -626,7 +652,8 @@ pub fn extract_fragments(bamfile_name: &String,
         // get the list of variants that overlap this read
         let read_vars = varlist.get_variants_range(interval);
 
-        let frag = extract_fragment(&record, read_vars, &ref_seq);
+
+        let frag = extract_fragment(&record, read_vars, &ref_seq, align_params);
         flist.push(frag);
 
         prev_tid = tid;

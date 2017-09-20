@@ -14,6 +14,51 @@ pub struct GenomicInterval {
     pub end_pos: u32, // end of interval (inclusive)
 }
 
+#[derive(Clone, Copy)]
+pub struct AlignmentParameters {
+    pub match_from_match: f64,
+    pub mismatch_from_match: f64,
+    pub insertion_from_match: f64,
+    pub deletion_from_match: f64,
+    pub extend_from_insertion: f64,
+    pub match_from_insertion: f64,
+    pub mismatch_from_insertion: f64,
+    pub extend_from_deletion: f64,
+    pub match_from_deletion: f64,
+    pub mismatch_from_deletion: f64,
+}
+
+#[derive(Clone, Copy)]
+pub struct LnAlignmentParameters {
+    pub match_from_match: LogProb,
+    pub mismatch_from_match: LogProb,
+    pub insertion_from_match: LogProb,
+    pub deletion_from_match: LogProb,
+    pub extend_from_insertion: LogProb,
+    pub match_from_insertion: LogProb,
+    pub mismatch_from_insertion: LogProb,
+    pub extend_from_deletion: LogProb,
+    pub match_from_deletion: LogProb,
+    pub mismatch_from_deletion: LogProb,
+}
+
+impl AlignmentParameters {
+    pub fn ln(&self) -> LnAlignmentParameters {
+        LnAlignmentParameters {
+            match_from_match: LogProb::from(Prob(self.match_from_match)),
+            mismatch_from_match: LogProb::from(Prob(self.mismatch_from_match)),
+            insertion_from_match: LogProb::from(Prob(self.insertion_from_match)),
+            deletion_from_match: LogProb::from(Prob(self.deletion_from_match)),
+            extend_from_insertion: LogProb::from(Prob(self.extend_from_insertion)),
+            match_from_insertion: LogProb::from(Prob(self.match_from_insertion)),
+            mismatch_from_insertion: LogProb::from(Prob(self.mismatch_from_insertion)),
+            extend_from_deletion: LogProb::from(Prob(self.extend_from_deletion)),
+            match_from_deletion: LogProb::from(Prob(self.match_from_deletion)),
+            mismatch_from_deletion: LogProb::from(Prob(self.mismatch_from_deletion)),
+        }
+    }
+}
+
 pub fn u8_to_string(u: &[u8]) -> String {
     String::from_utf8(u.to_vec()).unwrap()
 }

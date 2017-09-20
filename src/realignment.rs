@@ -4,15 +4,16 @@
 use std::f64::MIN;
 use std::cmp::max;
 use bio::stats::{LogProb, Prob};
+use util::{AlignmentParameters, LnAlignmentParameters};
 
 pub fn sum_all_alignments(v: &Vec<char>,
                           w: &Vec<char>,
-                          match_penalty: f64,
-                          mismatch_penalty: f64,
-                          gap_open_penalty: f64,
-                          gap_extend_penalty: f64,
-                          band_width: usize)
+                          params: AlignmentParameters,
+                          min_band_width: usize)
                           -> (LogProb) {
+
+    let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
+    let band_width = min_band_width + len_diff;
 
     let mut lower_prev: Vec<f64> = vec![0.0; w.len() + 1];
     let mut middle_prev: Vec<f64> = vec![0.0; w.len() + 1];
@@ -22,13 +23,13 @@ pub fn sum_all_alignments(v: &Vec<char>,
     let mut upper_curr: Vec<f64> = vec![0.0; w.len() + 1];
 
     middle_prev[0] = 1.0;
-    upper_prev[1] = gap_open_penalty;
-    lower_prev[1] = gap_open_penalty;
+    upper_prev[1] = params.deletion_from_match;
+    //lower_prev[1] = params.deletion_from_match;
 
     for j in 2..(w.len() + 1) {
-        upper_prev[j] = upper_prev[j - 1] * gap_extend_penalty;
+        upper_prev[j] = upper_prev[j - 1] * params.extend_from_deletion;
         middle_prev[j] = 0.0;
-        lower_prev[j] = lower_prev[j - 1] * gap_extend_penalty;
+        //lower_prev[j] = 0.0;
     }
 
     for i in 1..(v.len() + 1) {
@@ -46,9 +47,9 @@ pub fn sum_all_alignments(v: &Vec<char>,
         };
 
         if band_start == 1 {
-            upper_curr[0] = upper_prev[0] + gap_extend_penalty;
+            upper_curr[0] = 0.0;;
             middle_curr[0] = 0.0;
-            lower_curr[0] = lower_prev[0] + gap_extend_penalty;
+            lower_curr[0] = lower_prev[0] + params.extend_from_insertion;
         }
 
         for j in band_start..(band_end + 1) {
@@ -58,9 +59,9 @@ pub fn sum_all_alignments(v: &Vec<char>,
                     match w.get(j - 1) {
                         Some(w_j) => {
                             if v_i == w_j {
-                                match_penalty
+                                params.match_from_match
                             } else {
-                                mismatch_penalty
+                                params.mismatch_from_match
                             }
                         }
                         None => panic!("w_j shouldn't be empty"),
@@ -69,12 +70,12 @@ pub fn sum_all_alignments(v: &Vec<char>,
                 None => panic!("v_i shouldn't be empty"),
             };
 
-            let lower_continue = lower_prev[j] * gap_extend_penalty;
-            let lower_from_middle = middle_prev[j] * gap_open_penalty;
+            let lower_continue = lower_prev[j] * params.extend_from_insertion;
+            let lower_from_middle = middle_prev[j] * params.insertion_from_match;
             lower_curr[j] = lower_continue + lower_from_middle;
 
-            let upper_continue = upper_curr[j - 1] * gap_extend_penalty;
-            let upper_from_middle = middle_curr[j - 1] * gap_open_penalty;
+            let upper_continue = upper_curr[j - 1] * params.extend_from_deletion;
+            let upper_from_middle = middle_curr[j - 1] * params.deletion_from_match;
             upper_curr[j] = upper_continue + upper_from_middle;
 
             let middle_from_lower = lower_curr[j];
@@ -98,24 +99,18 @@ pub fn sum_all_alignments(v: &Vec<char>,
     if middle_prev[w.len()] != 0.0 {
         LogProb::from(Prob(middle_prev[w.len()]))
     } else {
-        sum_all_alignments_numerically_stable(v,
-                                              w,
-                                              LogProb::from(Prob(match_penalty)),
-                                              LogProb::from(Prob(mismatch_penalty)),
-                                              LogProb::from(Prob(gap_open_penalty)),
-                                              LogProb::from(Prob(gap_extend_penalty)),
-                                              band_width)
+        sum_all_alignments_numerically_stable(v, w, params.ln(), band_width)
     }
 }
 
 pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
                                              w: &Vec<char>,
-                                             match_penalty: LogProb,
-                                             mismatch_penalty: LogProb,
-                                             gap_open_penalty: LogProb,
-                                             gap_extend_penalty: LogProb,
-                                             band_width: usize)
+                                             params: LnAlignmentParameters,
+                                             min_band_width: usize)
                                              -> (LogProb) {
+
+    let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
+    let band_width = min_band_width + len_diff;
 
     let mut lower_prev: Vec<LogProb> = vec![LogProb::ln_zero(); w.len() + 1];
     let mut middle_prev: Vec<LogProb> = vec![LogProb::ln_zero(); w.len() + 1];
@@ -125,13 +120,12 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
     let mut upper_curr: Vec<LogProb> = vec![LogProb::ln_zero(); w.len() + 1];
 
     middle_prev[0] = LogProb::ln_one();
-    upper_prev[1] = gap_open_penalty;
-    lower_prev[1] = gap_open_penalty;
+    upper_prev[1] = params.deletion_from_match;
 
     for j in 2..(w.len() + 1) {
-        upper_prev[j] = upper_prev[j - 1] + gap_extend_penalty;
-        middle_prev[j] = LogProb::ln_zero();
-        lower_prev[j] = lower_prev[j - 1] + gap_extend_penalty;
+        upper_prev[j] = upper_prev[j - 1] + params.extend_from_deletion;
+        //middle_prev[j] = LogProb::ln_zero();
+        //lower_prev[j] = lower_prev[j - 1] + gap_extend_penalty;
     }
 
     for i in 1..(v.len() + 1) {
@@ -149,9 +143,9 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
         };
 
         if band_start == 1 {
-            upper_curr[0] = upper_prev[0] + gap_extend_penalty;
+            //upper_curr[0] = upper_prev[0] + gap_extend_penalty;
             middle_curr[0] = LogProb::ln_zero();
-            lower_curr[0] = lower_prev[0] + gap_extend_penalty;
+            lower_curr[0] = lower_prev[0] + params.extend_from_insertion;
         }
 
         for j in band_start..(band_end + 1) {
@@ -161,9 +155,9 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
                     match w.get(j - 1) {
                         Some(w_j) => {
                             if v_i == w_j {
-                                match_penalty
+                                params.match_from_match
                             } else {
-                                mismatch_penalty
+                                params.mismatch_from_match
                             }
                         }
                         None => panic!("w_j shouldn't be empty"),
@@ -172,12 +166,12 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
                 None => panic!("v_i shouldn't be empty"),
             };
 
-            let lower_continue = lower_prev[j] + gap_extend_penalty;
-            let lower_from_middle = middle_prev[j] + gap_open_penalty;
+            let lower_continue = lower_prev[j] + params.extend_from_insertion;
+            let lower_from_middle = middle_prev[j] + params.insertion_from_match;
             lower_curr[j] = LogProb::ln_add_exp(lower_continue, lower_from_middle);
 
-            let upper_continue = upper_curr[j - 1] + gap_extend_penalty;
-            let upper_from_middle = middle_curr[j - 1] + gap_open_penalty;
+            let upper_continue = upper_curr[j - 1] + params.extend_from_deletion;
+            let upper_from_middle = middle_curr[j - 1] + params.deletion_from_match;
             upper_curr[j] = LogProb::ln_add_exp(upper_continue, upper_from_middle);
 
             let middle_from_lower = lower_curr[j];

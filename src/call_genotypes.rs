@@ -3,7 +3,7 @@ use bio::stats::{PHREDProb, LogProb, Prob};
 use util::{PotentialVar, VarList, Fragment, FragCall, dna_vec, parse_target_names};
 
 
-static MAX_P_MISCALL_F64: f64 = 0.1;
+static MAX_P_MISCALL_F64: f64 = 0.25;
 
 fn generate_realigned_pileup(flist: Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
@@ -18,7 +18,32 @@ fn generate_realigned_pileup(flist: Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
     pileup_lst
 }
 
-fn compute_posteriors(pileup: Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
+fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize) {
+
+    // compute probabilities of data given each genotype
+    let mut count0 = 0;
+    let mut count1 = 0;
+
+    for call in pileup {
+
+        match call.allele {
+            '0' => {
+                count0 += 1;
+            }
+            '1' => {
+                count1 += 1;
+            }
+            _ => {
+                panic!("Unexpected allele observed in pileup.");
+            }
+        }
+    }
+
+    (count0, count1)
+}
+
+
+fn compute_posteriors(pileup: &Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
 
     // compute probabilities of data given each genotype
     let mut prob00 = LogProb::ln_one();
@@ -62,7 +87,7 @@ fn compute_posteriors(pileup: Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
 
 pub fn call_genotype(pileup: Vec<FragCall>, var: PotentialVar) {
 
-    let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(pileup);
+    let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(&pileup);
 
     let mut genotype: String = "./.".to_string();
     let mut genotype_qual: f64 = 0.0;
@@ -81,11 +106,18 @@ pub fn call_genotype(pileup: Vec<FragCall>, var: PotentialVar) {
         genotype = "1/1".to_string();
     }
 
-    println!("{}\t{}\t.\t{}\t{}\t.\t.\t.\tGT:GQ\t{}:{}",
+    let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
+
+    println!("{}\t{}\t.\t{}\t{}\t.\t.\t00={};01={};11={};RA={};AA={}\tGT:GQ\t{}:{}",
              var.chrom,
              var.pos0 + 1,
              var.ref_allele,
              var.var_allele,
+             *PHREDProb::from(post00),
+             *PHREDProb::from(post01),
+             *PHREDProb::from(post11),
+             count_ref,
+             count_var,
              genotype,
              genotype_qual);
 
