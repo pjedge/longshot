@@ -17,7 +17,7 @@ static VERBOSE: bool = false;
 static NUMERICALLY_STABLE_ALIGNMENT: bool = false;
 static COMPLEXITY_K: usize = 5;
 static SHORT_HAP_SNV_DISTANCE: usize = 20;
-static SHORT_HAP_MAX_SNVS: usize = 10;
+static SHORT_HAP_MAX_SNVS: usize = 5;
 static MIN_ALIGNMENT_LENGTH: usize = 15;
 static MAX_ALIGNMENT_LENGTH: usize = 200;
 static BAND_WIDTH: usize = 20;
@@ -248,6 +248,9 @@ pub fn find_anchors(bam_record: &Record,
         cigar_op_start <= pos && cigar_op_start + cigar_op_length > pos
     };
 
+    // find left_ix and right_ix.
+    // these are the indexes into the CIGAR of the CIGAR operation holding the
+    // left side of the range and right side of the range
     for (i, cigarpos) in cigarpos_list.iter().enumerate() {
         match cigarpos.cig {
             Cigar::Match(l) |
@@ -291,7 +294,8 @@ pub fn find_anchors(bam_record: &Record,
                     let l: usize = left_anchor_ref as usize - COMPLEXITY_K;
                     let r: usize = (left_anchor_ref + anchor_length) as usize + COMPLEXITY_K;
 
-                    if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                    if l > 0 && r < ref_seq.len() &&
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
 
                         found_anchor_left = true;
                         break;
@@ -307,7 +311,8 @@ pub fn find_anchors(bam_record: &Record,
                     let l: usize = left_anchor_ref as usize - COMPLEXITY_K;
                     let r: usize = (left_anchor_ref + anchor_length) as usize + COMPLEXITY_K;
 
-                    if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                    if l > 0 && r < ref_seq.len() &&
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
 
                         found_anchor_left = true;
                         break;
@@ -352,7 +357,8 @@ pub fn find_anchors(bam_record: &Record,
                     let l: usize = (right_anchor_ref - anchor_length) as usize - COMPLEXITY_K;
                     let r: usize = right_anchor_ref as usize + COMPLEXITY_K;
 
-                    if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                    if l > 0 && r < ref_seq.len() &&
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
                         found_anchor_right = true;
                         break;
                     }
@@ -367,7 +373,8 @@ pub fn find_anchors(bam_record: &Record,
                     let l: usize = (right_anchor_ref - anchor_length) as usize - COMPLEXITY_K;
                     let r: usize = right_anchor_ref as usize + COMPLEXITY_K;
 
-                    if check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                    if l > 0 && r < ref_seq.len() &&
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
                         found_anchor_right = true;
                         break;
                     }
@@ -394,11 +401,17 @@ pub fn find_anchors(bam_record: &Record,
         return Ok(None); // failed to find a right anchor
     }
 
+    // return none if read window or ref window is larger or smaller than the allowed lengths
     let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
     let read_window_len = (right_anchor_read - left_anchor_read) as usize;
     if ref_window_len < MIN_ALIGNMENT_LENGTH || read_window_len < MIN_ALIGNMENT_LENGTH ||
        ref_window_len > MAX_ALIGNMENT_LENGTH || read_window_len > MAX_ALIGNMENT_LENGTH {
+        return Ok(None);
+    }
 
+    // return none if any of the anchors are out of bounds
+    if left_anchor_ref < 0 || right_anchor_ref as usize >= ref_seq.len() ||
+       left_anchor_read < 0 || right_anchor_read as usize >= bam_record.seq().len() {
         return Ok(None);
     }
 
@@ -425,6 +438,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     //(anchors.right_anchor_ref as usize) + 1]
     //        .to_vec();
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
+
+    assert!((anchors.right_anchor_read as usize) + 1 < read_seq.len());
 
     let read_window: Vec<char> = read_seq[(anchors.left_anchor_read as usize)..
     (anchors.right_anchor_read as usize) + 1]
@@ -630,6 +645,7 @@ pub fn extract_fragments(bamfile_name: &String,
     for r in bam.records() {
 
         let record = r.unwrap();
+
         let tid: usize = record.tid() as usize;
         let chrom: String = t_names[record.tid() as usize].clone();
 

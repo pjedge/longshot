@@ -52,6 +52,7 @@ fn main() {
                                                            5,
                                                            63,
                                                            30);
+    eprintln!("{} potential SNVs identified.", varlist.lst.len());
 
     eprintln!("Generating condensed read data for SNVs...");
     let flist = extract_fragments::extract_fragments(&bamfile_name,

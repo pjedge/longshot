@@ -30,7 +30,9 @@ pub fn call_potential_snvs(bam_file: &String,
     let mut prev_tid = 4294967295;
 
     for p in bam.pileup() {
+
         let pileup = p.unwrap();
+
         let tid: usize = pileup.tid() as usize;
 
         if pileup.depth() > max_coverage || pileup.depth() < min_coverage {
