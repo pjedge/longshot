@@ -7,3 +7,4 @@ authors = ["Peter Edge <edge.peterj@gmail.com>"]
 bio = "*"
 rust-htslib = "*"
 quick-error = "*"
+clap = "*"

@@ -13,7 +13,7 @@ pub fn call_potential_snvs(bam_file: &String,
                            min_alt_count: u32,
                            min_alt_frac: f32,
                            min_coverage: u32,
-                           max_coverage: u32,
+                           max_coverage: Option<u32>,
                            min_mapq: u8)
                            -> VarList {
 
@@ -35,7 +35,14 @@ pub fn call_potential_snvs(bam_file: &String,
 
         let tid: usize = pileup.tid() as usize;
 
-        if pileup.depth() > max_coverage || pileup.depth() < min_coverage {
+        match max_coverage {
+            Some(cov) if pileup.depth() > cov => {
+                continue;
+            }
+            _ => {}
+        }
+
+        if pileup.depth() < min_coverage {
             continue;
         }
 

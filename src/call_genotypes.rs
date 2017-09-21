@@ -1,7 +1,10 @@
 
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{PotentialVar, VarList, Fragment, FragCall, dna_vec, parse_target_names};
-
+use util::{VarList, Fragment, FragCall};
+use std::error::Error;
+use std::io::prelude::*;
+use std::fs::File;
+use std::path::Path;
 
 static MAX_P_MISCALL_F64: f64 = 0.25;
 
@@ -85,45 +88,16 @@ fn compute_posteriors(pileup: &Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
     (post00, post01, post11)
 }
 
-pub fn call_genotype(pileup: Vec<FragCall>, var: PotentialVar) {
+pub fn call_genotypes(flist: Vec<Fragment>, varlist: &VarList, output_vcf_file: String) {
 
-    let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(&pileup);
+    let vcf_path = Path::new(&output_vcf_file);
+    let vcf_display = vcf_path.display();
 
-    let mut genotype: String = "./.".to_string();
-    let mut genotype_qual: f64 = 0.0;
-
-    if post00 > post01 && post00 > post11 {
-        let p_call_wrong = LogProb::ln_add_exp(post01, post11);
-        genotype_qual = *PHREDProb::from(p_call_wrong);
-        genotype = "0/0".to_string();
-    } else if post01 > post00 && post01 > post11 {
-        let p_call_wrong = LogProb::ln_add_exp(post00, post11);
-        genotype_qual = *PHREDProb::from(p_call_wrong);
-        genotype = "0/1".to_string();
-    } else {
-        let p_call_wrong = LogProb::ln_add_exp(post00, post01);
-        genotype_qual = *PHREDProb::from(p_call_wrong);
-        genotype = "1/1".to_string();
-    }
-
-    let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
-
-    println!("{}\t{}\t.\t{}\t{}\t.\t.\t00={};01={};11={};RA={};AA={}\tGT:GQ\t{}:{}",
-             var.chrom,
-             var.pos0 + 1,
-             var.ref_allele,
-             var.var_allele,
-             *PHREDProb::from(post00),
-             *PHREDProb::from(post01),
-             *PHREDProb::from(post11),
-             count_ref,
-             count_var,
-             genotype,
-             genotype_qual);
-
-}
-
-pub fn call_genotypes(flist: Vec<Fragment>, varlist: &VarList) {
+    // Open a file in write-only mode, returns `io::Result<File>`
+    let mut file = match File::create(&vcf_path) {
+        Err(why) => panic!("couldn't create {}: {}", vcf_display, why.description()),
+        Ok(file) => file,
+    };
 
     let pileup_lst = generate_realigned_pileup(flist, varlist.lst.len());
 
@@ -131,7 +105,43 @@ pub fn call_genotypes(flist: Vec<Fragment>, varlist: &VarList) {
 
     for i in 0..varlist.lst.len() {
 
-        call_genotype(pileup_lst[i].clone(), varlist.lst[i].clone());
+        let pileup = &pileup_lst[i];
+        let var = &varlist.lst[i];
+        let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(&pileup);
+
+        let genotype: String;
+        let genotype_qual: f64;
+
+        if post00 > post01 && post00 > post11 {
+            let p_call_wrong = LogProb::ln_add_exp(post01, post11);
+            genotype_qual = *PHREDProb::from(p_call_wrong);
+            genotype = "0/0".to_string();
+        } else if post01 > post00 && post01 > post11 {
+            let p_call_wrong = LogProb::ln_add_exp(post00, post11);
+            genotype_qual = *PHREDProb::from(p_call_wrong);
+            genotype = "0/1".to_string();
+        } else {
+            let p_call_wrong = LogProb::ln_add_exp(post00, post01);
+            genotype_qual = *PHREDProb::from(p_call_wrong);
+            genotype = "1/1".to_string();
+        }
+
+        let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
+
+        // Write the `LOREM_IPSUM` string to `file`, returns `io::Result<()>`
+        match writeln!(file,
+                       "{}\t{}\t.\t{}\t{}\t.\t.\tRA={};AA={}\tGT:GQ\t{}:{}",
+                       var.chrom,
+                       var.pos0 + 1,
+                       var.ref_allele,
+                       var.var_allele,
+                       count_ref,
+                       count_var,
+                       genotype,
+                       genotype_qual) {
+            Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
+            Ok(_) => {}
+        }
 
     }
 }

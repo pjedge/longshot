@@ -15,6 +15,18 @@ pub struct GenomicInterval {
 }
 
 #[derive(Clone, Copy)]
+pub struct ExtractFragmentParameters {
+    pub numerically_stable_alignment: bool,
+    pub band_width: usize,
+    pub anchor_length: usize,
+    pub anchor_k: usize,
+    pub short_hap_snv_distance: usize,
+    pub short_hap_max_snvs: usize,
+    pub min_window_length: usize,
+    pub max_window_length: usize,
+}
+
+#[derive(Clone, Copy)]
 pub struct AlignmentParameters {
     pub match_from_match: f64,
     pub mismatch_from_match: f64,

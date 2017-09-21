@@ -7,20 +7,12 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
-use bio::stats::{LogProb, Prob, PHREDProb};
+use bio::stats::{LogProb, PHREDProb};
 use bio::io::fasta;
 use realignment;
 
 use util::GenomicInterval;
 static VERBOSE: bool = false;
-
-static NUMERICALLY_STABLE_ALIGNMENT: bool = false;
-static COMPLEXITY_K: usize = 5;
-static SHORT_HAP_SNV_DISTANCE: usize = 20;
-static SHORT_HAP_MAX_SNVS: usize = 5;
-static MIN_ALIGNMENT_LENGTH: usize = 15;
-static MAX_ALIGNMENT_LENGTH: usize = 200;
-static BAND_WIDTH: usize = 20;
 
 // returns true if kmers in seq are unique, else false
 fn check_kmers_unique(seq: &Vec<char>, k: usize) -> (bool) {
@@ -219,8 +211,13 @@ pub struct AnchorPositions {
 pub fn find_anchors(bam_record: &Record,
                     interval: GenomicInterval,
                     anchor_length: u32,
-                    ref_seq: &Vec<char>)
+                    ref_seq: &Vec<char>,
+                    extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
+
+    let anchor_k = extract_params.anchor_k;
+    let min_window_length = extract_params.min_window_length;
+    let max_window_length = extract_params.max_window_length;
 
     if (interval.tid) != Some(bam_record.tid() as u32) ||
        (interval.start_pos as i32) >= bam_record.cigar().end_pos() ||
@@ -291,11 +288,11 @@ pub fn find_anchors(bam_record: &Record,
                     // we have found a sufficiently long match and it's NOT the cigar op containing interval.start_pos
                     left_anchor_ref = cigarpos_list[i].ref_pos + match_len_left - anchor_length;
                     left_anchor_read = cigarpos_list[i].read_pos + match_len_left - anchor_length;
-                    let l: usize = left_anchor_ref as usize - COMPLEXITY_K;
-                    let r: usize = (left_anchor_ref + anchor_length) as usize + COMPLEXITY_K;
+                    let l: usize = left_anchor_ref as usize - anchor_k;
+                    let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
 
                         found_anchor_left = true;
                         break;
@@ -308,11 +305,11 @@ pub fn find_anchors(bam_record: &Record,
                     left_anchor_read = cigarpos_list[i].read_pos +
                                        (interval.start_pos - anchor_length -
                                         cigarpos_list[i].ref_pos);
-                    let l: usize = left_anchor_ref as usize - COMPLEXITY_K;
-                    let r: usize = (left_anchor_ref + anchor_length) as usize + COMPLEXITY_K;
+                    let l: usize = left_anchor_ref as usize - anchor_k;
+                    let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
 
                         found_anchor_left = true;
                         break;
@@ -354,11 +351,11 @@ pub fn find_anchors(bam_record: &Record,
                                        anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos + l - match_len_right +
                                         anchor_length;
-                    let l: usize = (right_anchor_ref - anchor_length) as usize - COMPLEXITY_K;
-                    let r: usize = right_anchor_ref as usize + COMPLEXITY_K;
+                    let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
+                    let r: usize = right_anchor_ref as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_right = true;
                         break;
                     }
@@ -370,11 +367,11 @@ pub fn find_anchors(bam_record: &Record,
                     right_anchor_read = cigarpos_list[i].read_pos +
                                         (interval.end_pos + anchor_length -
                                          cigarpos_list[i].ref_pos);
-                    let l: usize = (right_anchor_ref - anchor_length) as usize - COMPLEXITY_K;
-                    let r: usize = right_anchor_ref as usize + COMPLEXITY_K;
+                    let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
+                    let r: usize = right_anchor_ref as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), COMPLEXITY_K) {
+                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_right = true;
                         break;
                     }
@@ -404,14 +401,14 @@ pub fn find_anchors(bam_record: &Record,
     // return none if read window or ref window is larger or smaller than the allowed lengths
     let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
     let read_window_len = (right_anchor_read - left_anchor_read) as usize;
-    if ref_window_len < MIN_ALIGNMENT_LENGTH || read_window_len < MIN_ALIGNMENT_LENGTH ||
-       ref_window_len > MAX_ALIGNMENT_LENGTH || read_window_len > MAX_ALIGNMENT_LENGTH {
+    if ref_window_len < min_window_length || read_window_len < min_window_length ||
+       ref_window_len > max_window_length || read_window_len > max_window_length {
         return Ok(None);
     }
 
     // return none if any of the anchors are out of bounds
-    if left_anchor_ref < 0 || right_anchor_ref as usize >= ref_seq.len() ||
-       left_anchor_read < 0 || right_anchor_read as usize >= bam_record.seq().len() {
+    if right_anchor_ref as usize >= ref_seq.len() ||
+       right_anchor_read as usize >= bam_record.seq().len() {
         return Ok(None);
     }
 
@@ -429,6 +426,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                        ref_seq: &Vec<char>,
                        var_cluster: Vec<PotentialVar>,
                        anchors: AnchorPositions,
+                       extract_params: ExtractFragmentParameters,
                        align_params: AlignmentParameters)
                        -> Vec<FragCall> {
 
@@ -499,15 +497,18 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
 
         // we now want to score hap_window
-        let score: LogProb = match NUMERICALLY_STABLE_ALIGNMENT {
+        let score: LogProb = match extract_params.numerically_stable_alignment {
             true => {
                 realignment::sum_all_alignments_numerically_stable(&read_window,
                                                                    &hap_window,
                                                                    align_params.ln(),
-                                                                   BAND_WIDTH)
+                                                                   extract_params.band_width)
             }
             false => {
-                realignment::sum_all_alignments(&read_window, &hap_window, align_params, BAND_WIDTH)
+                realignment::sum_all_alignments(&read_window,
+                                                &hap_window,
+                                                align_params,
+                                                extract_params.band_width)
             }
         };
 
@@ -569,6 +570,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 pub fn extract_fragment(bam_record: &Record,
                         vars: Vec<PotentialVar>,
                         ref_seq: &Vec<char>,
+                        extract_params: ExtractFragmentParameters,
                         align_params: AlignmentParameters)
                         -> Fragment {
 
@@ -586,8 +588,9 @@ pub fn extract_fragment(bam_record: &Record,
         for var in vars {
 
             if var_cluster.len() == 0 ||
-               (var.pos0 - var_cluster[var_cluster.len() - 1].pos0 < SHORT_HAP_SNV_DISTANCE &&
-                var_cluster.len() <= SHORT_HAP_MAX_SNVS) {
+               (var.pos0 - var_cluster[var_cluster.len() - 1].pos0 <
+                extract_params.short_hap_snv_distance &&
+                var_cluster.len() <= extract_params.short_hap_max_snvs) {
                 var_cluster.push(var);
             } else {
 
@@ -611,10 +614,10 @@ pub fn extract_fragment(bam_record: &Record,
             end_pos: var_cluster[var_cluster.len() - 1].pos0 as u32,
         };
 
-        match find_anchors(bam_record, interval, 10, &ref_seq)
+        match find_anchors(bam_record, interval, 10, &ref_seq, extract_params)
               .expect("CIGAR or Anchor Error while finding anchor sequences."){
             Some(anchors) => {
-                for call in extract_var_cluster(&read_seq, ref_seq, var_cluster, anchors, align_params) {
+                for call in extract_var_cluster(&read_seq, ref_seq, var_cluster, anchors, extract_params, align_params) {
                     fragment.calls.push(call);
                 }
             },
@@ -628,6 +631,7 @@ pub fn extract_fragment(bam_record: &Record,
 pub fn extract_fragments(bamfile_name: &String,
                          fastafile_name: &String,
                          varlist: &VarList,
+                         extract_params: ExtractFragmentParameters,
                          align_params: AlignmentParameters)
                          -> Vec<Fragment> {
 
@@ -666,7 +670,7 @@ pub fn extract_fragments(bamfile_name: &String,
         let read_vars = varlist.get_variants_range(interval);
 
 
-        let frag = extract_fragment(&record, read_vars, &ref_seq, align_params);
+        let frag = extract_fragment(&record, read_vars, &ref_seq, extract_params, align_params);
         flist.push(frag);
 
         prev_tid = tid;

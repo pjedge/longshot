@@ -1,8 +1,6 @@
 // original author: Ben Pullman
 // modified: Peter Edge, September 2017
 
-use std::f64::MIN;
-use std::cmp::max;
 use bio::stats::{LogProb, Prob};
 use util::{AlignmentParameters, LnAlignmentParameters};
 
