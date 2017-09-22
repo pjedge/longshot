@@ -143,8 +143,15 @@ pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
     let mut v: Vec<char> = Vec::with_capacity(u.len());
     for cu in AsciiExt::to_ascii_uppercase(u) {
         let c = cu as char;
-        assert!(c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N');
-        v.push(c);
+        //assert!(c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N');
+        if c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N' {
+            v.push(c);
+        } else {
+            eprintln!("Warning: Unexpected base \"{}\" encountered. Replaced with \"N\".",
+                      c);
+            v.push('N');
+        }
+
     }
     v
 }
