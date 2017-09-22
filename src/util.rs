@@ -7,9 +7,72 @@ use rust_htslib::bam::Read;
 
 static INDEX_FREQ: usize = 1000;
 
+// this is really ugly. TODO a less verbose implementation
+pub fn parse_region_string(region_string: Option<&str>,
+                           bamfile_name: &String)
+                           -> Option<GenomicInterval> {
+
+    let bam = bam::Reader::from_path(bamfile_name).unwrap();
+
+    match region_string {
+        Some(r) if r.contains(":") && r.contains("-") => {
+
+            let split1: Vec<&str> = r.split(":").collect();
+            if split1.len() != 2 {
+                panic!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
+            }
+            let split2: Vec<&str> = split1[1].split("-").collect();
+            if split2.len() != 2 {
+                panic!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
+            }
+            let iv_chrom = split1[0].to_string();
+            let iv_start = split2[0].parse::<u32>().expect("Invalid position value specified in region string.");
+            let iv_end = split2[1].parse::<u32>().expect("Invalid position value specified in region string.");
+
+            let mut tid: u32 = 0;
+            for name in bam.header().target_names() {
+                if u8_to_string(name) == iv_chrom {
+                    break;
+                }
+                tid += 1;
+            }
+            if tid as usize == bam.header().target_names().len() {
+                panic!("Chromosome name for region is not in BAM file.");
+            }
+
+            Some(GenomicInterval {
+                     chrom: iv_chrom,
+                     start_pos: iv_start,
+                     end_pos: iv_end - 1,
+                 })
+        }
+        Some(r) => {
+            let r_str = r.to_string();
+            let mut tid: u32 = 0;
+            for name in bam.header().target_names() {
+                if u8_to_string(name) == r_str {
+                    break;
+                }
+                tid += 1;
+            }
+            if tid as usize == bam.header().target_names().len() {
+                panic!("Chromosome name for region is not in BAM file.");
+            }
+
+            let tlen = bam.header().target_len(tid).unwrap();
+            Some(GenomicInterval {
+                     chrom: r_str,
+                     start_pos: 0,
+                     end_pos: tlen - 1,
+                 })
+        }
+        None => None,
+    }
+}
+
+#[derive(Clone)]
 pub struct GenomicInterval {
-    pub tid: Option<u32>, // target ID for chromosome in bam
-    pub chrom: Option<String>, // chromosome name corresponding to tid
+    pub chrom: String, // chromosome name
     pub start_pos: u32, // start of interval
     pub end_pos: u32, // end of interval (inclusive)
 }
@@ -201,22 +264,18 @@ impl VarList {
         // vector of variants to fill and return
         let mut vlst: Vec<PotentialVar> = vec![];
         // get the varlist index of a nearby position on the left
-        let chrom = match interval.chrom {
-            Some(str) => str,
-            None => panic!("Called get_variants_range with a range without chrom field"),
-        };
 
         let index_pos = (interval.start_pos as usize) / INDEX_FREQ;
 
         if index_pos >=
            self.ix
-               .get(&chrom)
+               .get(&interval.chrom)
                .unwrap()
                .len() {
             return vlst;
         }
 
-        let mut i = self.ix.get(&chrom).unwrap()[index_pos];
+        let mut i = self.ix.get(&interval.chrom).unwrap()[index_pos];
 
         while i < self.lst.len() && self.lst[i].pos0 <= interval.end_pos as usize {
             if self.lst[i].pos0 >= interval.start_pos as usize {
@@ -350,8 +409,7 @@ mod tests {
         let p1 = 2500;
         let p2 = 8000;
         let interval = GenomicInterval {
-            tid: Some(1),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };
@@ -384,8 +442,7 @@ mod tests {
         let p1 = 0;
         let p2 = 3000;
         let interval = GenomicInterval {
-            tid: Some(2),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };
@@ -432,8 +489,7 @@ mod tests {
         let p1 = 6000;
         let p2 = 10000;
         let interval = GenomicInterval {
-            tid: Some(2),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };
@@ -466,8 +522,7 @@ mod tests {
         let p1 = 20100;
         let p2 = 20200;
         let interval = GenomicInterval {
-            tid: Some(3),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };
@@ -493,8 +548,7 @@ mod tests {
         let p1 = 20200;
         let p2 = 20200;
         let interval = GenomicInterval {
-            tid: Some(3),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };
@@ -520,8 +574,7 @@ mod tests {
         let p1 = 25000;
         let p2 = 30500;
         let interval = GenomicInterval {
-            tid: Some(3),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };
@@ -554,8 +607,7 @@ mod tests {
         let p1 = 100000;
         let p2 = 200000;
         let interval = GenomicInterval {
-            tid: Some(3),
-            chrom: Some(c),
+            chrom: c,
             start_pos: p1,
             end_pos: p2,
         };

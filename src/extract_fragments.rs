@@ -209,9 +209,10 @@ pub struct AnchorPositions {
 }
 
 pub fn find_anchors(bam_record: &Record,
-                    interval: GenomicInterval,
+                    var_interval: GenomicInterval,
                     anchor_length: u32,
                     ref_seq: &Vec<char>,
+                    target_names: &Vec<String>,
                     extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
 
@@ -219,9 +220,9 @@ pub fn find_anchors(bam_record: &Record,
     let min_window_length = extract_params.min_window_length;
     let max_window_length = extract_params.max_window_length;
 
-    if (interval.tid) != Some(bam_record.tid() as u32) ||
-       (interval.start_pos as i32) >= bam_record.cigar().end_pos() ||
-       (interval.end_pos as i32) < bam_record.pos() {
+    if var_interval.chrom != target_names[bam_record.tid() as usize] ||
+       (var_interval.start_pos as i32) >= bam_record.cigar().end_pos() ||
+       (var_interval.end_pos as i32) < bam_record.pos() {
 
         return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
                 "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
@@ -257,10 +258,10 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Del(l) |
             Cigar::RefSkip(l) => {
 
-                if contains_pos(interval.start_pos, cigarpos.ref_pos, l) {
+                if contains_pos(var_interval.start_pos, cigarpos.ref_pos, l) {
                     left_ix = i;
                 }
-                if contains_pos(interval.end_pos, cigarpos.ref_pos, l) {
+                if contains_pos(var_interval.end_pos, cigarpos.ref_pos, l) {
                     right_ix = i;
                     break;
                 }
@@ -285,7 +286,7 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
                 match_len_left += l;
                 if seen_indel_left && match_len_left > anchor_length {
-                    // we have found a sufficiently long match and it's NOT the cigar op containing interval.start_pos
+                    // we have found a sufficiently long match and it's NOT the cigar op containing var_interval.start_pos
                     left_anchor_ref = cigarpos_list[i].ref_pos + match_len_left - anchor_length;
                     left_anchor_read = cigarpos_list[i].read_pos + match_len_left - anchor_length;
                     let l: usize = left_anchor_ref as usize - anchor_k;
@@ -298,12 +299,12 @@ pub fn find_anchors(bam_record: &Record,
                         break;
                     }
                 } else if !seen_indel_left &&
-                          cigarpos_list[i].ref_pos < interval.start_pos - anchor_length {
-                    // we have found a sufficiently long match but it's the cigar ops surrounding interval.start_pos
-                    // the interval.start_pos we are trying to anchor is just inside one huge match
-                    left_anchor_ref = interval.start_pos - anchor_length;
+                          cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length {
+                    // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.start_pos
+                    // the var_interval.start_pos we are trying to anchor is just inside one huge match
+                    left_anchor_ref = var_interval.start_pos - anchor_length;
                     left_anchor_read = cigarpos_list[i].read_pos +
-                                       (interval.start_pos - anchor_length -
+                                       (var_interval.start_pos - anchor_length -
                                         cigarpos_list[i].ref_pos);
                     let l: usize = left_anchor_ref as usize - anchor_k;
                     let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
@@ -346,7 +347,7 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
                 match_len_right += l;
                 if seen_indel_right && match_len_right > anchor_length {
-                    // we have found a sufficiently long match and it's NOT the cigar op containing interval.end_pos
+                    // we have found a sufficiently long match and it's NOT the cigar op containing var_interval.end_pos
                     right_anchor_ref = cigarpos_list[i].ref_pos + l - match_len_right +
                                        anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos + l - match_len_right +
@@ -360,12 +361,12 @@ pub fn find_anchors(bam_record: &Record,
                         break;
                     }
                 } else if !seen_indel_right &&
-                          cigarpos_list[i].ref_pos + l > interval.end_pos + anchor_length {
-                    // we have found a sufficiently long match but it's the cigar ops surrounding interval.end_pos
-                    // the interval.end_pos we are trying to anchor is just inside one huge match
-                    right_anchor_ref = interval.end_pos + anchor_length;
+                          cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length {
+                    // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.end_pos
+                    // the var_interval.end_pos we are trying to anchor is just inside one huge match
+                    right_anchor_ref = var_interval.end_pos + anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos +
-                                        (interval.end_pos + anchor_length -
+                                        (var_interval.end_pos + anchor_length -
                                          cigarpos_list[i].ref_pos);
                     let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
                     let r: usize = right_anchor_ref as usize + anchor_k;
@@ -570,6 +571,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 pub fn extract_fragment(bam_record: &Record,
                         vars: Vec<PotentialVar>,
                         ref_seq: &Vec<char>,
+                        target_names: &Vec<String>,
                         extract_params: ExtractFragmentParameters,
                         align_params: AlignmentParameters)
                         -> Fragment {
@@ -607,21 +609,32 @@ pub fn extract_fragment(bam_record: &Record,
 
     for var_cluster in cluster_lst {
 
-        let interval = GenomicInterval {
-            tid: Some(bam_record.tid() as u32),
-            chrom: None,
+        let var_interval = GenomicInterval {
+            chrom: target_names[bam_record.tid() as usize].clone(),
             start_pos: var_cluster[0].pos0 as u32,
             end_pos: var_cluster[var_cluster.len() - 1].pos0 as u32,
         };
 
-        match find_anchors(bam_record, interval, 10, &ref_seq, extract_params)
-              .expect("CIGAR or Anchor Error while finding anchor sequences."){
+        match find_anchors(bam_record,
+                           var_interval,
+                           10,
+                           &ref_seq,
+                           target_names,
+                           extract_params)
+                      .expect("CIGAR or Anchor Error while finding anchor sequences.") {
             Some(anchors) => {
-                for call in extract_var_cluster(&read_seq, ref_seq, var_cluster, anchors, extract_params, align_params) {
+                for call in extract_var_cluster(&read_seq,
+                                                ref_seq,
+                                                var_cluster,
+                                                anchors,
+                                                extract_params,
+                                                align_params) {
                     fragment.calls.push(call);
                 }
-            },
-            None => {continue;}
+            }
+            None => {
+                continue;
+            }
         }
     }
 
@@ -631,17 +644,28 @@ pub fn extract_fragment(bam_record: &Record,
 pub fn extract_fragments(bamfile_name: &String,
                          fastafile_name: &String,
                          varlist: &VarList,
+                         interval: &Option<GenomicInterval>,
                          extract_params: ExtractFragmentParameters,
                          align_params: AlignmentParameters)
                          -> Vec<Fragment> {
+
+    let t_names = parse_target_names(&bamfile_name);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
     let mut fasta = fasta::IndexedReader::from_file(fastafile_name).unwrap();
     let mut ref_seq: Vec<char> = vec![];
 
     let mut flist: Vec<Fragment> = vec![];
-    let bam = bam::Reader::from_path(bamfile_name).unwrap();
-    let t_names = parse_target_names(&bamfile_name);
+
+    let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
+
+    match interval {
+        &Some(ref iv) => {
+            let iv_tid = bam.header().tid(iv.chrom.as_bytes()).unwrap();
+            bam.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        }
+        &None => {}
+    };
 
     for r in bam.records() {
 
@@ -660,8 +684,7 @@ pub fn extract_fragments(bamfile_name: &String,
         let end_pos = record.cigar().end_pos() - 1;
 
         let interval = GenomicInterval {
-            tid: Some(tid as u32),
-            chrom: Some(chrom),
+            chrom: chrom,
             start_pos: start_pos as u32,
             end_pos: end_pos as u32,
         };
@@ -670,7 +693,12 @@ pub fn extract_fragments(bamfile_name: &String,
         let read_vars = varlist.get_variants_range(interval);
 
 
-        let frag = extract_fragment(&record, read_vars, &ref_seq, extract_params, align_params);
+        let frag = extract_fragment(&record,
+                                    read_vars,
+                                    &ref_seq,
+                                    &t_names,
+                                    extract_params,
+                                    align_params);
         flist.push(frag);
 
         prev_tid = tid;

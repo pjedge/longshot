@@ -3,6 +3,7 @@
 extern crate bio;
 extern crate clap;
 extern crate rust_htslib;
+extern crate regex;
 #[macro_use]
 extern crate quick_error;
 
@@ -14,7 +15,7 @@ mod util;
 use clap::{Arg, App};
 
 use call_genotypes::call_genotypes;
-use util::{ExtractFragmentParameters, AlignmentParameters};
+use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     match_from_match: 0.89,
@@ -44,7 +45,7 @@ fn main() {
                 .required(true)
                 .takes_value(true))
         .arg(Arg::with_name("Input FASTA")
-                .short("r")
+                .short("f")
                 .long("ref")
                 .value_name("FASTA")
                 .help("indexed fasta reference that BAM file is aligned to")
@@ -59,45 +60,53 @@ fn main() {
                 .display_order(3)
                 .required(true)
                 .takes_value(true))
+        .arg(Arg::with_name("Region")
+                .short("r")
+                .long("region")
+                .value_name("VCF")
+                .help("Region in format <chrom> or <chrom:start-stop> in which to call variants.")
+                .display_order(4)
+                .takes_value(true))
         .arg(Arg::with_name("Min alt count")
                 .short("a")
                 .long("min_alt_count")
                 .value_name("int")
                 .help("Minimum number of occurrences of a variant base in pileup to consider it as a potential SNV.")
-                .display_order(4)
+                .display_order(5)
                 .default_value("2"))
         .arg(Arg::with_name("Min alt frac")
                 .short("A")
                 .long("min_alt_frac")
                 .value_name("float")
                 .help("Minimum fraction of variant base in pileup to consider it as a potential SNV.")
-                .display_order(5)
+                .display_order(6)
                 .default_value("0.125"))
         .arg(Arg::with_name("Min coverage")
                 .short("c")
                 .long("min_cov")
                 .value_name("int")
                 .help("Minimum coverage to consider position as a potential SNV.")
-                .display_order(6)
+                .display_order(7)
                 .default_value("5"))
         .arg(Arg::with_name("Max coverage")
                 .short("C")
                 .long("max_cov")
                 .value_name("int")
                 .help("Maximum coverage to consider position as a potential SNV.")
-                .display_order(7))
+                .display_order(8))
         .arg(Arg::with_name("Min mapq")
                 .short("q")
                 .long("min_mapq")
                 .value_name("int")
                 .help("Minimum mapping quality to use a read.")
-                .display_order(8)
+                .display_order(9)
                 .default_value("30"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
                 .value_name("int")
                 .help("Length of indel-free anchor sequence on the left and right side of read realignment window.")
+                .display_order(10)
                 .default_value("10"))
         .arg(Arg::with_name("Anchor k")
                 .short("k")
@@ -132,18 +141,18 @@ fn main() {
                 .long("max_window")
                 .value_name("int")
                 .help("Ignore a variant/short haplotype if the realignment window for read or reference is larger than w bases.")
-                .display_order(16)
+                .display_order(15)
                 .default_value("200"))
         .arg(Arg::with_name("Fast alignment")
-                .short("f")
+                .short("z")
                 .long("fast_alignment")
                 .help("Use non-numerically stable alignment algorithm. Is significantly faster but may be less accurate or have unexpected behaviour.")
-                .display_order(17))
+                .display_order(16))
         .arg(Arg::with_name("Band width")
                 .short("B")
                 .long("band_width")
                 .help("Minimum width of alignment band. Band will increase in size if sequences are different lengths.")
-                .display_order(18)
+                .display_order(17)
                 .default_value("20"))
         .get_matches();
 
@@ -151,6 +160,9 @@ fn main() {
     let bamfile_name = input_args.value_of("Input BAM").unwrap().to_string();
     let fasta_file = input_args.value_of("Input FASTA").unwrap().to_string();
     let output_vcf_file = input_args.value_of("Output VCF").unwrap().to_string();
+
+    let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
+                                                                &bamfile_name);
 
     let min_alt_count: u32 = input_args.value_of("Min alt count")
         .unwrap()
@@ -231,6 +243,7 @@ fn main() {
     eprintln!("Calling potential SNVs using pileup...");
     let varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
                                                            &fasta_file,
+                                                           &interval,
                                                            min_alt_count,
                                                            min_alt_frac,
                                                            min_cov,
@@ -255,9 +268,10 @@ fn main() {
     let flist = extract_fragments::extract_fragments(&bamfile_name,
                                                      &fasta_file,
                                                      &varlist,
+                                                     &interval,
                                                      extract_fragment_parameters,
                                                      alignment_parameters);
     eprintln!("Calling genotypes...");
-    call_genotypes(flist, &varlist, output_vcf_file);
+    call_genotypes(flist, &varlist, &interval, output_vcf_file);
 
 }

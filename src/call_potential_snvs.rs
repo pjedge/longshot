@@ -4,12 +4,13 @@ use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use bio::io::fasta;
 use std::char;
-use util::{PotentialVar, VarList, parse_target_names};
+use util::{GenomicInterval, PotentialVar, VarList, parse_target_names};
 
 static VARLIST_CAPACITY: usize = 1000000;
 
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
+                           interval: &Option<GenomicInterval>,
                            min_alt_count: u32,
                            min_alt_frac: f32,
                            min_coverage: u32,
@@ -19,7 +20,6 @@ pub fn call_potential_snvs(bam_file: &String,
 
     let target_names = parse_target_names(&bam_file);
 
-    let bam = bam::Reader::from_path(bam_file).unwrap();
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
 
     let mut varlist: Vec<PotentialVar> = Vec::with_capacity(VARLIST_CAPACITY);
@@ -29,7 +29,24 @@ pub fn call_potential_snvs(bam_file: &String,
     let mut ref_seq: Vec<u8> = vec![];
     let mut prev_tid = 4294967295;
 
-    for p in bam.pileup() {
+    // there is a really weird bug going on here,
+    // hence the duplicate file handles to the bam file.
+    // if an indexed reader is used, and fetch is never called, pileup() hangs.
+    // so we need to iterate over the fetched indexed pileup if there's a region,
+    // or a totally separate pileup from the unindexed file if not.
+    // TODO: try to reproduce as a minimal example and possibly raise issue on Rust-htslib repo
+    let bam = bam::Reader::from_path(bam_file).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let bam_pileup = match interval {
+        &Some(ref iv) => {
+            let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
+            bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+            bam_ix.pileup()
+        }
+        &None => bam.pileup(),
+    };
+
+    for p in bam_pileup {
 
         let pileup = p.unwrap();
 

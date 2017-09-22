@@ -1,6 +1,6 @@
 
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{VarList, Fragment, FragCall};
+use util::{VarList, Fragment, FragCall, GenomicInterval};
 use std::error::Error;
 use std::io::prelude::*;
 use std::fs::File;
@@ -88,7 +88,10 @@ fn compute_posteriors(pileup: &Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
     (post00, post01, post11)
 }
 
-pub fn call_genotypes(flist: Vec<Fragment>, varlist: &VarList, output_vcf_file: String) {
+pub fn call_genotypes(flist: Vec<Fragment>,
+                      varlist: &VarList,
+                      interval: &Option<GenomicInterval>,
+                      output_vcf_file: String) {
 
     let vcf_path = Path::new(&output_vcf_file);
     let vcf_display = vcf_path.display();
@@ -107,6 +110,16 @@ pub fn call_genotypes(flist: Vec<Fragment>, varlist: &VarList, output_vcf_file: 
 
         let pileup = &pileup_lst[i];
         let var = &varlist.lst[i];
+
+        match interval {
+            &Some(ref iv) => {
+                if var.pos0 < iv.start_pos as usize || var.pos0 > iv.end_pos as usize {
+                    continue;
+                }
+            }
+            &None => {}
+        }
+
         let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(&pileup);
 
         let genotype: String;
