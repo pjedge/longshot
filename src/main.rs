@@ -30,6 +30,19 @@ static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     mismatch_from_deletion: 0.0097777,
 };
 
+static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
+    match_from_match: 0.82,
+    mismatch_from_match: 0.05,
+    insertion_from_match: 0.05,
+    deletion_from_match: 0.08,
+    extend_from_insertion: 0.25,
+    match_from_insertion: 0.7069,
+    mismatch_from_insertion: 0.0431,
+    extend_from_deletion: 0.35,
+    match_from_deletion: 0.6126,
+    mismatch_from_deletion: 0.0373,
+};
+
 fn main() {
 
     let input_args = App::new("Reaper (REAlign error PronE Reads)")
@@ -154,6 +167,12 @@ fn main() {
                 .help("Minimum width of alignment band. Band will increase in size if sequences are different lengths.")
                 .display_order(17)
                 .default_value("20"))
+        .arg(Arg::with_name("Read technology")
+                .short("t")
+                .long("read_technology")
+                .help("Which read technology is being used (\"ont\" or \"pacbio\").")
+                .default_value("pacbio")
+                .display_order(18))
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -234,10 +253,24 @@ fn main() {
         }
     };
 
-    let band_width: usize = input_args.value_of("Band width")
+    let mut band_width: usize = input_args.value_of("Band width")
         .unwrap()
         .parse::<usize>()
         .expect("Argument band_width must be a positive integer!");
+
+    let alignment_parameters;
+    match input_args.value_of("Read technology").unwrap() {
+        "pacbio" | "Pacbio" | "PacBio" | "PACBIO" => {
+            alignment_parameters = PACBIO_ALIGNMENT_PARAMETERS.clone();
+        }
+        "ont" | "ONT" => {
+            alignment_parameters = ONT_ALIGNMENT_PARAMETERS.clone();
+            band_width = 50
+        }
+        _ => {
+            panic!("Invalid read technology argument.");
+        }
+    }
 
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("Calling potential SNVs using pileup...");
@@ -261,8 +294,6 @@ fn main() {
         min_window_length: min_window_length,
         max_window_length: max_window_length,
     };
-
-    let alignment_parameters = PACBIO_ALIGNMENT_PARAMETERS.clone();
 
     eprintln!("Generating condensed read data for SNVs...");
     let flist = extract_fragments::extract_fragments(&bamfile_name,

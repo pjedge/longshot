@@ -657,52 +657,89 @@ pub fn extract_fragments(bamfile_name: &String,
 
     let mut flist: Vec<Fragment> = vec![];
 
-    let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
-
+    // TODO: this uses a lot of duplicate code, need to figure out a better solution.
     match interval {
         &Some(ref iv) => {
+            let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
             let iv_tid = bam.header().tid(iv.chrom.as_bytes()).unwrap();
             bam.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+            for r in bam.records() {
+                let record = r.unwrap();
+
+                let tid: usize = record.tid() as usize;
+                let chrom: String = t_names[record.tid() as usize].clone();
+
+                if tid != prev_tid {
+                    let mut ref_seq_u8: Vec<u8> = vec![];
+                    fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                    ref_seq = dna_vec(&ref_seq_u8);
+                }
+
+                let start_pos = record.pos();
+                let end_pos = record.cigar().end_pos() - 1;
+
+                let interval = GenomicInterval {
+                    chrom: chrom,
+                    start_pos: start_pos as u32,
+                    end_pos: end_pos as u32,
+                };
+
+                // get the list of variants that overlap this read
+                let read_vars = varlist.get_variants_range(interval);
+
+                let frag = extract_fragment(&record,
+                                            read_vars,
+                                            &ref_seq,
+                                            &t_names,
+                                            extract_params,
+                                            align_params);
+                flist.push(frag);
+
+                prev_tid = tid;
+
+            }
         }
-        &None => {}
+        &None => {
+            let bam = bam::Reader::from_path(bamfile_name).unwrap();
+            for r in bam.records() {
+                let record = r.unwrap();
+
+
+                let tid: usize = record.tid() as usize;
+                let chrom: String = t_names[record.tid() as usize].clone();
+
+                if tid != prev_tid {
+                    let mut ref_seq_u8: Vec<u8> = vec![];
+                    fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                    ref_seq = dna_vec(&ref_seq_u8);
+                }
+
+                let start_pos = record.pos();
+                let end_pos = record.cigar().end_pos() - 1;
+
+                let interval = GenomicInterval {
+                    chrom: chrom,
+                    start_pos: start_pos as u32,
+                    end_pos: end_pos as u32,
+                };
+
+                // get the list of variants that overlap this read
+                let read_vars = varlist.get_variants_range(interval);
+
+                let frag = extract_fragment(&record,
+                                            read_vars,
+                                            &ref_seq,
+                                            &t_names,
+                                            extract_params,
+                                            align_params);
+                flist.push(frag);
+
+                prev_tid = tid;
+
+            }
+        }
     };
 
-    for r in bam.records() {
-
-        let record = r.unwrap();
-
-        let tid: usize = record.tid() as usize;
-        let chrom: String = t_names[record.tid() as usize].clone();
-
-        if tid != prev_tid {
-            let mut ref_seq_u8: Vec<u8> = vec![];
-            fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
-            ref_seq = dna_vec(&ref_seq_u8);
-        }
-
-        let start_pos = record.pos();
-        let end_pos = record.cigar().end_pos() - 1;
-
-        let interval = GenomicInterval {
-            chrom: chrom,
-            start_pos: start_pos as u32,
-            end_pos: end_pos as u32,
-        };
-
-        // get the list of variants that overlap this read
-        let read_vars = varlist.get_variants_range(interval);
-
-
-        let frag = extract_fragment(&record,
-                                    read_vars,
-                                    &ref_seq,
-                                    &t_names,
-                                    extract_params,
-                                    align_params);
-        flist.push(frag);
-
-        prev_tid = tid;
-    }
 
     flist
 }
