@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range1() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr1".to_string();
         let p1 = 2500;
         let p2 = 8000;
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range2() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr2".to_string();
         let p1 = 0;
         let p2 = 3000;
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range3() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr2".to_string();
         let p1 = 6000;
         let p2 = 10000;
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range4() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 20100;
         let p2 = 20200;
@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range5() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 20200;
         let p2 = 20200;
@@ -569,7 +569,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range6() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 25000;
         let p2 = 30500;
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range7() {
 
-        let mut vlst = generate_test_lst1();
+        let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 100000;
         let p2 = 200000;
@@ -613,7 +613,7 @@ mod tests {
         };
         let vars = vlst.get_variants_range(interval);
 
-        let mut exp: Vec<PotentialVar> = vec![];
+        let exp: Vec<PotentialVar> = vec![];
         assert_eq!(vars, exp);
     }
 
