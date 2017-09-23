@@ -304,7 +304,7 @@ fn main() {
                                                      alignment_parameters);
 
     eprintln!("Calling genotypes/haplotypes...");
-    let hap: Vec<char> = call_haplotypes(&flist, &varlist, &interval);
+    let hap: Vec<char> = call_haplotypes(&flist, &varlist);
 
     //eprintln!("Calling genotypes...");
     call_genotypes(&flist, &varlist, &interval, &hap, output_vcf_file);

@@ -90,10 +90,7 @@ fn compute_posteriors(pileup: &Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
     (post00, post01, post11)
 }
 
-pub fn call_haplotypes(flist: &Vec<Fragment>,
-                       varlist: &VarList,
-                       interval: &Option<GenomicInterval>)
-                       -> Vec<char> {
+pub fn call_haplotypes(flist: &Vec<Fragment>, varlist: &VarList) -> Vec<char> {
 
     let pileup_lst = generate_realigned_pileup(&flist, varlist.lst.len());
 
@@ -107,14 +104,14 @@ pub fn call_haplotypes(flist: &Vec<Fragment>,
         let pileup = &pileup_lst[i];
         let var = &varlist.lst[i];
 
-        match interval {
-            &Some(ref iv) => {
-                if var.pos0 < iv.start_pos as usize || var.pos0 > iv.end_pos as usize {
-                    continue;
-                }
-            }
-            &None => {}
-        }
+        //match interval {
+        //    &Some(ref iv) => {
+        //        if var.pos0 < iv.start_pos as usize || var.pos0 > iv.end_pos as usize {
+        //            continue;
+        //        }
+        //    }
+        //    &None => {}
+        //}
 
         let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(&pileup);
 
