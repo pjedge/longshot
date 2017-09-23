@@ -182,7 +182,9 @@ pub struct FragCall {
     pub qual: LogProb, // LogProb probability the call is an error
 }
 
+#[derive(Clone)]
 pub struct Fragment {
+    pub id: String,
     pub calls: Vec<FragCall>,
 }
 

@@ -578,7 +578,11 @@ pub fn extract_fragment(bam_record: &Record,
 
 
     // TODO assert that every single variant in vars is on the same chromosome
-    let mut fragment = Fragment { calls: vec![] };
+    let id: String = u8_to_string(bam_record.qname());
+    let mut fragment = Fragment {
+        id: id,
+        calls: vec![],
+    };
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
     let mut cluster_lst: Vec<Vec<PotentialVar>> = vec![];
 

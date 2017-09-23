@@ -3,10 +3,10 @@
 extern crate bio;
 extern crate clap;
 extern crate rust_htslib;
-extern crate regex;
 #[macro_use]
 extern crate quick_error;
 
+mod haplotype_assembly;
 mod call_potential_snvs;
 mod extract_fragments;
 mod call_genotypes;
@@ -14,7 +14,7 @@ mod realignment;
 mod util;
 use clap::{Arg, App};
 
-use call_genotypes::call_genotypes;
+use call_genotypes::{call_genotypes, call_haplotypes};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -302,7 +302,10 @@ fn main() {
                                                      &interval,
                                                      extract_fragment_parameters,
                                                      alignment_parameters);
-    eprintln!("Calling genotypes...");
-    call_genotypes(flist, &varlist, &interval, output_vcf_file);
 
+    eprintln!("Calling genotypes/haplotypes...");
+    let hap: Vec<char> = call_haplotypes(&flist, &varlist, &interval);
+
+    //eprintln!("Calling genotypes...");
+    call_genotypes(&flist, &varlist, &interval, &hap, output_vcf_file);
 }
