@@ -221,7 +221,8 @@ pub fn find_anchors(bam_record: &Record,
     let max_window_length = extract_params.max_window_length;
 
     if var_interval.chrom != target_names[bam_record.tid() as usize] ||
-       (var_interval.start_pos as i32) >= bam_record.cigar().end_pos() ||
+       (var_interval.start_pos as i32) >=
+       bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
        (var_interval.end_pos as i32) < bam_record.pos() {
 
         return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
@@ -680,7 +681,8 @@ pub fn extract_fragments(bamfile_name: &String,
                 }
 
                 let start_pos = record.pos();
-                let end_pos = record.cigar().end_pos() - 1;
+                let end_pos =
+                    record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
 
                 let interval = GenomicInterval {
                     chrom: chrom,
@@ -719,7 +721,8 @@ pub fn extract_fragments(bamfile_name: &String,
                 }
 
                 let start_pos = record.pos();
-                let end_pos = record.cigar().end_pos() - 1;
+                let end_pos =
+                    record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
 
                 let interval = GenomicInterval {
                     chrom: chrom,

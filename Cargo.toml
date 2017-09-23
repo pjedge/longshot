@@ -4,10 +4,10 @@ version = "0.1.0"
 authors = ["Peter Edge <edge.peterj@gmail.com>"]
 
 [dependencies]
-bio = "*"
-rust-htslib = "*"
-quick-error = "*"
-clap = "*"
+bio = "0.14.2"
+rust-htslib = "0.13.0"
+quick-error = "1.2.0"
+clap = "2.26.2"
 
 [build-dependencies]
 cc = "1.0"
