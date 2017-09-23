@@ -177,7 +177,7 @@ pub fn call_haplotypes(flist: &Vec<Fragment>, varlist: &VarList) -> Vec<char> {
 pub fn call_genotypes(flist: &Vec<Fragment>,
                       varlist: &VarList,
                       interval: &Option<GenomicInterval>,
-                      hap: &Vec<char>,
+                      hap: &Option<Vec<char>>,
                       output_vcf_file: String) {
 
     let vcf_path = Path::new(&output_vcf_file);
@@ -215,26 +215,43 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         if post00 > post01 && post00 > post11 {
             let p_call_wrong = LogProb::ln_add_exp(post01, post11);
             genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "0|0".to_string();
+            match hap {
+                &Some(_) => {
+                    genotype = "0|0".to_string();
+                }
+                &None => {
+                    genotype = "0/0".to_string();
+                }
+            }
         } else if post01 > post00 && post01 > post11 {
             let p_call_wrong = LogProb::ln_add_exp(post00, post11);
             genotype_qual = *PHREDProb::from(p_call_wrong);
 
-            if hap[i] != '-' {
-                if hap[i] == '0' {
-                    genotype = "0|1".to_string();
-                } else {
-                    genotype = "1|0".to_string();
+            match hap {
+                &Some(ref h) if h[i] != '-' => {
+                    if h[i] == '0' {
+                        genotype = "0|1".to_string();
+                    } else {
+                        genotype = "1|0".to_string();
+                    }
+                }
+                &Some(_) | &None => {
+                    genotype = "0/1".to_string();
                 }
 
-            } else {
-                genotype = "0/1".to_string();
             }
 
         } else {
             let p_call_wrong = LogProb::ln_add_exp(post00, post01);
             genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "1|1".to_string();
+            match hap {
+                &Some(_) => {
+                    genotype = "1|1".to_string();
+                }
+                &None => {
+                    genotype = "1/1".to_string();
+                }
+            }
         }
 
         let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);

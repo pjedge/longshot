@@ -173,6 +173,11 @@ fn main() {
                 .help("Which read technology is being used (\"ont\" or \"pacbio\").")
                 .default_value("pacbio")
                 .display_order(18))
+        .arg(Arg::with_name("No haplotypes")
+                .short("n")
+                .long("no_haps")
+                .help("Don't call HapCUT2 to phase variants.")
+                .display_order(19))
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -272,6 +277,15 @@ fn main() {
         }
     }
 
+
+    let assemble_haps = match input_args.occurrences_of("No haplotypes") {
+        0 => true,
+        1 => false,
+        _ => {
+            panic!("no_haps specified multiple times");
+        }
+    };
+
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("Calling potential SNVs using pileup...");
     let varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
@@ -304,7 +318,10 @@ fn main() {
                                                      alignment_parameters);
 
     eprintln!("Calling genotypes/haplotypes...");
-    let hap: Vec<char> = call_haplotypes(&flist, &varlist);
+    let hap: Option<Vec<char>> = match assemble_haps {
+        true => Some(call_haplotypes(&flist, &varlist)),
+        false => None,
+    };
 
     //eprintln!("Calling genotypes...");
     call_genotypes(&flist, &varlist, &interval, &hap, output_vcf_file);

@@ -186,11 +186,12 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
         likelihood_pruning(snps, Flist, snpfrag, HAP1, CALL_HOMOZYGOUS);
     }
 
-    for (i=0;i<snps;i++){
-        HAP[i] = (int)HAP1[i];
+    for (i = 0; i < snps; i++){
+        HAP[i] = HAP1[i];
     }
 
     // FREE UP MEMORY
+    free(HAP1);
     for (i = 0; i < snps; i++) free(snpfrag[i].elist);
     for (i = 0; i < snps; i++) free(snpfrag[i].telist);
     component = 0;
