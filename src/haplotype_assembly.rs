@@ -56,7 +56,8 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         }
         line.push(' ' as u8);
         line.append(&mut quals);
-        line.push('\n' as u8);
+        //line.push('\n' as u8);
+        line.push('\0' as u8);
 
         let mut charline: Vec<char> = vec![];
         for u in line.clone() {

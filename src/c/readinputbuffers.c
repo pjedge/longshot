@@ -17,22 +17,20 @@ int fragment_compare(const void *a, const void *b) {
 int read_fragment_buffer(char** fragmentbuffer, struct fragment* Flist, int fragments) {
     int i = 0, j = 0, k = 0, t = 0, t1 = 0;
     int blocks = 0, type = 0, l = 0, biter = 0, offset = 0;
-    char buffer[100000];
+    char* buffer = fragmentbuffer[0];
     char blockseq[100000];
-    for (i=0;i<MAXBUF;i++) buffer[i] = 0;
+    //for (i=0;i<MAXBUF;i++) buffer[i] = 0;
     for (i=0;i<100000;i++) blockseq[i] = 0;
     //int num_fields;
     //int expected_num_fields;
 
     for (i = 0; i < fragments; i++) {
         //		fprintf(stdout,"%s \n",buffer);
-        for (j = 0; j < 100000; j++){
-            buffer[j] = (char)fragmentbuffer[i][j];
-            if (buffer[j] == '\n'){
-                break;
-            }
-        }
-
+        buffer = fragmentbuffer[i];
+        j = 0;
+        while (buffer[j] != '\0') {
+            j++;
+        };
         k = 0;
         t = 0;
         type = 0;
@@ -120,20 +118,15 @@ int read_fragment_buffer(char** fragmentbuffer, struct fragment* Flist, int frag
 // read variants from VCF file, this code doesn't check the vcf file and assumes that column 10 contains the genotypes for the individual we are interested in phasing
 
 int read_vcf_buffer(char** vcfbuffer, struct SNPfrags* snpfrag, int snps) {
-    char buffer[100000];
+    char* buffer = vcfbuffer[0];
     char temp[1000];
-    char GQ[5];
-    char* gen;
-    int bix=0, i = 0, j = 0, k=0, len=0, s = 0, e = 0, var = 0, GQ_ix, format_ix;
+    //char GQ[5];
+    //char* gen;
+    int var=0, i = 0, j = 0, s = 0, e = 0;
+    //int GQ_ix = 0,k=0, len=0,format_ix;
+    for (var=0; var < snps; var++) {
 
-    for (bix=0; bix < snps; bix++) {
-
-        for (j = 0; j < 100000; j++){
-            buffer[j] = (char)vcfbuffer[i][j];
-            if (buffer[j] == '\n'){
-                break;
-            }
-        }
+        buffer = vcfbuffer[var];
 
         if (buffer[0] == '#') continue;
         i = 0;
@@ -202,15 +195,15 @@ int read_vcf_buffer(char** vcfbuffer, struct SNPfrags* snpfrag, int snps) {
         assert(buffer[s] == 'G' && buffer[s+1] == 'T' && (buffer[s+2] == ':' || buffer[s+2] == '\t'));
 
         // check format string for presence of GQ
-        format_ix = 0;
-        GQ_ix = -1; // the index of format field for GQ
-        for (j=s;j<e;j++){
-            if (buffer[j] == ':')
-                format_ix++;
-            else if((j+1 < e) && buffer[j] == 'G' && buffer[j+1] == 'Q'){
-                GQ_ix = format_ix;
-            }
-        }
+        //format_ix = 0;
+        //GQ_ix = -1; // the index of format field for GQ
+        //for (j=s;j<e;j++){
+        //    if (buffer[j] == ':')
+        //        format_ix++;
+        //    else if((j+1 < e) && buffer[j] == 'G' && buffer[j+1] == 'Q'){
+        //        GQ_ix = format_ix;
+        //    }
+        //}
 
         while (buffer[i] == ' ' || buffer[i] == '\t') i++;
         s = i;
@@ -220,32 +213,30 @@ int read_vcf_buffer(char** vcfbuffer, struct SNPfrags* snpfrag, int snps) {
         snpfrag[var].genotypes = (char*) malloc(e - s + 1);
         for (j = s; j < e; j++) snpfrag[var].genotypes[j - s] = buffer[j];
         snpfrag[var].genotypes[j - s] = '\0';
-        len = j-s;
-        gen = snpfrag[var].genotypes; //  for convenience
-        if (GQ_ix != -1) {
+        //len = j-s;
+        //gen = snpfrag[var].genotypes; //  for convenience
+        //if (GQ_ix != -1) {
             // get to the index where GQ is located.
-            k = 0; // where we are in gen
-            for (j=0; j<GQ_ix; j++){
-                while(gen[k] != ':')
-                    k++;
-                k++; // step past the ':'
-            }
+        //    k = 0; // where we are in gen
+        //    for (j=0; j<GQ_ix; j++){
+        //        while(gen[k] != ':')
+        //            k++;
+        //        k++; // step past the ':'
+        //    }
             // reached GQ field. read it in.
 
-            j=0;
-            while (k<len && gen[k] != ':') {
-                GQ[j] = gen[k];
-                k++;
-                j++;
-            }
-            GQ[j] = '\0';
+        //    j=0;
+        //    while (k<len && gen[k] != ':') {
+        //        GQ[j] = gen[k];
+        //        k++;
+        //        j++;
+        //    }
+        //    GQ[j] = '\0';
 
-            snpfrag[var].homozygous_prior = atof(GQ) / -10; // log prior probability of homozygousity
-        } else{
-            snpfrag[var].homozygous_prior = HOMOZYGOUS_PRIOR;
-        }
-
-        var++;
+        //    snpfrag[var].homozygous_prior = atof(GQ) / -10; // log prior probability of homozygousity
+        //} else{
+        snpfrag[var].homozygous_prior = HOMOZYGOUS_PRIOR;
+        //}
     }
     return 0;
 }

@@ -7,7 +7,7 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
 
-static MAX_P_MISCALL_F64: f64 = 0.25;
+static MAX_P_MISCALL_F64: f64 = 0.2;
 static MIN_GQ_FOR_PHASING: f64 = 50.0;
 
 fn generate_realigned_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
@@ -139,7 +139,7 @@ pub fn call_haplotypes(flist: &Vec<Fragment>, varlist: &VarList) -> Vec<char> {
         }
 
         // Write the `LOREM_IPSUM` string to `file`, returns `io::Result<()>`
-        let line: String = format!("{}\t{}\t.\t{}\t{}\t.\t.\tRA={};AA={}\tGT:GQ\t{}:{}\n",
+        let line: String = format!("{}\t{}\t.\t{}\t{}\t.\t.\tRA={};AA={}\tGT:GQ\t{}:{}",
                                    var.chrom,
                                    var.pos0 + 1,
                                    var.ref_allele,
@@ -153,6 +153,7 @@ pub fn call_haplotypes(flist: &Vec<Fragment>, varlist: &VarList) -> Vec<char> {
         for u in line.into_bytes() {
             vcf_line.push(u as u8);
         }
+        vcf_line.push('\n' as u8);
         vcf_line.push('\0' as u8);
         vcf_buffer.push(vcf_line);
 
