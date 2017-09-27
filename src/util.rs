@@ -180,12 +180,61 @@ pub struct FragCall {
     pub var_ix: usize, // index into variant list
     pub allele: char, // allele call
     pub qual: LogProb, // LogProb probability the call is an error
+    pub p_hap1: LogProb,
+    pub p_hap2: LogProb,
 }
 
 #[derive(Clone)]
 pub struct Fragment {
     pub id: String,
     pub calls: Vec<FragCall>,
+}
+
+impl Fragment {
+    pub fn assign_haps(&mut self, hap: &Vec<char>) {
+        // assign every FragCall in calls a posterior probability of each haplotype
+        let mut prob_hap1: LogProb = LogProb::ln_one();
+        let mut prob_hap2: LogProb = LogProb::ln_one();
+
+        for i in 0..self.calls.len() {
+            let call = self.calls[i];
+            let p_miscall = call.qual;
+            let p_call = LogProb::ln_sub_exp(LogProb::ln_one(), p_miscall);
+            match hap[call.var_ix] {
+                '0' if call.allele == '0' => {
+                    prob_hap1 = prob_hap1 + p_call;
+                    prob_hap2 = prob_hap2 + p_miscall;
+                }
+                '1' if call.allele == '0' => {
+                    prob_hap1 = prob_hap1 + p_miscall;
+                    prob_hap2 = prob_hap2 + p_call;
+                }
+                '0' if call.allele == '1' => {
+                    prob_hap1 = prob_hap1 + p_miscall;
+                    prob_hap2 = prob_hap2 + p_call;
+                }
+                '1' if call.allele == '1' => {
+                    prob_hap1 = prob_hap1 + p_call;
+                    prob_hap2 = prob_hap2 + p_miscall;
+                }
+                '-' => {}
+                _ => {
+                    panic!("Unexpected Fragment allele while assigning haplotypes.");
+                }
+            }
+        }
+
+        let total = LogProb::ln_add_exp(prob_hap1, prob_hap2);
+        let post_hap1: LogProb = prob_hap1 - total;
+        let post_hap2: LogProb = prob_hap2 - total;
+        println!("{} {}", post_hap1.exp(), post_hap2.exp());
+
+        for i in 0..self.calls.len() {
+            self.calls[i].p_hap1 = post_hap1;
+            self.calls[i].p_hap2 = post_hap2;
+        }
+
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
