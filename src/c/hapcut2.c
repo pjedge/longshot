@@ -40,7 +40,7 @@ int LONG_READS = 0; // if this variable is 1, the data contains long read data
 #include "find_maxcut.c"   // function compute_good_cut
 #include "post_processing.c"  // post-processing functions
 
-int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps, char* HAP) {
+int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps, float min_post_hap, char* HAP) {
     // IMP NOTE: all SNPs start from 1 instead of 0 and all offsets are 1+
 
     if (VERBOSE) fprintf_time(stderr, "Calling Max-Likelihood-Cut based haplotype assembly algorithm\n");
@@ -187,7 +187,10 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
     }
 
     for (i = 0; i < snps; i++){
-        HAP[i] = HAP1[i];
+        if (snpfrag[i].post_hap < log10(min_post_hap) || snpfrag[i].genotypes[0] == snpfrag[i].genotypes[2])
+            HAP[i] = '-';
+        else
+            HAP[i] = HAP1[i];
     }
 
     // FREE UP MEMORY

@@ -220,12 +220,13 @@ pub fn call_haplotypes(flist: &Vec<Fragment>, varlist: &VarList) -> Vec<char> {
 
     }
     let frag_buffer = generate_flist_buffer(&flist, &phase_variant);
-    let mut hap1: Vec<u8> = vec![0; varlist.lst.len()];
+    let mut hap1: Vec<u8> = vec![0u8; varlist.lst.len()];
 
     call_hapcut2(&frag_buffer,
                  &vcf_buffer,
                  frag_buffer.len(),
                  vcf_buffer.len(),
+                 0.999,
                  &mut hap1);
 
     let mut char_hap: Vec<char> = Vec::with_capacity(varlist.lst.len());
