@@ -5,6 +5,7 @@ extern crate clap;
 extern crate rust_htslib;
 #[macro_use]
 extern crate quick_error;
+extern crate core;
 
 mod haplotype_assembly;
 mod call_potential_snvs;
@@ -12,6 +13,7 @@ mod extract_fragments;
 mod call_genotypes;
 mod realignment;
 mod util;
+//mod de_bruijn;
 use clap::{Arg, App};
 
 use call_genotypes::{call_genotypes, call_haplotypes};
@@ -310,18 +312,27 @@ fn main() {
     };
 
     eprintln!("Generating condensed read data for SNVs...");
-    let flist = extract_fragments::extract_fragments(&bamfile_name,
-                                                     &fasta_file,
-                                                     &varlist,
-                                                     &interval,
-                                                     extract_fragment_parameters,
-                                                     alignment_parameters);
+    let mut flist = extract_fragments::extract_fragments(&bamfile_name,
+                                                         &fasta_file,
+                                                         &varlist,
+                                                         &interval,
+                                                         extract_fragment_parameters,
+                                                         alignment_parameters);
 
     eprintln!("Calling genotypes/haplotypes...");
     let hap: Option<Vec<char>> = match assemble_haps {
         true => Some(call_haplotypes(&flist, &varlist)),
         false => None,
     };
+
+    match hap {
+        Some(ref h) => {
+            for i in 0..flist.len() {
+                flist[i].assign_haps(&h);
+            }
+        }
+        None => {}
+    }
 
     //eprintln!("Calling genotypes...");
     call_genotypes(&flist, &varlist, &interval, &hap, output_vcf_file);

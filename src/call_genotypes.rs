@@ -47,6 +47,67 @@ fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize) {
     (count0, count1)
 }
 
+struct HapPost {
+    post00: LogProb,
+    post01: LogProb,
+    post10: LogProb,
+    post11: LogProb,
+}
+
+fn compute_haplotype_posteriors(pileup: &Vec<FragCall>) -> HapPost {
+
+    // compute probabilities of data given each genotype
+    let mut prob00 = LogProb::ln_one();
+    let mut prob01 = LogProb::ln_one();
+    let mut prob10 = LogProb::ln_one();
+    let mut prob11 = LogProb::ln_one();
+    //let ln_half = LogProb::from(Prob(0.5));
+
+    for call in pileup {
+
+        let p_call = LogProb::ln_sub_exp(LogProb::ln_one(), call.qual);
+        let p_miscall = call.qual;
+
+        match call.allele {
+            '0' => {
+                prob00 = prob00 + p_call;
+                prob01 = prob01 +
+                         LogProb::ln_add_exp(call.p_hap1 + p_call, call.p_hap2 + p_miscall);
+                prob10 = prob10 +
+                         LogProb::ln_add_exp(call.p_hap2 + p_call, call.p_hap1 + p_miscall);
+                prob11 = prob11 + p_miscall;
+            }
+            '1' => {
+                prob00 = prob00 + p_miscall;
+                prob01 = prob01 +
+                         LogProb::ln_add_exp(call.p_hap2 + p_call, call.p_hap1 + p_miscall);
+                prob10 = prob10 +
+                         LogProb::ln_add_exp(call.p_hap1 + p_call, call.p_hap2 + p_miscall);
+                prob11 = prob11 + p_call;
+            }
+            _ => {
+                panic!("Unexpected allele observed in pileup.");
+            }
+        }
+    }
+
+    // these can happen two ways
+    prob00 = prob00 + LogProb(2.0f64.ln());
+    prob11 = prob11 + LogProb(2.0f64.ln());
+
+    // sum of data probabilities
+    let posts: Vec<LogProb> = vec![prob00, prob01, prob10, prob11];
+    let total = LogProb::ln_sum_exp(&posts);
+
+    // genotype posterior probabilities
+    HapPost {
+        post00: prob00 - total,
+        post01: prob01 - total,
+        post10: prob10 - total,
+        post11: prob11 - total,
+    }
+}
+
 
 fn compute_posteriors(pileup: &Vec<FragCall>) -> (LogProb, LogProb, LogProb) {
 
@@ -208,7 +269,11 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
             &None => {}
         }
 
-        let (post00, post01, post11): (LogProb, LogProb, LogProb) = compute_posteriors(&pileup);
+        let posts = compute_haplotype_posteriors(&pileup);
+
+        let post00 = posts.post00;
+        let post01 = LogProb::ln_add_exp(posts.post01, posts.post10);
+        let post11 = posts.post11;
 
         let genotype: String;
         let genotype_qual: f64;
@@ -239,7 +304,6 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                 &Some(_) | &None => {
                     genotype = "0/1".to_string();
                 }
-
             }
 
         } else {
