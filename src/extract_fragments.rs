@@ -7,7 +7,7 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
-use bio::stats::{LogProb, PHREDProb};
+use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use realignment;
 
@@ -550,6 +550,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                            var_ix: var_cluster[v].ix,
                            allele: '1',
                            qual: qual,
+                           p_hap1: LogProb::from(Prob(0.5)), // haplotype unknown at this time
+                           p_hap2: LogProb::from(Prob(0.5)), // haplotype unknown at this time
                        });
         } else {
             // the best haplotype has a '0' ref allele at this position
@@ -562,6 +564,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                            var_ix: var_cluster[v].ix,
                            allele: '0',
                            qual: qual,
+                           p_hap1: LogProb::from(Prob(0.5)), // haplotype unknown at this time
+                           p_hap2: LogProb::from(Prob(0.5)), // haplotype unknown at this time
                        });
         }
     }
