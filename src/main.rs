@@ -180,6 +180,11 @@ fn main() {
                 .long("no_haps")
                 .help("Don't call HapCUT2 to phase variants.")
                 .display_order(19))
+        .arg(Arg::with_name("Indels")
+            .short("i")
+            .long("indels")
+            .help("Call short indels.")
+            .display_order(19))
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -288,6 +293,15 @@ fn main() {
         }
     };
 
+
+    let indels = match input_args.occurrences_of("Indels") {
+        0 => false,
+        1 => true,
+        _ => {
+            panic!("Indels specified multiple times");
+        }
+    };
+
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("Calling potential SNVs using pileup...");
     let varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
@@ -297,7 +311,8 @@ fn main() {
                                                            min_alt_frac,
                                                            min_cov,
                                                            max_cov,
-                                                           min_mapq);
+                                                           min_mapq,
+                                                           indels);
     eprintln!("{} potential SNVs identified.", varlist.lst.len());
 
     let extract_fragment_parameters = ExtractFragmentParameters {
