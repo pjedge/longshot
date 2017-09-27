@@ -251,6 +251,18 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         Ok(file) => file,
     };
 
+    let headerstr = "##fileformat=VCFv4.2
+##source=ReaperV0.1
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
+            .to_string();
+
+    match writeln!(file, "{}", headerstr) {
+        Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
+        Ok(_) => {}
+    }
+
+
     let pileup_lst = generate_realigned_pileup(&flist, varlist.lst.len());
 
     assert_eq!(pileup_lst.len(), varlist.lst.len());
