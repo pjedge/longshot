@@ -227,7 +227,7 @@ impl Fragment {
         let total = LogProb::ln_add_exp(prob_hap1, prob_hap2);
         let post_hap1: LogProb = prob_hap1 - total;
         let post_hap2: LogProb = prob_hap2 - total;
-        println!("{} {}", post_hap1.exp(), post_hap2.exp());
+        //println!("{} {}", post_hap1.exp(), post_hap2.exp());
 
         for i in 0..self.calls.len() {
             self.calls[i].p_hap1 = post_hap1;
