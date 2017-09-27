@@ -19,7 +19,8 @@ pub fn call_potential_snvs(bam_file: &String,
                            min_alt_frac: f32,
                            min_coverage: u32,
                            max_coverage: Option<u32>,
-                           min_mapq: u8)
+                           min_mapq: u8,
+                           call_indels: bool)
                            -> VarList {
 
     let target_names = parse_target_names(&bam_file);
@@ -99,34 +100,38 @@ pub fn call_potential_snvs(bam_file: &String,
                 let ref_allele;
                 let var_allele;
 
-                match alignment.indel() {
-                    Indel::None => {
-                        ref_allele =
-                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-                        var_allele = base.to_string();
-
-                    }
-                    Indel::Ins(l) => {
-
-                        ref_allele =
-                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-
-                        let start = alignment.qpos().unwrap();
-                        let end = start + l as usize + 1;
-                        // don't want to convert whole seq to bytes...
-                        let mut var_char: Vec<char> = vec![];
-                        for i in start..end {
-                            var_char.push(alignment.record().seq()[i] as char);
+                if call_indels {
+                    match alignment.indel() {
+                        Indel::None => {
+                            ref_allele =
+                                (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                            var_allele = base.to_string();
                         }
-                        var_allele = var_char.into_iter().collect::<String>();
+                        Indel::Ins(l) => {
+                            ref_allele =
+                                (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+                            let start = alignment.qpos().unwrap();
+                            let end = start + l as usize + 1;
+                            // don't want to convert whole seq to bytes...
+                            let mut var_char: Vec<char> = vec![];
+                            for i in start..end {
+                                var_char.push(alignment.record().seq()[i] as char);
+                            }
+                            var_allele = var_char.into_iter().collect::<String>();
+                        }
+                        Indel::Del(l) => {
+                            let start = pileup.pos() as usize;
+                            let end = (pileup.pos() + l + 1) as usize;
+                            ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
+                            var_allele = base.to_string();
+                            //(ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                        }
                     }
-                    Indel::Del(l) => {
-                        let start = pileup.pos() as usize;
-                        let end = (pileup.pos() + l + 1) as usize;
-                        ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
-                        var_allele = base.to_string();
-                        //(ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-                    }
+                } else{
+                    ref_allele =
+                        (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                    var_allele = base.to_string();
                 }
 
                 //counts[(ref)] += 1;
