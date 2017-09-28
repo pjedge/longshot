@@ -336,11 +336,12 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
 
         // Write the `LOREM_IPSUM` string to `file`, returns `io::Result<()>`
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t.\t.\tRA={};AA={}\tGT:GQ\t{}:{}",
+                       "{}\t{}\t.\t{}\t{}\t.\t.\tDP={};RA={};AA={}\tGT:GQ\t{}:{}",
                        var.chrom,
                        var.pos0 + 1,
                        var.ref_allele,
                        var.var_allele,
+                       var.dp,
                        count_ref,
                        count_var,
                        genotype,
