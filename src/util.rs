@@ -79,6 +79,7 @@ pub struct GenomicInterval {
 
 #[derive(Clone, Copy)]
 pub struct ExtractFragmentParameters {
+    pub min_mapq: u8,
     pub numerically_stable_alignment: bool,
     pub band_width: usize,
     pub anchor_length: usize,
