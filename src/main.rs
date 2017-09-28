@@ -16,7 +16,7 @@ mod util;
 //mod de_bruijn;
 use clap::{Arg, App};
 
-use call_genotypes::{call_genotypes, call_haplotypes};
+use call_genotypes::{call_genotypes, call_haplotypes, print_vcf, var_filter};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -304,13 +304,13 @@ fn main() {
 
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("Calling potential SNVs using pileup...");
-    let varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
+    let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
                                                            &fasta_file,
                                                            &interval,
                                                            min_alt_count,
                                                            min_alt_frac,
                                                            min_cov,
-                                                           max_cov,
+                                                           None,
                                                            min_mapq,
                                                            indels);
     eprintln!("{} potential SNVs identified.", varlist.lst.len());
@@ -335,21 +335,23 @@ fn main() {
                                                          extract_fragment_parameters,
                                                          alignment_parameters);
 
-    eprintln!("Calling genotypes/haplotypes...");
-    let hap: Option<Vec<char>> = match assemble_haps {
-        true => Some(call_haplotypes(&flist, &varlist)),
-        false => None,
+    eprintln!("Calling initial genotypes and assembling haplotypes...");
+    match assemble_haps {
+        true => {
+            call_haplotypes(&flist, &mut varlist);
+            for i in 0..flist.len() {
+                flist[i].assign_haps(&varlist);
+            }
+        },
+        false => {},
     };
 
-    match hap {
-        Some(ref h) => {
-            for i in 0..flist.len() {
-                flist[i].assign_haps(&h);
-            }
-        }
-        None => {}
-    }
+    eprintln!("Refining genotypes with haplotype information...");
+    call_genotypes(&flist, &mut varlist, &interval);
 
-    //eprintln!("Calling genotypes...");
-    call_genotypes(&flist, &varlist, &interval, &hap, output_vcf_file);
+    eprintln!("Adding filter flags based on depth and variant density...");
+    var_filter(&mut varlist, 50.0, 500, 10, max_cov);
+
+    eprintln!("Printing VCF file...");
+    print_vcf(&varlist, &interval, output_vcf_file);
 }

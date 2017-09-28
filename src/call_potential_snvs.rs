@@ -4,7 +4,7 @@ use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use bio::io::fasta;
 use std::char;
-use util::{GenomicInterval, PotentialVar, VarList, parse_target_names, u8_to_string};
+use util::{GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
 use rust_htslib::bam::pileup::Indel;
 use std::collections::HashMap;
 
@@ -26,7 +26,7 @@ pub fn call_potential_snvs(bam_file: &String,
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
 
-    let mut varlist: Vec<PotentialVar> = Vec::with_capacity(VARLIST_CAPACITY);
+    let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
     // pileup over all covered sites
     let mut ref_seq: Vec<u8> = vec![];
@@ -49,20 +49,28 @@ pub fn call_potential_snvs(bam_file: &String,
         &None => bam.pileup(),
     };
 
+    let mut next_valid_pos = 0;
+
     for p in bam_pileup {
+
         let pileup = p.unwrap();
 
         let tid: usize = pileup.tid() as usize;
 
         if tid != prev_tid {
             fasta.read_all(&target_names[tid], &mut ref_seq).expect("Failed to read fasta sequence record.");
+            next_valid_pos = 0;
+        }
+
+        // this is specifically to avoid having a variant inside a previous variant's deletion.
+        if pileup.pos() < next_valid_pos {
+            continue;
         }
 
         //let mut counts = [0; 5]; // A,C,G,T,N
         let mut counts: HashMap<(String, String), usize> = HashMap::new();
         // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
         let mut depth: usize = 0;
-
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
             let record = alignment.record();
@@ -74,9 +82,10 @@ pub fn call_potential_snvs(bam_file: &String,
                 continue;
             }
 
+            depth += 1;
+
             if !alignment.is_del() && !alignment.is_refskip() {
 
-                depth += 1;
                 let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
 
                 let ref_allele;
@@ -152,6 +161,8 @@ pub fn call_potential_snvs(bam_file: &String,
 
         let alt_frac: f32 = (max_count as f32) / (depth as f32) ; //(max_count as f32) / (base_cov as f32);
 
+        next_valid_pos = pileup.pos()+1;
+
         if !ref_allele.contains("N") && !var_allele.contains("N") &&
             (ref_allele.clone(), var_allele.clone()) !=
                 (ref_base_str.clone(), ref_base_str.clone()) &&
@@ -160,15 +171,24 @@ pub fn call_potential_snvs(bam_file: &String,
                 max_count >= INDEL_MIN_COUNT && alt_frac >= INDEL_MIN_FRAC) {
 
             let tid: usize = pileup.tid() as usize;
-            let new_var = PotentialVar {
+            let new_var = Var {
                 ix: 0,
                 // this will be set automatically
                 chrom: target_names[tid].clone(),
                 pos0: pileup.pos() as usize,
-                ref_allele: ref_allele,
-                var_allele: var_allele,
-                dp: depth
+                ref_allele: ref_allele.clone(),
+                var_allele: var_allele.clone(),
+                dp: depth,
+                ra: 0,
+                aa: 0,
+                qual: 0.0,
+                filter: ".".to_string(),
+                genotype: "./.".to_string(),
+                gq: 0.0
             };
+
+            // we don't want potential SNVs that are inside a deletion, for instance.
+            next_valid_pos = pileup.pos() + ref_allele.len() as u32;
 
             varlist.push(new_var);
         }
