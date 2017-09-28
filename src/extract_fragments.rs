@@ -416,7 +416,7 @@ pub fn find_anchors(bam_record: &Record,
 
 fn extract_var_cluster(read_seq: &Vec<char>,
                        ref_seq: &Vec<char>,
-                       var_cluster: Vec<PotentialVar>,
+                       var_cluster: Vec<Var>,
                        anchors: AnchorPositions,
                        extract_params: ExtractFragmentParameters,
                        align_params: AlignmentParameters)
@@ -563,7 +563,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 }
 
 pub fn extract_fragment(bam_record: &Record,
-                        vars: Vec<PotentialVar>,
+                        vars: Vec<Var>,
                         ref_seq: &Vec<char>,
                         target_names: &Vec<String>,
                         extract_params: ExtractFragmentParameters,
@@ -583,11 +583,11 @@ pub fn extract_fragment(bam_record: &Record,
         calls: vec![],
     };
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
-    let mut cluster_lst: Vec<Vec<PotentialVar>> = vec![];
+    let mut cluster_lst: Vec<Vec<Var>> = vec![];
 
     {
         // populate cluster_lst with variant clusters
-        let mut var_cluster: Vec<PotentialVar> = vec![];
+        let mut var_cluster: Vec<Var> = vec![];
 
         // generate clusters of SNVs that should be considered
         for var in vars {
