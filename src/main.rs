@@ -6,6 +6,7 @@ extern crate rust_htslib;
 #[macro_use]
 extern crate quick_error;
 extern crate core;
+extern crate chrono;
 
 mod haplotype_assembly;
 mod call_potential_snvs;
@@ -15,6 +16,7 @@ mod realignment;
 mod util;
 //mod de_bruijn;
 use clap::{Arg, App};
+use chrono::prelude::*;
 
 use call_genotypes::{call_genotypes, call_haplotypes, print_vcf, var_filter};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string};
@@ -302,8 +304,10 @@ fn main() {
         }
     };
 
+    let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
     //let bam_file: String = "test_data/test.bam".to_string();
-    eprintln!("Calling potential SNVs using pileup...");
+    eprintln!("{} Calling potential SNVs using pileup...",print_time());
     let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
                                                            &fasta_file,
                                                            &interval,
@@ -313,7 +317,7 @@ fn main() {
                                                            None,
                                                            min_mapq,
                                                            indels);
-    eprintln!("{} potential SNVs identified.", varlist.lst.len());
+    eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq: min_mapq,
@@ -327,7 +331,7 @@ fn main() {
         max_window_length: max_window_length,
     };
 
-    eprintln!("Generating condensed read data for SNVs...");
+    eprintln!("{} Generating condensed read data for SNVs...",print_time());
     let mut flist = extract_fragments::extract_fragments(&bamfile_name,
                                                          &fasta_file,
                                                          &varlist,
@@ -335,7 +339,7 @@ fn main() {
                                                          extract_fragment_parameters,
                                                          alignment_parameters);
 
-    eprintln!("Calling initial genotypes and assembling haplotypes...");
+    eprintln!("{} Calling initial genotypes and assembling haplotypes...", print_time());
     match assemble_haps {
         true => {
             call_haplotypes(&flist, &mut varlist);
@@ -346,12 +350,12 @@ fn main() {
         false => {},
     };
 
-    eprintln!("Refining genotypes with haplotype information...");
+    eprintln!("{} Refining genotypes with haplotype information...",print_time());
     call_genotypes(&flist, &mut varlist, &interval);
 
-    eprintln!("Adding filter flags based on depth and variant density...");
+    eprintln!("{} Adding filter flags based on depth and variant density...",print_time());
     var_filter(&mut varlist, 50.0, 500, 10, max_cov);
 
-    eprintln!("Printing VCF file...");
+    eprintln!("{} Printing VCF file...",print_time());
     print_vcf(&varlist, &interval, output_vcf_file);
 }
