@@ -174,6 +174,7 @@ pub fn call_potential_snvs(bam_file: &String,
                 pos0: pileup.pos() as usize,
                 ref_allele: ref_allele,
                 var_allele: var_allele,
+                dp: pileup.depth() as usize
             };
 
             varlist.push(new_var);

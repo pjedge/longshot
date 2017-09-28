@@ -1,4 +1,3 @@
-
 use std::ascii::AsciiExt;
 use std::collections::HashMap;
 use bio::stats::{LogProb, Prob};
@@ -11,12 +10,10 @@ static INDEX_FREQ: usize = 1000;
 pub fn parse_region_string(region_string: Option<&str>,
                            bamfile_name: &String)
                            -> Option<GenomicInterval> {
-
     let bam = bam::Reader::from_path(bamfile_name).unwrap();
 
     match region_string {
         Some(r) if r.contains(":") && r.contains("-") => {
-
             let split1: Vec<&str> = r.split(":").collect();
             if split1.len() != 2 {
                 panic!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
@@ -41,10 +38,10 @@ pub fn parse_region_string(region_string: Option<&str>,
             }
 
             Some(GenomicInterval {
-                     chrom: iv_chrom,
-                     start_pos: iv_start,
-                     end_pos: iv_end - 1,
-                 })
+                chrom: iv_chrom,
+                start_pos: iv_start,
+                end_pos: iv_end - 1,
+            })
         }
         Some(r) => {
             let r_str = r.to_string();
@@ -61,10 +58,10 @@ pub fn parse_region_string(region_string: Option<&str>,
 
             let tlen = bam.header().target_len(tid).unwrap();
             Some(GenomicInterval {
-                     chrom: r_str,
-                     start_pos: 0,
-                     end_pos: tlen - 1,
-                 })
+                chrom: r_str,
+                start_pos: 0,
+                end_pos: tlen - 1,
+            })
         }
         None => None,
     }
@@ -72,9 +69,12 @@ pub fn parse_region_string(region_string: Option<&str>,
 
 #[derive(Clone)]
 pub struct GenomicInterval {
-    pub chrom: String, // chromosome name
-    pub start_pos: u32, // start of interval
-    pub end_pos: u32, // end of interval (inclusive)
+    pub chrom: String,
+    // chromosome name
+    pub start_pos: u32,
+    // start of interval
+    pub end_pos: u32,
+    // end of interval (inclusive)
 }
 
 #[derive(Clone, Copy)]
@@ -151,7 +151,6 @@ pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
                       c);
             v.push('N');
         }
-
     }
     v
 }
@@ -177,9 +176,12 @@ pub fn parse_target_names(bam_file: &String) -> Vec<String> {
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub var_ix: usize, // index into variant list
-    pub allele: char, // allele call
-    pub qual: LogProb, // LogProb probability the call is an error
+    pub var_ix: usize,
+    // index into variant list
+    pub allele: char,
+    // allele call
+    pub qual: LogProb,
+    // LogProb probability the call is an error
     pub p_hap1: LogProb,
     pub p_hap2: LogProb,
 }
@@ -233,17 +235,18 @@ impl Fragment {
             self.calls[i].p_hap1 = post_hap1;
             self.calls[i].p_hap2 = post_hap2;
         }
-
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PotentialVar {
-    pub ix: usize, // index of this variant in the global var list
+    pub ix: usize,
+    // index of this variant in the global var list
     pub chrom: String,
     pub pos0: usize,
     pub ref_allele: String,
-    pub var_allele: String, 
+    pub var_allele: String,
+    pub dp: usize // depth of coverage
     //pub pileup: Option(Vec<PileupElement>),
 }
 
@@ -285,7 +288,6 @@ impl VarList {
         // for every chrom, iterate up to its last potential variant and create an index that
         // returns the lst index of the next SNV for some position mod 1000
         for (chrom, max_pos) in &max_positions {
-
             let mut v: Vec<usize> = vec![];
             // the first variant after position 0 is the first variant on the chromosome
             let e = match first_ix.get(chrom) {
@@ -318,7 +320,6 @@ impl VarList {
     }
 
     pub fn get_variants_range(&self, interval: GenomicInterval) -> (Vec<PotentialVar>) {
-
         // vector of variants to fill and return
         let mut vlst: Vec<PotentialVar> = vec![];
         // get the varlist index of a nearby position on the left
@@ -326,10 +327,10 @@ impl VarList {
         let index_pos = (interval.start_pos as usize) / INDEX_FREQ;
 
         if index_pos >=
-           self.ix
-               .get(&interval.chrom)
-               .unwrap()
-               .len() {
+            self.ix
+                .get(&interval.chrom)
+                .unwrap()
+                .len() {
             return vlst;
         }
 
@@ -352,116 +353,130 @@ mod tests {
     fn generate_test_lst1() -> VarList {
         let mut lst: Vec<PotentialVar> = vec![];
         lst.push(PotentialVar {
-                     ix: 0,
-                     chrom: "chr1".to_string(),
-                     pos0: 5,
-                     ref_allele: "A".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 0,
+            chrom: "chr1".to_string(),
+            pos0: 5,
+            ref_allele: "A".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 1,
-                     chrom: "chr1".to_string(),
-                     pos0: 1000,
-                     ref_allele: "T".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 1,
+            chrom: "chr1".to_string(),
+            pos0: 1000,
+            ref_allele: "T".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 2,
-                     chrom: "chr1".to_string(),
-                     pos0: 2005,
-                     ref_allele: "T".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 2,
+            chrom: "chr1".to_string(),
+            pos0: 2005,
+            ref_allele: "T".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 3,
-                     chrom: "chr1".to_string(),
-                     pos0: 2900,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 3,
+            chrom: "chr1".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 4,
-                     chrom: "chr1".to_string(),
-                     pos0: 6000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 4,
+            chrom: "chr1".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 5,
-                     chrom: "chr1".to_string(),
-                     pos0: 10000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 5,
+            chrom: "chr1".to_string(),
+            pos0: 10000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 6,
-                     chrom: "chr2".to_string(),
-                     pos0: 5,
-                     ref_allele: "A".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 6,
+            chrom: "chr2".to_string(),
+            pos0: 5,
+            ref_allele: "A".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 7,
-                     chrom: "chr2".to_string(),
-                     pos0: 1000,
-                     ref_allele: "T".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 7,
+            chrom: "chr2".to_string(),
+            pos0: 1000,
+            ref_allele: "T".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 8,
-                     chrom: "chr2".to_string(),
-                     pos0: 2005,
-                     ref_allele: "T".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 8,
+            chrom: "chr2".to_string(),
+            pos0: 2005,
+            ref_allele: "T".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 9,
-                     chrom: "chr2".to_string(),
-                     pos0: 2900,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 9,
+            chrom: "chr2".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 10,
-                     chrom: "chr2".to_string(),
-                     pos0: 6000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 10,
+            chrom: "chr2".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 11,
-                     chrom: "chr2".to_string(),
-                     pos0: 10000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 11,
+            chrom: "chr2".to_string(),
+            pos0: 10000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 12,
-                     chrom: "chr3".to_string(),
-                     pos0: 20200,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 12,
+            chrom: "chr3".to_string(),
+            pos0: 20200,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 13,
-                     chrom: "chr3".to_string(),
-                     pos0: 25100,
-                     ref_allele: "A".to_string(),
-                     var_allele: "C".to_string(),
-                 });
+            ix: 13,
+            chrom: "chr3".to_string(),
+            pos0: 25100,
+            ref_allele: "A".to_string(),
+            var_allele: "C".to_string(),
+            dp: 40
+        });
         lst.push(PotentialVar {
-                     ix: 14,
-                     chrom: "chr3".to_string(),
-                     pos0: 30400,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 14,
+            chrom: "chr3".to_string(),
+            pos0: 30400,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         VarList::new(lst)
     }
 
     #[test]
     fn test_varlist_get_variants_range1() {
-
         let vlst = generate_test_lst1();
         let c = "chr1".to_string();
         let p1 = 2500;
@@ -475,26 +490,27 @@ mod tests {
 
         let mut exp: Vec<PotentialVar> = vec![];
         exp.push(PotentialVar {
-                     ix: 3,
-                     chrom: "chr1".to_string(),
-                     pos0: 2900,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 3,
+            chrom: "chr1".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         exp.push(PotentialVar {
-                     ix: 4,
-                     chrom: "chr1".to_string(),
-                     pos0: 6000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 4,
+            chrom: "chr1".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
 
         assert_eq!(vars, exp);
     }
 
     #[test]
     fn test_varlist_get_variants_range2() {
-
         let vlst = generate_test_lst1();
         let c = "chr2".to_string();
         let p1 = 0;
@@ -508,40 +524,43 @@ mod tests {
 
         let mut exp: Vec<PotentialVar> = vec![];
         exp.push(PotentialVar {
-                     ix: 6,
-                     chrom: "chr2".to_string(),
-                     pos0: 5,
-                     ref_allele: "A".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 6,
+            chrom: "chr2".to_string(),
+            pos0: 5,
+            ref_allele: "A".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         exp.push(PotentialVar {
-                     ix: 7,
-                     chrom: "chr2".to_string(),
-                     pos0: 1000,
-                     ref_allele: "T".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 7,
+            chrom: "chr2".to_string(),
+            pos0: 1000,
+            ref_allele: "T".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         exp.push(PotentialVar {
-                     ix: 8,
-                     chrom: "chr2".to_string(),
-                     pos0: 2005,
-                     ref_allele: "T".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 8,
+            chrom: "chr2".to_string(),
+            pos0: 2005,
+            ref_allele: "T".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
         exp.push(PotentialVar {
-                     ix: 9,
-                     chrom: "chr2".to_string(),
-                     pos0: 2900,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 9,
+            chrom: "chr2".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
 
         assert_eq!(vars, exp);
     }
 
     #[test]
     fn test_varlist_get_variants_range3() {
-
         let vlst = generate_test_lst1();
         let c = "chr2".to_string();
         let p1 = 6000;
@@ -555,26 +574,27 @@ mod tests {
 
         let mut exp: Vec<PotentialVar> = vec![];
         exp.push(PotentialVar {
-                     ix: 10,
-                     chrom: "chr2".to_string(),
-                     pos0: 6000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 10,
+            chrom: "chr2".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
         exp.push(PotentialVar {
-                     ix: 11,
-                     chrom: "chr2".to_string(),
-                     pos0: 10000,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 11,
+            chrom: "chr2".to_string(),
+            pos0: 10000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
 
         assert_eq!(vars, exp);
     }
 
     #[test]
     fn test_varlist_get_variants_range4() {
-
         let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 20100;
@@ -588,19 +608,19 @@ mod tests {
 
         let mut exp: Vec<PotentialVar> = vec![];
         exp.push(PotentialVar {
-                     ix: 12,
-                     chrom: "chr3".to_string(),
-                     pos0: 20200,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 12,
+            chrom: "chr3".to_string(),
+            pos0: 20200,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
 
         assert_eq!(vars, exp);
     }
 
     #[test]
     fn test_varlist_get_variants_range5() {
-
         let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 20200;
@@ -614,19 +634,19 @@ mod tests {
 
         let mut exp: Vec<PotentialVar> = vec![];
         exp.push(PotentialVar {
-                     ix: 12,
-                     chrom: "chr3".to_string(),
-                     pos0: 20200,
-                     ref_allele: "C".to_string(),
-                     var_allele: "G".to_string(),
-                 });
+            ix: 12,
+            chrom: "chr3".to_string(),
+            pos0: 20200,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40
+        });
 
         assert_eq!(vars, exp);
     }
 
     #[test]
     fn test_varlist_get_variants_range6() {
-
         let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 25000;
@@ -640,26 +660,27 @@ mod tests {
 
         let mut exp: Vec<PotentialVar> = vec![];
         exp.push(PotentialVar {
-                     ix: 13,
-                     chrom: "chr3".to_string(),
-                     pos0: 25100,
-                     ref_allele: "A".to_string(),
-                     var_allele: "C".to_string(),
-                 });
+            ix: 13,
+            chrom: "chr3".to_string(),
+            pos0: 25100,
+            ref_allele: "A".to_string(),
+            var_allele: "C".to_string(),
+            dp: 40
+        });
         exp.push(PotentialVar {
-                     ix: 14,
-                     chrom: "chr3".to_string(),
-                     pos0: 30400,
-                     ref_allele: "C".to_string(),
-                     var_allele: "A".to_string(),
-                 });
+            ix: 14,
+            chrom: "chr3".to_string(),
+            pos0: 30400,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40
+        });
 
         assert_eq!(vars, exp);
     }
 
     #[test]
     fn test_varlist_get_variants_range7() {
-
         let vlst = generate_test_lst1();
         let c = "chr3".to_string();
         let p1 = 100000;
@@ -674,5 +695,4 @@ mod tests {
         let exp: Vec<PotentialVar> = vec![];
         assert_eq!(vars, exp);
     }
-
 }
