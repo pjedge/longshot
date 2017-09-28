@@ -316,6 +316,7 @@ fn main() {
     eprintln!("{} potential SNVs identified.", varlist.lst.len());
 
     let extract_fragment_parameters = ExtractFragmentParameters {
+        min_mapq: min_mapq,
         numerically_stable_alignment: numerically_stable_alignment,
         band_width: band_width,
         anchor_length: anchor_length,

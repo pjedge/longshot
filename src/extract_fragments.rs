@@ -1,4 +1,3 @@
-
 use std::collections::HashSet;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
@@ -12,16 +11,15 @@ use bio::io::fasta;
 use realignment;
 
 use util::GenomicInterval;
+
 static VERBOSE: bool = false;
 
 // returns true if kmers in seq are unique, else false
 fn check_kmers_unique(seq: &Vec<char>, k: usize) -> (bool) {
-
     //seq_str = seq.iter().cloned().collect();
     let mut kmers: HashSet<&[char]> = HashSet::new();
 
     for i in 0..(seq.len() - k + 1) {
-
         let kmer = &seq[i..(i + k)]; // (&seq[i..(i+k)]).iter().cloned().collect();
         //kmer.clone_from_slice(&seq[i..(i + k)]);
         if kmers.contains(kmer) {
@@ -98,48 +96,46 @@ pub fn create_augmented_cigarlist(refpos: u32,
     for (i, c) in cigar_string_view.iter().enumerate() {
         match c {
             &Cigar::Match(_) |
-            &Cigar::Diff(_)  |
+            &Cigar::Diff(_) |
             &Cigar::Equal(_) |
             // this is unexpected, but bwa + GATK indel realignment can produce insertions
             // before matching positions
             &Cigar::Ins(_) => {
                 j = i;
                 break;
-            },
+            }
             &Cigar::SoftClip(_) => {
                 j = i;
                 break;
-            },
+            }
             &Cigar::Del(_) => {
                 return Err(CigarOrAnchorError::UnexpectedOperation(
                     "'deletion' (D) found before any operation describing read sequence".to_owned()
                 ));
-            },
+            }
             &Cigar::Back(_) => {
                 return Err(CigarOrAnchorError::UnsupportedOperation(
                     "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
                 ));
-            },
+            }
             &Cigar::RefSkip(_) => {
                 return Err(CigarOrAnchorError::UnexpectedOperation(
                     "'reference skip' (N) found before any operation describing read sequence".to_owned()
                 ));
-            },
-            &Cigar::HardClip(_) if i > 0 && i < cigar_string_view.len()-1 => {
+            }
+            &Cigar::HardClip(_) if i > 0 && i < cigar_string_view.len() - 1 => {
                 return Err(CigarOrAnchorError::UnexpectedOperation(
                     "'hard clip' (H) found in between operations, contradicting SAMv1 spec that hard clips can only be at the ends of reads".to_owned()
                 ));
-            },
+            }
             // if we have reached the end of the CigarString with only pads and hard clips, we have no read position matching the variant
-            &Cigar::Pad(_) | &Cigar::HardClip(_) if i == cigar_string_view.len()-1 => return Ok(cigar_list),
+            &Cigar::Pad(_) | &Cigar::HardClip(_) if i == cigar_string_view.len() - 1 => return Ok(cigar_list),
             // skip leading HardClips and Pads, as they consume neither read sequence nor reference sequence
             &Cigar::Pad(_) | &Cigar::HardClip(_) => ()
         }
     }
 
     while j < cigar_string_view.len() {
-
-
         // append CigarPos to list (contains cigar op, ref position, read position)
         match &cigar_string_view[j] {
             &Cigar::Match(_) |
@@ -150,10 +146,10 @@ pub fn create_augmented_cigarlist(refpos: u32,
             &Cigar::RefSkip(_) => {
                 // push the current cigar operation, ref position, and query position onto the list
                 cigar_list.push(CigarPos {
-                                    cig: cigar_string_view[j].clone(),
-                                    ref_pos: rpos,
-                                    read_pos: qpos,
-                                });
+                    cig: cigar_string_view[j].clone(),
+                    ref_pos: rpos,
+                    read_pos: qpos,
+                });
             }
             &Cigar::SoftClip(_) |
             &Cigar::Pad(_) |
@@ -215,19 +211,17 @@ pub fn find_anchors(bam_record: &Record,
                     target_names: &Vec<String>,
                     extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
-
     let anchor_k = extract_params.anchor_k;
     let min_window_length = extract_params.min_window_length;
     let max_window_length = extract_params.max_window_length;
 
     if var_interval.chrom != target_names[bam_record.tid() as usize] ||
-       (var_interval.start_pos as i32) >=
-       bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
-       (var_interval.end_pos as i32) < bam_record.pos() {
-
+        (var_interval.start_pos as i32) >=
+            bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
+        (var_interval.end_pos as i32) < bam_record.pos() {
         return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
-                "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
-            ));
+            "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
+        ));
     }
 
     let bam_cig: CigarStringView = bam_record.cigar();
@@ -258,7 +252,6 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Ins(l) |
             Cigar::Del(l) |
             Cigar::RefSkip(l) => {
-
                 if contains_pos(var_interval.start_pos, cigarpos.ref_pos, l) {
                     left_ix = i;
                 }
@@ -294,25 +287,23 @@ pub fn find_anchors(bam_record: &Record,
                     let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
-
+                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_left = true;
                         break;
                     }
                 } else if !seen_indel_left &&
-                          cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length {
+                    cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length {
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.start_pos
                     // the var_interval.start_pos we are trying to anchor is just inside one huge match
                     left_anchor_ref = var_interval.start_pos - anchor_length;
                     left_anchor_read = cigarpos_list[i].read_pos +
-                                       (var_interval.start_pos - anchor_length -
-                                        cigarpos_list[i].ref_pos);
+                        (var_interval.start_pos - anchor_length -
+                            cigarpos_list[i].ref_pos);
                     let l: usize = left_anchor_ref as usize - anchor_k;
                     let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
-
+                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_left = true;
                         break;
                     }
@@ -350,30 +341,30 @@ pub fn find_anchors(bam_record: &Record,
                 if seen_indel_right && match_len_right > anchor_length {
                     // we have found a sufficiently long match and it's NOT the cigar op containing var_interval.end_pos
                     right_anchor_ref = cigarpos_list[i].ref_pos + l - match_len_right +
-                                       anchor_length;
+                        anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos + l - match_len_right +
-                                        anchor_length;
+                        anchor_length;
                     let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
                     let r: usize = right_anchor_ref as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
+                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_right = true;
                         break;
                     }
                 } else if !seen_indel_right &&
-                          cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length {
+                    cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length {
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.end_pos
                     // the var_interval.end_pos we are trying to anchor is just inside one huge match
                     right_anchor_ref = var_interval.end_pos + anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos +
-                                        (var_interval.end_pos + anchor_length -
-                                         cigarpos_list[i].ref_pos);
+                        (var_interval.end_pos + anchor_length -
+                            cigarpos_list[i].ref_pos);
                     let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
                     let r: usize = right_anchor_ref as usize + anchor_k;
 
                     if l > 0 && r < ref_seq.len() &&
-                       check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
+                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_right = true;
                         break;
                     }
@@ -404,24 +395,23 @@ pub fn find_anchors(bam_record: &Record,
     let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
     let read_window_len = (right_anchor_read - left_anchor_read) as usize;
     if ref_window_len < min_window_length || read_window_len < min_window_length ||
-       ref_window_len > max_window_length || read_window_len > max_window_length {
+        ref_window_len > max_window_length || read_window_len > max_window_length {
         return Ok(None);
     }
 
     // return none if any of the anchors are out of bounds
     if right_anchor_ref as usize >= ref_seq.len() ||
-       right_anchor_read as usize >= bam_record.seq().len() {
+        right_anchor_read as usize >= bam_record.seq().len() {
         return Ok(None);
     }
 
     // return anchor pos
     Ok(Some(AnchorPositions {
-                left_anchor_ref: left_anchor_ref,
-                right_anchor_ref: right_anchor_ref,
-                left_anchor_read: left_anchor_read,
-                right_anchor_read: right_anchor_read,
-            }))
-
+        left_anchor_ref: left_anchor_ref,
+        right_anchor_ref: right_anchor_ref,
+        left_anchor_read: left_anchor_read,
+        right_anchor_read: right_anchor_read,
+    }))
 }
 
 fn extract_var_cluster(read_seq: &Vec<char>,
@@ -431,7 +421,6 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                        extract_params: ExtractFragmentParameters,
                        align_params: AlignmentParameters)
                        -> Vec<FragCall> {
-
     let mut calls: Vec<FragCall> = vec![];
 
     //let ref_window = ref_seq[(anchors.left_anchor_ref as usize)..
@@ -440,8 +429,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
     let read_window: Vec<char> = read_seq[(anchors.left_anchor_read as usize)..
-    (anchors.right_anchor_read as usize) + 1]
-            .to_vec();
+        (anchors.right_anchor_read as usize) + 1]
+        .to_vec();
 
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: usize = 0;
@@ -470,13 +459,10 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     }
 
 
-
     for hap in 0..n_haps {
-
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
         for var in 0..n_vars {
-
             while i < var_cluster[var].pos0 {
                 hap_window.push(ref_seq[i]);
                 i += 1;
@@ -538,7 +524,6 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     }
 
     for v in 0..n_vars {
-
         if in_hap(v, max_hap) {
             // the best haplotype has a '1' variant allele at this position
 
@@ -547,12 +532,14 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             let qual = allele_scores0[v] - score_total;
 
             calls.push(FragCall {
-                           var_ix: var_cluster[v].ix,
-                           allele: '1',
-                           qual: qual,
-                           p_hap1: LogProb::from(Prob(0.5)), // haplotype unknown at this time
-                           p_hap2: LogProb::from(Prob(0.5)), // haplotype unknown at this time
-                       });
+                var_ix: var_cluster[v].ix,
+                allele: '1',
+                qual: qual,
+                p_hap1: LogProb::from(Prob(0.5)),
+                // haplotype unknown at this time
+                p_hap2: LogProb::from(Prob(0.5)),
+                // haplotype unknown at this time
+            });
         } else {
             // the best haplotype has a '0' ref allele at this position
 
@@ -561,12 +548,14 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             let qual = allele_scores1[v] - score_total;
 
             calls.push(FragCall {
-                           var_ix: var_cluster[v].ix,
-                           allele: '0',
-                           qual: qual,
-                           p_hap1: LogProb::from(Prob(0.5)), // haplotype unknown at this time
-                           p_hap2: LogProb::from(Prob(0.5)), // haplotype unknown at this time
-                       });
+                var_ix: var_cluster[v].ix,
+                allele: '0',
+                qual: qual,
+                p_hap1: LogProb::from(Prob(0.5)),
+                // haplotype unknown at this time
+                p_hap2: LogProb::from(Prob(0.5)),
+                // haplotype unknown at this time
+            });
         }
     }
 
@@ -579,8 +568,13 @@ pub fn extract_fragment(bam_record: &Record,
                         target_names: &Vec<String>,
                         extract_params: ExtractFragmentParameters,
                         align_params: AlignmentParameters)
-                        -> Fragment {
+                        -> Option<Fragment> {
 
+    if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
+        bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
+        {
+            return None;
+        }
 
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname());
@@ -597,14 +591,12 @@ pub fn extract_fragment(bam_record: &Record,
 
         // generate clusters of SNVs that should be considered
         for var in vars {
-
             if var_cluster.len() == 0 ||
-               (var.pos0 - var_cluster[var_cluster.len() - 1].pos0 <
-                extract_params.short_hap_snv_distance &&
-                var_cluster.len() <= extract_params.short_hap_max_snvs) {
+                (var.pos0 - var_cluster[var_cluster.len() - 1].pos0 <
+                    extract_params.short_hap_snv_distance &&
+                    var_cluster.len() <= extract_params.short_hap_max_snvs) {
                 var_cluster.push(var);
             } else {
-
                 cluster_lst.push(var_cluster.clone());
                 var_cluster.clear();
                 var_cluster.push(var);
@@ -617,7 +609,6 @@ pub fn extract_fragment(bam_record: &Record,
     }
 
     for var_cluster in cluster_lst {
-
         let var_interval = GenomicInterval {
             chrom: target_names[bam_record.tid() as usize].clone(),
             start_pos: var_cluster[0].pos0 as u32,
@@ -630,7 +621,7 @@ pub fn extract_fragment(bam_record: &Record,
                            &ref_seq,
                            target_names,
                            extract_params)
-                      .expect("CIGAR or Anchor Error while finding anchor sequences.") {
+            .expect("CIGAR or Anchor Error while finding anchor sequences.") {
             Some(anchors) => {
                 for call in extract_var_cluster(&read_seq,
                                                 ref_seq,
@@ -647,7 +638,11 @@ pub fn extract_fragment(bam_record: &Record,
         }
     }
 
-    fragment
+    if fragment.calls.len() > 0 {
+        Some(fragment)
+    } else {
+        None
+    }
 }
 
 pub fn extract_fragments(bamfile_name: &String,
@@ -657,7 +652,6 @@ pub fn extract_fragments(bamfile_name: &String,
                          extract_params: ExtractFragmentParameters,
                          align_params: AlignmentParameters)
                          -> Vec<Fragment> {
-
     let t_names = parse_target_names(&bamfile_name);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
@@ -703,17 +697,19 @@ pub fn extract_fragments(bamfile_name: &String,
                                             &t_names,
                                             extract_params,
                                             align_params);
-                flist.push(frag);
+
+                match frag {
+                    Some(f) => {flist.push(f);}
+                    None => {}
+                }
 
                 prev_tid = tid;
-
             }
         }
         &None => {
             let bam = bam::Reader::from_path(bamfile_name).unwrap();
             for r in bam.records() {
                 let record = r.unwrap();
-
 
                 let tid: usize = record.tid() as usize;
                 let chrom: String = t_names[record.tid() as usize].clone();
@@ -743,10 +739,13 @@ pub fn extract_fragments(bamfile_name: &String,
                                             &t_names,
                                             extract_params,
                                             align_params);
-                flist.push(frag);
+
+                match frag {
+                    Some(f) => {flist.push(f);}
+                    None => {}
+                }
 
                 prev_tid = tid;
-
             }
         }
     };
@@ -758,7 +757,6 @@ pub fn extract_fragments(bamfile_name: &String,
 //************************************************************************************************
 // END OF RUST-HTSLIB BASED CODE *****************************************************************
 //************************************************************************************************
-
 
 
 #[cfg(test)]
@@ -822,5 +820,4 @@ mod tests {
         // check that overlap test returns true if we insert a 'C'
         test_check_kmers_helper("CCCCTGATCATGACCCC".to_string(), 5, true);
     }
-
 }
