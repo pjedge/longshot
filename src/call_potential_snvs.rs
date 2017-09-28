@@ -54,23 +54,14 @@ pub fn call_potential_snvs(bam_file: &String,
 
         let tid: usize = pileup.tid() as usize;
 
-        match max_coverage {
-            Some(cov) if pileup.depth() > cov => {
-                continue;
-            }
-            _ => {}
-        }
-
-        if pileup.depth() < min_coverage {
-            continue;
-        }
-
         if tid != prev_tid {
             fasta.read_all(&target_names[tid], &mut ref_seq).expect("Failed to read fasta sequence record.");
         }
 
         //let mut counts = [0; 5]; // A,C,G,T,N
         let mut counts: HashMap<(String, String), usize> = HashMap::new();
+        // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
+        let mut depth: usize = 0;
 
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
@@ -79,19 +70,14 @@ pub fn call_potential_snvs(bam_file: &String,
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
                 record.is_quality_check_failed() ||
-                record.is_duplicate() || record.is_supplementary() {
+                record.is_duplicate() {
                 continue;
             }
+
             if !alignment.is_del() && !alignment.is_refskip() {
+
+                depth += 1;
                 let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
-                //let b = match base {
-                //    'A' | 'a' => 0,
-                //    'C' | 'c' => 1,
-                //    'G' | 'g' => 2,
-                //    'T' | 't' => 3,
-                //    'N' | 'n' => 4,
-                //    _ => panic!("Invalid base read from BAM file."),
-                //};
 
                 let ref_allele;
                 let var_allele;
@@ -130,9 +116,17 @@ pub fn call_potential_snvs(bam_file: &String,
                     var_allele = base.to_string();
                 }
 
-                //counts[(ref)] += 1;
                 *counts.entry((ref_allele, var_allele)).or_insert(0) += 1;
             }
+        }
+
+        if depth < min_coverage as usize {
+            continue
+        }
+
+        match max_coverage {
+            Some(cov) if depth > cov as usize => {continue;}
+            _ => {}
         }
 
         //let mut var_allele = "N".to_string();
@@ -145,8 +139,8 @@ pub fn call_potential_snvs(bam_file: &String,
         // iterate over everything.
 
         for (&(ref r, ref v), &count) in &counts {
-            //eprintln!("{}, {}: {}", r, v, count);
-            let frac = (count as f32) / (pileup.depth() as f32);
+
+            let frac = (count as f32) / (depth as f32);
             if count > max_count as usize && (r, v) != (&ref_base_str, &ref_base_str) &&
                 (r.len() == 1 && v.len() == 1 ||
                     count >= INDEL_MIN_COUNT as usize && frac >= INDEL_MIN_FRAC) {
@@ -156,9 +150,7 @@ pub fn call_potential_snvs(bam_file: &String,
             }
         }
 
-        //eprintln!("--------------");
-
-        let alt_frac: f32 = (max_count as f32) / (pileup.depth() as f32); //(max_count as f32) / (base_cov as f32);
+        let alt_frac: f32 = (max_count as f32) / (depth as f32) ; //(max_count as f32) / (base_cov as f32);
 
         if !ref_allele.contains("N") && !var_allele.contains("N") &&
             (ref_allele.clone(), var_allele.clone()) !=
@@ -166,6 +158,7 @@ pub fn call_potential_snvs(bam_file: &String,
             (ref_allele.len() == 1 && var_allele.len() == 1 && max_count >= min_alt_count &&
                 alt_frac >= min_alt_frac ||
                 max_count >= INDEL_MIN_COUNT && alt_frac >= INDEL_MIN_FRAC) {
+
             let tid: usize = pileup.tid() as usize;
             let new_var = PotentialVar {
                 ix: 0,
@@ -174,7 +167,7 @@ pub fn call_potential_snvs(bam_file: &String,
                 pos0: pileup.pos() as usize,
                 ref_allele: ref_allele,
                 var_allele: var_allele,
-                dp: pileup.depth() as usize
+                dp: depth
             };
 
             varlist.push(new_var);
