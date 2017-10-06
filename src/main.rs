@@ -19,7 +19,7 @@ use clap::{Arg, App};
 use chrono::prelude::*;
 
 use call_genotypes::{call_genotypes, call_haplotypes, print_vcf, var_filter};
-use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string};
+use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     match_from_match: 0.89,
@@ -187,6 +187,11 @@ fn main() {
             .long("indels")
             .help("Call short indels.")
             .display_order(19))
+        .arg(Arg::with_name("Max alignment")
+            .short("x")
+            .long("max_alignment")
+            .help("Use max alignment algorithm rather than all-alignments algorithm.")
+            .display_order(20))
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -259,11 +264,26 @@ fn main() {
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
 
-    let numerically_stable_alignment = match input_args.occurrences_of("Fast alignment") {
-        0 => true,
-        1 => false,
+    let mut alignment_type = AlignmentType::NumericallyStableAllAlignment;
+
+    match input_args.occurrences_of("Fast alignment") {
+        0 => {},
+        1 => {alignment_type = AlignmentType::FastAllAlignment;},
         _ => {
-            panic!("Fast_alignment specified multiple times");
+            panic!("fast_alignment specified multiple times");
+        }
+    };
+
+    match input_args.occurrences_of("Max alignment") {
+        0 => {},
+        1 => {
+            if alignment_type == AlignmentType::FastAllAlignment {
+                panic!("Fast alignment and max alignment options are incompatible. The max alignment uses sums rather than pows/logs so it is already fast compared to default.");
+            }
+            alignment_type = AlignmentType::MaxAlignment;
+        },
+        _ => {
+            panic!("max_alignment specified multiple times");
         }
     };
 
@@ -321,7 +341,7 @@ fn main() {
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq: min_mapq,
-        numerically_stable_alignment: numerically_stable_alignment,
+        alignment_type: alignment_type,
         band_width: band_width,
         anchor_length: anchor_length,
         anchor_k: anchor_k,
