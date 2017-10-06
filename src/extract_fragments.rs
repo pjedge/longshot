@@ -10,8 +10,6 @@ use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use realignment;
 
-use util::GenomicInterval;
-
 static VERBOSE: bool = false;
 
 // returns true if kmers in seq are unique, else false
@@ -485,18 +483,24 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
 
         // we now want to score hap_window
-        let score: LogProb = match extract_params.numerically_stable_alignment {
-            true => {
+        let score: LogProb = match extract_params.alignment_type{
+            AlignmentType::NumericallyStableAllAlignment => {
                 realignment::sum_all_alignments_numerically_stable(&read_window,
                                                                    &hap_window,
                                                                    align_params.ln(),
                                                                    extract_params.band_width)
             }
-            false => {
+            AlignmentType::FastAllAlignment => {
                 realignment::sum_all_alignments(&read_window,
                                                 &hap_window,
                                                 align_params,
                                                 extract_params.band_width)
+            }
+            AlignmentType::MaxAlignment => {
+                realignment::max_alignment(&read_window,
+                                           &hap_window,
+                                           align_params.ln(),
+                                           extract_params.band_width)
             }
         };
 
