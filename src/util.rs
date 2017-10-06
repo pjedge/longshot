@@ -77,10 +77,17 @@ pub struct GenomicInterval {
     // end of interval (inclusive)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AlignmentType {
+    FastAllAlignment,
+    NumericallyStableAllAlignment,
+    MaxAlignment
+}
+
 #[derive(Clone, Copy)]
 pub struct ExtractFragmentParameters {
     pub min_mapq: u8,
-    pub numerically_stable_alignment: bool,
+    pub alignment_type: AlignmentType,
     pub band_width: usize,
     pub anchor_length: usize,
     pub anchor_k: usize,
