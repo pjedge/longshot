@@ -536,9 +536,11 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             let qual = allele_scores0[v] - score_total;
 
             calls.push(FragCall {
+                frag_ix: None,
                 var_ix: var_cluster[v].ix,
                 allele: '1',
                 qual: qual,
+                one_minus_qual: LogProb::ln_one_minus_exp(&qual),
                 p_hap1: LogProb::from(Prob(0.5)),
                 // haplotype unknown at this time
                 p_hap2: LogProb::from(Prob(0.5)),
@@ -552,9 +554,11 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             let qual = allele_scores1[v] - score_total;
 
             calls.push(FragCall {
+                frag_ix: None,
                 var_ix: var_cluster[v].ix,
                 allele: '0',
                 qual: qual,
+                one_minus_qual: LogProb::ln_one_minus_exp(&qual),
                 p_hap1: LogProb::from(Prob(0.5)),
                 // haplotype unknown at this time
                 p_hap2: LogProb::from(Prob(0.5)),
@@ -754,6 +758,13 @@ pub fn extract_fragments(bamfile_name: &String,
         }
     };
 
+    // label every fragment call with its index in the fragment list.
+    for i in 0..flist.len() {
+
+        for j in 0..flist[i].calls.len() {
+            flist[i].calls[j].frag_ix = Some(i);
+        }
+    }
 
     flist
 }

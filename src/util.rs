@@ -184,12 +184,11 @@ pub fn parse_target_names(bam_file: &String) -> Vec<String> {
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub var_ix: usize,
-    // index into variant list
-    pub allele: char,
-    // allele call
-    pub qual: LogProb,
-    // LogProb probability the call is an error
+    pub frag_ix: Option<usize>, // index into variant list
+    pub var_ix: usize, // index into variant list
+    pub allele: char, // allele call
+    pub qual: LogProb, // LogProb probability the call is an error
+    pub one_minus_qual: LogProb, // LogProb probability the call is correct
     pub p_hap1: LogProb,
     pub p_hap2: LogProb,
 }
@@ -262,6 +261,7 @@ pub struct Var {
     pub filter: String,
     pub genotype: String,
     pub gq: f64,
+    pub genotype_counts: [f64; 4],  // genotype counts from gibbs sampler
     //pub pileup: Option(Vec<PileupElement>),
 }
 

@@ -184,7 +184,8 @@ pub fn call_potential_snvs(bam_file: &String,
                 qual: 0.0,
                 filter: ".".to_string(),
                 genotype: "./.".to_string(),
-                gq: 0.0
+                gq: 0.0,
+                genotype_counts: [0 as f64; 4]
             };
 
             // we don't want potential SNVs that are inside a deletion, for instance.
