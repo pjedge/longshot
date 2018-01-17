@@ -193,13 +193,6 @@ fn main() {
             .long("max_alignment")
             .help("Use max alignment algorithm rather than all-alignments algorithm.")
             .display_order(165))
-        .arg(Arg::with_name("Gibbs iterations")
-            .short("G")
-            .long("gibbs_iterations")
-            .help("How many iterations of Gibbs Sampling to Perform for Genotyping (1e6).")
-            .default_value("1000000")
-        .display_order(210))
-
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -332,11 +325,6 @@ fn main() {
         }
     };
 
-    let gibbs_iterations: usize = input_args.value_of("Gibbs iterations")
-        .unwrap()
-        .parse::<usize>()
-        .expect("Argument gibbs_iterations must be a positive integer!");
-
     let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     //let bam_file: String = "test_data/test.bam".to_string();
@@ -384,7 +372,7 @@ fn main() {
     };
 
     eprintln!("{} Refining genotypes with haplotype information...",print_time());
-    call_genotypes(&flist, &mut varlist, &interval, gibbs_iterations);
+    call_genotypes(&flist, &mut varlist, &interval);
 
     eprintln!("{} Adding filter flags based on depth and variant density...",print_time());
     var_filter(&mut varlist, 50.0, 500, 10, max_cov);

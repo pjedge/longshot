@@ -210,7 +210,7 @@ pub fn find_anchors(bam_record: &Record,
                     extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
     let anchor_k = extract_params.anchor_k;
-    let min_window_length = extract_params.min_window_length;
+    //let min_window_length = extract_params.min_window_length;
     let max_window_length = extract_params.max_window_length;
 
     if var_interval.chrom != target_names[bam_record.tid() as usize] ||
@@ -288,6 +288,12 @@ pub fn find_anchors(bam_record: &Record,
                         check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_left = true;
                         break;
+
+                    } else if match_len_left > (max_window_length / 2) as u32{
+                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
+                        // once we've hit the window size limit
+                        found_anchor_left = true;
+                        break;
                     }
                 } else if !seen_indel_left &&
                     cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length {
@@ -302,6 +308,11 @@ pub fn find_anchors(bam_record: &Record,
 
                     if l > 0 && r < ref_seq.len() &&
                         check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
+                        found_anchor_left = true;
+                        break;
+                    } else if match_len_left > (max_window_length / 2) as u32{
+                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
+                        // once we've hit the window size limit
                         found_anchor_left = true;
                         break;
                     }
@@ -349,6 +360,11 @@ pub fn find_anchors(bam_record: &Record,
                         check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
                         found_anchor_right = true;
                         break;
+                    } else if match_len_right > (max_window_length / 2) as u32{
+                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
+                        // once we've hit the window size limit
+                        found_anchor_right = true;
+                        break;
                     }
                 } else if !seen_indel_right &&
                     cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length {
@@ -363,6 +379,11 @@ pub fn find_anchors(bam_record: &Record,
 
                     if l > 0 && r < ref_seq.len() &&
                         check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
+                        found_anchor_right = true;
+                        break;
+                    } else if match_len_right > (max_window_length / 2) as u32{
+                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
+                        // once we've hit the window size limit
                         found_anchor_right = true;
                         break;
                     }
@@ -385,17 +406,21 @@ pub fn find_anchors(bam_record: &Record,
         }
     }
 
+
     if !found_anchor_right {
         return Ok(None); // failed to find a right anchor
     }
 
+    // commented out 1/16/18 -- we no longer care if we found anchors or not,
+    // we're going to use them anyway.
+
     // return none if read window or ref window is larger or smaller than the allowed lengths
-    let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
-    let read_window_len = (right_anchor_read - left_anchor_read) as usize;
-    if ref_window_len < min_window_length || read_window_len < min_window_length ||
-        ref_window_len > max_window_length || read_window_len > max_window_length {
-        return Ok(None);
-    }
+    //let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
+    //let read_window_len = (right_anchor_read - left_anchor_read) as usize;
+    //if ref_window_len < min_window_length || read_window_len < min_window_length ||
+    //    ref_window_len > max_window_length || read_window_len > max_window_length {
+    //    return Ok(None);
+    //}
 
     // return none if any of the anchors are out of bounds
     if right_anchor_ref as usize >= ref_seq.len() ||

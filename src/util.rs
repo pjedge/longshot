@@ -261,7 +261,7 @@ pub struct Var {
     pub filter: String,
     pub genotype: String,
     pub gq: f64,
-    pub genotype_counts: [f64; 4],  // genotype counts from gibbs sampler
+    pub genotype_post: [LogProb; 4],  // genotype posteriors... [p00, p01, p10, p11]
     //pub pileup: Option(Vec<PileupElement>),
 }
 
