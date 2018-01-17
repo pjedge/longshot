@@ -7,6 +7,7 @@ use std::char;
 use util::{GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
 use rust_htslib::bam::pileup::Indel;
 use std::collections::HashMap;
+use bio::stats::{LogProb, Prob};
 
 static VARLIST_CAPACITY: usize = 1000000;
 static INDEL_MIN_COUNT: u32 = 6;
@@ -185,7 +186,7 @@ pub fn call_potential_snvs(bam_file: &String,
                 filter: ".".to_string(),
                 genotype: "./.".to_string(),
                 gq: 0.0,
-                genotype_counts: [0 as f64; 4]
+                genotype_post: [LogProb::from(Prob(0.25)); 4]
             };
 
             // we don't want potential SNVs that are inside a deletion, for instance.
