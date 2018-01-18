@@ -142,6 +142,20 @@ impl AlignmentParameters {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct AlignmentCounts {
+    pub match_from_match: usize,
+    pub mismatch_from_match: usize,
+    pub insertion_from_match: usize,
+    pub deletion_from_match: usize,
+    pub extend_from_insertion: usize,
+    pub match_from_insertion: usize,
+    pub mismatch_from_insertion: usize,
+    pub extend_from_deletion: usize,
+    pub match_from_deletion: usize,
+    pub mismatch_from_deletion: usize,
+}
+
 pub fn u8_to_string(u: &[u8]) -> String {
     String::from_utf8(u.to_vec()).unwrap()
 }

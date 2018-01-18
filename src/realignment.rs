@@ -197,7 +197,7 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
 pub fn max_alignment(v: &Vec<char>,
                      w: &Vec<char>,
                      params: LnAlignmentParameters,
-                     min_band_width: usize) -> (LogProb) {
+                     min_band_width: usize) -> LogProb {
 
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
