@@ -89,6 +89,7 @@ pub struct ExtractFragmentParameters {
     pub min_mapq: u8,
     pub alignment_type: AlignmentType,
     pub band_width: usize,
+    pub simple_anchors: bool,
     pub anchor_length: usize,
     pub anchor_k: usize,
     pub short_hap_snv_distance: usize,

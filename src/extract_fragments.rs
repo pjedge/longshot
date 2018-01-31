@@ -202,6 +202,57 @@ pub struct AnchorPositions {
     pub right_anchor_read: u32,
 }
 
+pub fn find_anchors_simple(bam_record: &Record,
+                    var_interval: GenomicInterval,
+                    _anchor_length: u32,
+                    ref_seq: &Vec<char>,
+                    target_names: &Vec<String>,
+                    _extract_params: ExtractFragmentParameters)
+                    -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
+
+    if var_interval.chrom != target_names[bam_record.tid() as usize] ||
+        (var_interval.start_pos as i32) >=
+            bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
+        (var_interval.end_pos as i32) < bam_record.pos() {
+        return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
+            "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
+        ));
+    }
+
+    let bam_cig: CigarStringView = bam_record.cigar();
+
+    let left_anchor_ref = var_interval.start_pos - 30;
+    let right_anchor_ref = var_interval.end_pos + 30;
+
+    let left_anchor_read: u32 = match bam_cig.read_pos(left_anchor_ref, false, true){
+        Ok(Some(pos)) => pos as u32,
+        _ => {return Ok(None);}
+    };
+
+    let right_anchor_read: u32 = match bam_cig.read_pos(right_anchor_ref, false, true){
+        Ok(Some(pos)) => pos as u32,
+        _ => {return Ok(None);}
+    };
+
+    // return none if any of the anchors are out of bounds
+    if right_anchor_ref as usize >= ref_seq.len() ||
+        right_anchor_read as usize >= bam_record.seq().len() {
+        return Ok(None);
+    }
+
+    if left_anchor_ref > right_anchor_ref || left_anchor_read > right_anchor_read {
+        return Ok(None);
+    }
+
+    // return anchor pos
+    Ok(Some(AnchorPositions {
+        left_anchor_ref: left_anchor_ref,
+        right_anchor_ref: right_anchor_ref,
+        left_anchor_read: left_anchor_read,
+        right_anchor_read: right_anchor_read,
+    }))
+}
+
 pub fn find_anchors(bam_record: &Record,
                     var_interval: GenomicInterval,
                     anchor_length: u32,
@@ -209,6 +260,7 @@ pub fn find_anchors(bam_record: &Record,
                     target_names: &Vec<String>,
                     extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
+
     let anchor_k = extract_params.anchor_k;
     //let min_window_length = extract_params.min_window_length;
     let max_window_length = extract_params.max_window_length;
@@ -648,7 +700,12 @@ pub fn extract_fragment(bam_record: &Record,
             end_pos: var_cluster[var_cluster.len() - 1].pos0 as u32,
         };
 
-        match find_anchors(bam_record,
+        let anchor_func = match extract_params.simple_anchors {
+            true => find_anchors_simple,
+            false => find_anchors
+        };
+
+        match anchor_func(bam_record,
                            var_interval,
                            10,
                            &ref_seq,
@@ -676,6 +733,7 @@ pub fn extract_fragment(bam_record: &Record,
     } else {
         None
     }
+
 }
 
 pub fn extract_fragments(bamfile_name: &String,
