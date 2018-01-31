@@ -119,6 +119,13 @@ fn main() {
                 .help("Minimum mapping quality to use a read.")
                 .display_order(90)
                 .default_value("30"))
+        .arg(Arg::with_name("Simple anchors")
+                .short("s")
+                .long("simple_anchors")
+                .value_name("bool")
+                .help("Simply select anchors that are 30 bps on either side of the variants.")
+                .display_order(102)
+                .default_value("false"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
@@ -233,6 +240,14 @@ fn main() {
         .parse::<u8>()
         .expect("Argument min_mapq must be an integer between 0 and 255!");
 
+    let simple_anchors = match input_args.occurrences_of("Simple anchors") {
+        0 => false,
+        1 => true,
+        _ => {
+            panic!("simple_anchors specified multiple times");
+        }
+    };
+
     let anchor_length: usize = input_args.value_of("Anchor length")
         .unwrap()
         .parse::<usize>()
@@ -344,6 +359,7 @@ fn main() {
         min_mapq: min_mapq,
         alignment_type: alignment_type,
         band_width: band_width,
+        simple_anchors: simple_anchors,
         anchor_length: anchor_length,
         anchor_k: anchor_k,
         short_hap_snv_distance: short_hap_snv_distance,
