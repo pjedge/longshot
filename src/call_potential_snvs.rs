@@ -4,27 +4,26 @@ use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use bio::io::fasta;
 use std::char;
-use util::{GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
+use util::{LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
 use rust_htslib::bam::pileup::Indel;
 use std::collections::HashMap;
 use bio::stats::{LogProb, Prob};
+use call_genotypes::{estimate_genotype_priors, calculate_genotypes_without_haplotypes};
 
 static VARLIST_CAPACITY: usize = 1000000;
-static INDEL_MIN_COUNT: u32 = 6;
-static INDEL_MIN_FRAC: f32 = 0.3;
 
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
                            interval: &Option<GenomicInterval>,
-                           min_alt_count: u32,
-                           min_alt_frac: f32,
-                           min_coverage: u32,
                            max_coverage: Option<u32>,
                            min_mapq: u8,
-                           call_indels: bool)
+                           ln_align_params: LnAlignmentParameters)
                            -> VarList {
+
+    let potential_snv_qual = LogProb::from(Prob(0.5));
     let target_names = parse_target_names(&bam_file);
 
+    let genotype_priors = estimate_genotype_priors();
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
@@ -68,10 +67,19 @@ pub fn call_potential_snvs(bam_file: &String,
             continue;
         }
 
+
+        let ref_base_str = (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+        if ref_base_str.contains("N") {
+            continue;
+        }
+
         //let mut counts = [0; 5]; // A,C,G,T,N
         let mut counts: HashMap<(String, String), usize> = HashMap::new();
         // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
         let mut depth: usize = 0;
+        let mut pileup_alleles: Vec<(String,String)> = vec![];
+
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
             let record = alignment.record();
@@ -87,52 +95,48 @@ pub fn call_potential_snvs(bam_file: &String,
 
             if !alignment.is_del() && !alignment.is_refskip() {
 
-                let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
-
                 let ref_allele;
                 let var_allele;
 
-                if call_indels {
-                    match alignment.indel() {
-                        Indel::None => {
-                            ref_allele =
-                                (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-                            var_allele = base.to_string();
-                        }
-                        Indel::Ins(l) => {
-                            ref_allele =
-                                (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                match alignment.indel() {
+                    Indel::None => {
+                        // unwrapping a None value here
+                        ref_allele =
+                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                        let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
+                        var_allele = base.to_string();
 
-                            let start = alignment.qpos().unwrap();
-                            let end = start + l as usize + 1;
-                            // don't want to convert whole seq to bytes...
-                            let mut var_char: Vec<char> = vec![];
-                            for i in start..end {
-                                var_char.push(alignment.record().seq()[i] as char);
-                            }
-                            var_allele = var_char.into_iter().collect::<String>();
+                    },
+                    Indel::Ins(l) => {
+                        ref_allele =
+                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+                        let start = alignment.qpos().unwrap();
+                        let end = start + l as usize + 1;
+                        // don't want to convert whole seq to bytes...
+                        let mut var_char: Vec<char> = vec![];
+                        for i in start..end {
+                            var_char.push(alignment.record().seq()[i] as char);
                         }
-                        Indel::Del(l) => {
-                            let start = pileup.pos() as usize;
-                            let end = (pileup.pos() + l + 1) as usize;
-                            ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
-                            var_allele = base.to_string();
-                            //(ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-                        }
-                    }
-                } else {
-                    ref_allele =
-                        (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-                    var_allele = base.to_string();
+                        var_allele = var_char.into_iter().collect::<String>();
+                    },
+                    Indel::Del(l) => {
+                        let start = pileup.pos() as usize;
+                        let end = (pileup.pos() + l + 1) as usize;
+                        ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
+                        var_allele = (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                        //(ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                    },
                 }
 
-                *counts.entry((ref_allele, var_allele)).or_insert(0) += 1;
+                pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
+                *counts.entry((ref_allele.clone(), var_allele.clone())).or_insert(0) += 1;
             }
         }
 
-        if depth < min_coverage as usize {
-            continue
-        }
+        //if depth < min_coverage as usize {
+        //    continue
+        //}
 
         match max_coverage {
             Some(cov) if depth > cov as usize => {continue;}
@@ -140,36 +144,97 @@ pub fn call_potential_snvs(bam_file: &String,
         }
 
         //let mut var_allele = "N".to_string();
-        let mut max_count: u32 = 0;
-        let mut ref_allele = 'N'.to_string();
-        let mut var_allele = 'N'.to_string();
-
-        let ref_base_str = (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+        let mut snv_max_count: u32 = 0;
+        let mut snv_ref_allele = 'N'.to_string();
+        let mut snv_var_allele = 'N'.to_string();
+        //let mut var_allele = "N".to_string();
+        let mut indel_max_count: u32 = 0;
+        let mut indel_ref_allele = 'N'.to_string();
+        let mut indel_var_allele = 'N'.to_string();
 
         // iterate over everything.
 
         for (&(ref r, ref v), &count) in &counts {
 
-            let frac = (count as f32) / (depth as f32);
-            if count > max_count as usize && (r, v) != (&ref_base_str, &ref_base_str) &&
-                (r.len() == 1 && v.len() == 1 ||
-                    count >= INDEL_MIN_COUNT as usize && frac >= INDEL_MIN_FRAC) {
-                max_count = count as u32;
-                ref_allele = r.clone();
-                var_allele = v.clone();
+            if r.contains("N") || v.contains("N") {
+                continue;
+            }
+
+            if r.len() == 1 && v.len() == 1 {
+                // potential SNV
+                if count > snv_max_count as usize && (r, v) != (&ref_base_str, &ref_base_str) {
+                    snv_max_count = count as u32;
+                    snv_ref_allele = r.clone();
+                    snv_var_allele = v.clone();
+                }
+            } else {
+                // potential indel
+                if count > indel_max_count as usize {
+                    indel_max_count = count as u32;
+                    indel_ref_allele = r.clone();
+                    indel_var_allele = v.clone();
+                }
             }
         }
 
-        let alt_frac: f32 = (max_count as f32) / (depth as f32) ; //(max_count as f32) / (base_cov as f32);
+        // vectors contain entries with (call, qual)
+        // call is '0' or '1' (or potentially '2'...)
+        // qual is a LogProb probability of miscall
+        let mut snv_pileup_calls: Vec<(char, LogProb)> = vec![];
+        let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
+
+        for (ref_allele, var_allele) in pileup_alleles {
+
+            if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
+                let qual = ln_align_params.mismatch_from_match;
+                snv_pileup_calls.push(('1', qual));
+            } else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
+                let qual = if indel_ref_allele.len() > indel_var_allele.len() {
+                    ln_align_params.deletion_from_match
+                } else {
+                    ln_align_params.insertion_from_match
+                };
+
+                indel_pileup_calls.push(('1', qual));
+            }
+
+            if (ref_allele.clone(), var_allele.clone()) == (ref_allele.clone(), ref_allele.clone()){
+                let qual = ln_align_params.mismatch_from_match;
+
+                snv_pileup_calls.push(('0', qual));
+                indel_pileup_calls.push(('0', qual));
+            }
+        }
+
+        // use a basic genotype likelihood calculation to call SNVs
+        let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
+            let (_snv_post00, snv_post01, snv_post11) = calculate_genotypes_without_haplotypes(&snv_pileup_calls, &genotype_priors, &snv_ref_allele, &snv_var_allele);
+            LogProb::ln_add_exp(snv_post01, snv_post11)
+        } else {
+            LogProb::ln_zero()
+        };
+
+        let indel_qual = if !indel_ref_allele.contains("N") && !indel_var_allele.contains("N") {
+            let (_indel_post00, indel_post01, indel_post11) = calculate_genotypes_without_haplotypes(&indel_pileup_calls, &genotype_priors, &indel_ref_allele, &indel_var_allele);
+            LogProb::ln_add_exp(indel_post01, indel_post11)
+        } else {
+            LogProb::ln_zero()
+        };
+
+        //println!("{} {}",*Prob::from(snv_qual),*Prob::from(indel_qual));
+
+        let (ref_allele, var_allele, qual) = if snv_qual > indel_qual {
+            (snv_ref_allele, snv_var_allele, snv_qual)
+        } else {
+            (indel_ref_allele, indel_var_allele, indel_qual)
+        };
 
         next_valid_pos = pileup.pos()+1;
 
-        if !ref_allele.contains("N") && !var_allele.contains("N") &&
+        if qual > potential_snv_qual &&
+            !ref_allele.contains("N") && !var_allele.contains("N") &&
             (ref_allele.clone(), var_allele.clone()) !=
-                (ref_base_str.clone(), ref_base_str.clone()) &&
-            (ref_allele.len() == 1 && var_allele.len() == 1 && max_count >= min_alt_count &&
-                alt_frac >= min_alt_frac ||
-                max_count >= INDEL_MIN_COUNT && alt_frac >= INDEL_MIN_FRAC) {
+                (ref_base_str.clone(), ref_base_str.clone()){
 
             let tid: usize = pileup.tid() as usize;
             let new_var = Var {

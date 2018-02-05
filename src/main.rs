@@ -19,7 +19,7 @@ mod util;
 use clap::{Arg, App};
 use chrono::prelude::*;
 
-use call_genotypes::{call_genotypes, call_haplotypes, print_vcf, var_filter};
+use call_genotypes::{call_genotypes, assemble_initial_haplotypes, print_vcf, var_filter};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -85,27 +85,6 @@ fn main() {
                 .help("Region in format <chrom> or <chrom:start-stop> in which to call variants.")
                 .display_order(40)
                 .takes_value(true))
-        .arg(Arg::with_name("Min alt count")
-                .short("a")
-                .long("min_alt_count")
-                .value_name("int")
-                .help("Minimum number of occurrences of a variant base in pileup to consider it as a potential SNV.")
-                .display_order(50)
-                .default_value("2"))
-        .arg(Arg::with_name("Min alt frac")
-                .short("A")
-                .long("min_alt_frac")
-                .value_name("float")
-                .help("Minimum fraction of variant base in pileup to consider it as a potential SNV.")
-                .display_order(60)
-                .default_value("0.125"))
-        .arg(Arg::with_name("Min coverage")
-                .short("c")
-                .long("min_cov")
-                .value_name("int")
-                .help("Minimum coverage to consider position as a potential SNV.")
-                .display_order(70)
-                .default_value("5"))
         .arg(Arg::with_name("Max coverage")
                 .short("C")
                 .long("max_cov")
@@ -154,13 +133,6 @@ fn main() {
                 .help("Cut off short haplotypes after this many SNVs. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
                 .display_order(130)
                 .default_value("5"))
-        .arg(Arg::with_name("Min window length")
-                .short("w")
-                .long("min_window")
-                .value_name("int")
-                .help("Ignore a variant/short haplotype if the realignment window for read or reference is smaller than w bases.")
-                .display_order(140)
-                .default_value("15"))
         .arg(Arg::with_name("Max window length")
                 .short("W")
                 .long("max_window")
@@ -193,7 +165,7 @@ fn main() {
         .arg(Arg::with_name("Indels")
             .short("i")
             .long("indels")
-            .help("Call short indels.")
+            .help("Report short indels -- called indels are wildly inaccurate but are used internally to avoid false SNVs.")
             .display_order(200))
         .arg(Arg::with_name("Max alignment")
             .short("x")
@@ -209,24 +181,7 @@ fn main() {
 
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
-
-    let min_alt_count: u32 = input_args.value_of("Min alt count")
-        .unwrap()
-        .parse::<u32>()
-        .expect("Argument min_alt_count must be a positive integer!");
-
-    let min_alt_frac: f32 = input_args.value_of("Min alt frac")
-        .unwrap()
-        .parse::<f32>()
-        .expect("Argument min_alt_frac must be a float!");
-
     // TODO check that min_alt_frac is between 0 and 1
-
-
-    let min_cov: u32 = input_args.value_of("Min coverage")
-        .unwrap()
-        .parse::<u32>()
-        .expect("Argument min_cov must be a positive integer!");
 
     let max_cov: Option<u32> = match input_args.value_of("Max coverage") {
         Some(cov) => {
@@ -269,11 +224,6 @@ fn main() {
         .unwrap()
         .parse::<usize>()
         .expect("Argument max_snvs must be a positive integer!");
-
-    let min_window_length: usize = input_args.value_of("Min window length")
-        .unwrap()
-        .parse::<usize>()
-        .expect("Argument min_window must be a positive integer!");
 
     let max_window_length: usize = input_args.value_of("Max window length")
         .unwrap()
@@ -347,12 +297,10 @@ fn main() {
     let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
                                                            &fasta_file,
                                                            &interval,
-                                                           min_alt_count,
-                                                           min_alt_frac,
-                                                           min_cov,
-                                                           None,
-                                                           min_mapq,
-                                                           indels);
+                                                               max_cov,
+                                                               min_mapq,
+                                                           alignment_parameters.ln());
+
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
     let extract_fragment_parameters = ExtractFragmentParameters {
@@ -364,12 +312,11 @@ fn main() {
         anchor_k: anchor_k,
         short_hap_snv_distance: short_hap_snv_distance,
         short_hap_max_snvs: short_hap_max_snvs,
-        min_window_length: min_window_length,
         max_window_length: max_window_length,
     };
 
     eprintln!("{} Generating condensed read data for SNVs...",print_time());
-    let mut flist = extract_fragments::extract_fragments(&bamfile_name,
+    let flist = extract_fragments::extract_fragments(&bamfile_name,
                                                          &fasta_file,
                                                          &varlist,
                                                          &interval,
@@ -379,10 +326,7 @@ fn main() {
     eprintln!("{} Calling initial genotypes and assembling haplotypes...", print_time());
     match assemble_haps {
         true => {
-            call_haplotypes(&flist, &mut varlist);
-            for i in 0..flist.len() {
-                flist[i].assign_haps(&varlist);
-            }
+            assemble_initial_haplotypes(&flist, &mut varlist);
         },
         false => {},
     };
@@ -394,5 +338,5 @@ fn main() {
     var_filter(&mut varlist, 50.0, 500, 10, max_cov);
 
     eprintln!("{} Printing VCF file...",print_time());
-    print_vcf(&varlist, &interval, output_vcf_file);
+    print_vcf(&varlist, &interval, indels, output_vcf_file);
 }
