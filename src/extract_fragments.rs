@@ -6,7 +6,7 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
-use bio::stats::{LogProb, Prob, PHREDProb};
+use bio::stats::{LogProb, PHREDProb};
 use bio::io::fasta;
 use realignment;
 
@@ -203,7 +203,8 @@ pub struct AnchorPositions {
 }
 
 pub fn find_anchors_simple(bam_record: &Record,
-                    var_interval: GenomicInterval,
+                           _cigarpos_list: &Vec<CigarPos>,
+                           var_interval: GenomicInterval,
                     _anchor_length: u32,
                     ref_seq: &Vec<char>,
                     target_names: &Vec<String>,
@@ -254,6 +255,7 @@ pub fn find_anchors_simple(bam_record: &Record,
 }
 
 pub fn find_anchors(bam_record: &Record,
+                    cigarpos_list: &Vec<CigarPos>,
                     var_interval: GenomicInterval,
                     anchor_length: u32,
                     ref_seq: &Vec<char>,
@@ -273,11 +275,6 @@ pub fn find_anchors(bam_record: &Record,
             "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
         ));
     }
-
-    let bam_cig: CigarStringView = bam_record.cigar();
-    let rpos: u32 = bam_record.pos() as u32;
-    let cigarpos_list: Vec<CigarPos> =
-        create_augmented_cigarlist(rpos, &bam_cig).expect("Error creating augmented cigarlist.");
 
     let mut left_anchor_ref: u32 = 0;
     let mut right_anchor_ref: u32 = 0;
@@ -617,11 +614,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 var_ix: var_cluster[v].ix,
                 allele: '1',
                 qual: qual,
-                one_minus_qual: LogProb::ln_one_minus_exp(&qual),
-                p_hap1: LogProb::from(Prob(0.5)),
-                // haplotype unknown at this time
-                p_hap2: LogProb::from(Prob(0.5)),
-                // haplotype unknown at this time
+                one_minus_qual: LogProb::ln_one_minus_exp(&qual)
             });
         } else {
             // the best haplotype has a '0' ref allele at this position
@@ -635,11 +628,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 var_ix: var_cluster[v].ix,
                 allele: '0',
                 qual: qual,
-                one_minus_qual: LogProb::ln_one_minus_exp(&qual),
-                p_hap1: LogProb::from(Prob(0.5)),
-                // haplotype unknown at this time
-                p_hap2: LogProb::from(Prob(0.5)),
-                // haplotype unknown at this time
+                one_minus_qual: LogProb::ln_one_minus_exp(&qual)
             });
         }
     }
@@ -648,6 +637,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 }
 
 pub fn extract_fragment(bam_record: &Record,
+                        cigarpos_list: &Vec<CigarPos>,
                         vars: Vec<Var>,
                         ref_seq: &Vec<char>,
                         target_names: &Vec<String>,
@@ -706,6 +696,7 @@ pub fn extract_fragment(bam_record: &Record,
         };
 
         match anchor_func(bam_record,
+                           cigarpos_list,
                            var_interval,
                            10,
                            &ref_seq,
@@ -773,6 +764,11 @@ pub fn extract_fragments(bamfile_name: &String,
                 let end_pos =
                     record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
 
+                let bam_cig: CigarStringView = record.cigar();
+                let cigarpos_list: Vec<CigarPos> =
+                    create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+
+
                 let interval = GenomicInterval {
                     chrom: chrom,
                     start_pos: start_pos as u32,
@@ -783,6 +779,7 @@ pub fn extract_fragments(bamfile_name: &String,
                 let read_vars = varlist.get_variants_range(interval);
 
                 let frag = extract_fragment(&record,
+                                            &cigarpos_list,
                                             read_vars,
                                             &ref_seq,
                                             &t_names,
@@ -821,10 +818,15 @@ pub fn extract_fragments(bamfile_name: &String,
                     end_pos: end_pos as u32,
                 };
 
+                let bam_cig: CigarStringView = record.cigar();
+                let cigarpos_list: Vec<CigarPos> =
+                    create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+
                 // get the list of variants that overlap this read
                 let read_vars = varlist.get_variants_range(interval);
 
                 let frag = extract_fragment(&record,
+                                            &cigarpos_list,
                                             read_vars,
                                             &ref_seq,
                                             &t_names,
