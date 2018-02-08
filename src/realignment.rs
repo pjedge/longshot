@@ -149,34 +149,83 @@ pub fn sum_all_alignments(v: &Vec<char>,
 
         for j in band_start..(band_end + 1) {
             //for j in 1..(w.len() + 1) {
-            let score = match v.get(i - 1) {
-                Some(v_i) => {
-                    match w.get(j - 1) {
-                        Some(w_j) => {
-                            if v_i == w_j {
-                                params.match_from_match
-                            } else {
-                                params.mismatch_from_match
-                            }
-                        }
-                        None => panic!("w_j shouldn't be empty"),
+
+            let homopolymer = match w.get(j - 1) {
+
+                Some(w_j) => {
+
+                    match w.get(j-2) {
+                        Some(w_prev) if w_j == w_prev => {true}
+                        _ => {false}
                     }
                 }
-                None => panic!("v_i shouldn't be empty"),
+                None => panic!("w_j shouldn't be empty"),
             };
 
-            let lower_continue = lower_prev[j] * params.extend_from_insertion;
-            let lower_from_middle = middle_prev[j] * params.insertion_from_match;
-            lower_curr[j] = lower_continue + lower_from_middle;
+            if homopolymer {
 
-            let upper_continue = upper_curr[j - 1] * params.extend_from_deletion;
-            let upper_from_middle = middle_curr[j - 1] * params.deletion_from_match;
-            upper_curr[j] = upper_continue + upper_from_middle;
+                let score = match v.get(i - 1) {
+                    Some(v_i) => {
+                        match w.get(j - 1) {
+                            Some(w_j) => {
 
-            let middle_from_lower = lower_curr[j];
-            let middle_continue = middle_prev[j - 1] * score;
-            let middle_from_upper = upper_curr[j];
-            middle_curr[j] = middle_from_lower + middle_continue + middle_from_upper;
+                                if v_i == w_j {
+                                    params.match_from_match_homopolymer
+                                } else {
+                                    params.mismatch_from_match_homopolymer
+                                }
+                            }
+                            None => panic!("w_j shouldn't be empty"),
+                        }
+                    }
+                    None => panic!("v_i shouldn't be empty"),
+                };
+
+                let lower_continue = lower_prev[j] * params.extend_from_insertion_homopolymer;
+                let lower_from_middle = middle_prev[j] * params.insertion_from_match_homopolymer;
+                lower_curr[j] = lower_continue + lower_from_middle;
+
+                let upper_continue = upper_curr[j - 1] * params.extend_from_deletion_homopolymer;
+                let upper_from_middle = middle_curr[j - 1] * params.deletion_from_match_homopolymer;
+                upper_curr[j] = upper_continue + upper_from_middle;
+
+                let middle_from_lower = lower_curr[j];
+                let middle_continue = middle_prev[j - 1] * score;
+                let middle_from_upper = upper_curr[j];
+                middle_curr[j] = middle_from_lower + middle_continue + middle_from_upper;
+
+            } else {
+
+                let score = match v.get(i - 1) {
+                    Some(v_i) => {
+                        match w.get(j - 1) {
+                            Some(w_j) => {
+
+                                if v_i == w_j {
+                                    params.match_from_match
+                                } else {
+                                    params.mismatch_from_match
+                                }
+                            }
+                            None => panic!("w_j shouldn't be empty"),
+                        }
+                    }
+                    None => panic!("v_i shouldn't be empty"),
+                };
+
+                let lower_continue = lower_prev[j] * params.extend_from_insertion;
+                let lower_from_middle = middle_prev[j] * params.insertion_from_match;
+                lower_curr[j] = lower_continue + lower_from_middle;
+
+                let upper_continue = upper_curr[j - 1] * params.extend_from_deletion;
+                let upper_from_middle = middle_curr[j - 1] * params.deletion_from_match;
+                upper_curr[j] = upper_continue + upper_from_middle;
+
+                let middle_from_lower = lower_curr[j];
+                let middle_continue = middle_prev[j - 1] * score;
+                let middle_from_upper = upper_curr[j];
+                middle_curr[j] = middle_from_lower + middle_continue + middle_from_upper;
+            }
         }
 
         for j in band_start..(band_end + 1) {
@@ -245,35 +294,82 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
 
         for j in band_start..(band_end + 1) {
             //for j in 1..(w.len() + 1) {
-            let score = match v.get(i - 1) {
-                Some(v_i) => {
-                    match w.get(j - 1) {
-                        Some(w_j) => {
-                            if v_i == w_j {
-                                params.match_from_match
-                            } else {
-                                params.mismatch_from_match
-                            }
-                        }
-                        None => panic!("w_j shouldn't be empty"),
+
+            let homopolymer = match w.get(j - 1) {
+
+                Some(w_j) => {
+
+                    match w.get(j-2) {
+                        Some(w_prev) if w_j == w_prev => {true}
+                        _ => {false}
                     }
                 }
-                None => panic!("v_i shouldn't be empty"),
+                None => panic!("w_j shouldn't be empty"),
             };
 
-            let lower_continue = lower_prev[j] + params.extend_from_insertion;
-            let lower_from_middle = middle_prev[j] + params.insertion_from_match;
-            lower_curr[j] = LogProb::ln_add_exp(lower_continue, lower_from_middle);
+            if homopolymer {
+                let score = match v.get(i - 1) {
+                    Some(v_i) => {
+                        match w.get(j - 1) {
+                            Some(w_j) => {
+                                if v_i == w_j {
+                                    params.match_from_match_homopolymer
+                                } else {
+                                    params.mismatch_from_match_homopolymer
+                                }
+                            }
+                            None => panic!("w_j shouldn't be empty"),
+                        }
+                    }
+                    None => panic!("v_i shouldn't be empty"),
+                };
 
-            let upper_continue = upper_curr[j - 1] + params.extend_from_deletion;
-            let upper_from_middle = middle_curr[j - 1] + params.deletion_from_match;
-            upper_curr[j] = LogProb::ln_add_exp(upper_continue, upper_from_middle);
+                let lower_continue = lower_prev[j] + params.extend_from_insertion_homopolymer;
+                let lower_from_middle = middle_prev[j] + params.insertion_from_match_homopolymer;
+                lower_curr[j] = LogProb::ln_add_exp(lower_continue, lower_from_middle);
 
-            let middle_from_lower = lower_curr[j];
-            let middle_continue = middle_prev[j - 1] + score;
-            let middle_from_upper = upper_curr[j];
-            let options3 = [middle_from_lower, middle_continue, middle_from_upper];
-            middle_curr[j] = LogProb::ln_sum_exp(&options3);
+                let upper_continue = upper_curr[j - 1] + params.extend_from_deletion_homopolymer;
+                let upper_from_middle = middle_curr[j - 1] + params.deletion_from_match_homopolymer;
+                upper_curr[j] = LogProb::ln_add_exp(upper_continue, upper_from_middle);
+
+                let middle_from_lower = lower_curr[j];
+                let middle_continue = middle_prev[j - 1] + score;
+                let middle_from_upper = upper_curr[j];
+                let options3 = [middle_from_lower, middle_continue, middle_from_upper];
+                middle_curr[j] = LogProb::ln_sum_exp(&options3);
+            } else{
+
+                let score = match v.get(i - 1) {
+                    Some(v_i) => {
+                        match w.get(j - 1) {
+                            Some(w_j) => {
+                                if v_i == w_j {
+                                    params.match_from_match
+                                } else {
+                                    params.mismatch_from_match
+                                }
+                            }
+                            None => panic!("w_j shouldn't be empty"),
+                        }
+                    }
+                    None => panic!("v_i shouldn't be empty"),
+                };
+
+                let lower_continue = lower_prev[j] + params.extend_from_insertion;
+                let lower_from_middle = middle_prev[j] + params.insertion_from_match;
+                lower_curr[j] = LogProb::ln_add_exp(lower_continue, lower_from_middle);
+
+                let upper_continue = upper_curr[j - 1] + params.extend_from_deletion;
+                let upper_from_middle = middle_curr[j - 1] + params.deletion_from_match;
+                upper_curr[j] = LogProb::ln_add_exp(upper_continue, upper_from_middle);
+
+                let middle_from_lower = lower_curr[j];
+                let middle_continue = middle_prev[j - 1] + score;
+                let middle_from_upper = upper_curr[j];
+                let options3 = [middle_from_lower, middle_continue, middle_from_upper];
+                middle_curr[j] = LogProb::ln_sum_exp(&options3);
+
+            }
         }
 
         for j in band_start..(band_end + 1) {

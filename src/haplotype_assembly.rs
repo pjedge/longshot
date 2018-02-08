@@ -76,16 +76,16 @@ extern "C" {
                variantbuffer: *const *const u8,
                fragments: usize,
                snps: usize,
-               min_post_hap: f32,
-               hap1: *mut u8);
+               hap1: *mut u8,
+               phase_sets: *mut i32,);
 }
 
 pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,
                     vcf_buffer: &Vec<Vec<u8>>,
                     fragments: usize,
                     snps: usize,
-                    min_post_hap: f32,
-                    hap1: &mut Vec<u8>) {
+                    hap1: &mut Vec<u8>,
+                    phase_sets: &mut Vec<i32>) {
 
     unsafe {
         let mut frag_ptrs: Vec<*const u8> = Vec::with_capacity(frag_buffer.len());
@@ -103,7 +103,7 @@ pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,
                 vcf_ptrs.as_ptr(),
                 fragments,
                 snps,
-                min_post_hap,
-                hap1.as_mut_ptr());
+                hap1.as_mut_ptr(),
+                phase_sets.as_mut_ptr());
     }
 }
