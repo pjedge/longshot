@@ -6,6 +6,8 @@ use std::error::Error;
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
+use chrono::prelude::*;
+
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
 
@@ -104,18 +106,30 @@ pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
     diploid_genotype_priors
 }
 
-fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize) {
+fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize, usize) {
     // compute probabilities of data given each genotype
     let mut count0 = 0;
     let mut count1 = 0;
+    let mut count_amb = 0; // ambiguous
+    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
 
     for call in pileup {
         match call.allele {
             '0' => {
-                count0 += 1;
+                if call.qual < ln_max_p_miscall {
+                    //println!("{}",*Prob::from(call.qual));
+                    count0 += 1;
+                } else {
+                    count_amb += 1;
+                }
             }
             '1' => {
-                count1 += 1;
+                if call.qual < ln_max_p_miscall {
+                    //println!("{}",*Prob::from(call.qual));
+                    count1 += 1;
+                } else {
+                    count_amb += 1;
+                }
             }
             _ => {
                 panic!("Unexpected allele observed in pileup.");
@@ -123,7 +137,7 @@ fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize) {
         }
     }
 
-    (count0, count1)
+    (count0, count1, count_amb)
 }
 
 struct HapPost {
@@ -264,6 +278,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
     //let sample_every: usize = 1;
     let ln_half = LogProb::from(Prob(0.5));
     let mut rng: StdRng = StdRng::from_seed(&[1]);
+    let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     let hap_ixs = vec![0, 1];
 
@@ -279,7 +294,10 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
 
     let mut haps: Vec<Vec<char>> = vec![vec!['0'; n_var]; 2];
 
-    for _ in 0..5 {
+    for hapcut2_iter in 0..5 {
+
+        // print the haplotype assembly iteration
+        eprintln!("{}    round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
 
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
         let mut vcf_buffer: Vec<Vec<u8>> = Vec::with_capacity(varlist.lst.len());
@@ -386,6 +404,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
             }
         }
 
+        eprintln!("{}    refining genotypes using round {} haplotypes...",print_time(), hapcut2_iter+1);
 
         for _ in 0..max_iterations {
             let mut changed = false;
@@ -745,11 +764,12 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
             genotype = "1|1".to_string();
         }
 
-        let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
+        let (count_ref, count_var, count_amb): (usize, usize, usize) = count_alleles(&pileup);
 
         var.qual = *PHREDProb::from(post00);
         var.ra = count_ref;
         var.aa = count_var;
+        var.na = count_amb;
         var.genotype = genotype;
         var.gq = genotype_qual;
         var.filter = "PASS".to_string();
@@ -840,7 +860,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
         };
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};P00={:.2};P01={:.2};P10={:.2};P11={:.2};RA={};AA={}{}\tGT:GQ\t{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};RA={};AA={};NA={};P00={:.2};P01={:.2};P10={:.2};P11={:.2}{}\tGT:GQ\t{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.ref_allele,
@@ -848,12 +868,13 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
                        var.qual,
                        var.filter,
                        var.dp,
+                       var.ra,
+                       var.aa,
+                       var.na,
                        *PHREDProb::from(var.genotype_post[0]),
                        *PHREDProb::from(var.genotype_post[1]),
                        *PHREDProb::from(var.genotype_post[2]),
                        *PHREDProb::from(var.genotype_post[3]),
-                       var.ra,
-                       var.aa,
                        ps_str,
                        var.genotype,
                        var.gq) {
