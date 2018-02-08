@@ -79,6 +79,7 @@ pub fn call_potential_snvs(bam_file: &String,
         // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
         let mut depth: usize = 0;
         let mut pileup_alleles: Vec<(String,String, bool)> = vec![];
+        let pos: usize = pileup.pos() as usize;
 
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
@@ -99,19 +100,27 @@ pub fn call_potential_snvs(bam_file: &String,
                 let var_allele;
                 let mut homopolymer;
 
+                let ref_allele_prev: char = if pos >= 1 && pos <= ref_seq.len() {
+                    (ref_seq[pos - 1] as char).to_uppercase().nth(0).unwrap()
+                } else {
+                    'N'
+                };
+
+                let mut ref_allele_next: char = match ref_seq.get(pos + 1) {
+                    Some(&r) => (r as char).to_uppercase().nth(0).unwrap(),
+                    None => 'N'
+                };
+
                 match alignment.indel() {
                     Indel::None => {
                         // unwrapping a None value here
                         ref_allele =
-                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
-
-                        let ref_allele_prev =
-                            (ref_seq[pileup.pos() as usize - 1] as char).to_string().to_uppercase();
-                        let ref_allele_next =
-                            (ref_seq[pileup.pos() as usize + 1] as char).to_string().to_uppercase();
+                            (ref_seq[pos] as char).to_string().to_uppercase();
+                        let ref_allele_char = ref_allele.chars().nth(0).unwrap();
                         let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
+
                         var_allele = base.to_string();
-                        homopolymer = ref_allele == ref_allele_prev || ref_allele == ref_allele_next;
+                        homopolymer = ref_allele_char == ref_allele_prev || ref_allele_char == ref_allele_next;
                     },
                     Indel::Ins(l) => {
 
@@ -119,18 +128,24 @@ pub fn call_potential_snvs(bam_file: &String,
                         let end = start + l as usize + 1;
                         // don't want to convert whole seq to bytes...
                         let mut var_char: Vec<char> = vec![];
+
+                        let record_len = alignment.record().seq().len();
+
                         for i in start..end {
-                            var_char.push(alignment.record().seq()[i] as char);
+                            if i < record_len {
+                                var_char.push(alignment.record().seq()[i] as char);
+                            } else {
+                                var_char.push('N');
+                            }
                         }
-                        ref_allele =
-                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+                        ref_allele = match ref_seq.get(pos) {
+                            Some(&r) => (r as char).to_string().to_uppercase(),
+                            None => "N".to_string()
+                        };
+
                         var_allele = var_char.into_iter().collect::<String>();
 
-
-                        let ref_allele_prev =
-                        (ref_seq[start - 1] as char).to_uppercase().nth(0).unwrap();
-                        let ref_allele_next =
-                            (ref_seq[end] as char).to_uppercase().nth(0).unwrap();
                         homopolymer = true;
                         for c in var_allele.chars() {
                             if ! (c == ref_allele_prev && c == ref_allele_next) {
@@ -140,16 +155,17 @@ pub fn call_potential_snvs(bam_file: &String,
 
                     },
                     Indel::Del(l) => {
-                        let start = pileup.pos() as usize;
-                        let end = (pileup.pos() + l + 1) as usize;
-                        ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
-                        var_allele = (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                        let start = pos;
+                        let end: usize = pos + l as usize + 1;
 
-                        let ref_allele_prev =
-                        (ref_seq[start - 1] as char).to_uppercase().nth(0).unwrap();
-                        let ref_allele_next =
-                            (ref_seq[end] as char).to_uppercase().nth(0).unwrap();
-                        //(ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+                        ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
+                        var_allele = (ref_seq[pos] as char).to_string().to_uppercase();
+
+                        // need to reassign this based on where the deletion ends
+                        ref_allele_next = match ref_seq.get(end) {
+                            Some(&r) => (r as char).to_uppercase().nth(0).unwrap(),
+                            None => 'N'
+                        };
 
                         homopolymer = true;
                         for c in ref_allele.chars() {
@@ -164,10 +180,6 @@ pub fn call_potential_snvs(bam_file: &String,
                 *counts.entry((ref_allele.clone(), var_allele.clone())).or_insert(0) += 1;
             }
         }
-
-        //if depth < min_coverage as usize {
-        //    continue
-        //}
 
         match max_coverage {
             Some(cov) if depth > cov as usize => {continue;}
@@ -260,7 +272,7 @@ pub fn call_potential_snvs(bam_file: &String,
             (indel_ref_allele, indel_var_allele, indel_qual)
         };
 
-        next_valid_pos = pileup.pos()+1;
+        next_valid_pos = (pos+1) as u32;
 
         if qual > potential_snv_qual &&
             !ref_allele.contains("N") && !var_allele.contains("N") &&
@@ -272,7 +284,7 @@ pub fn call_potential_snvs(bam_file: &String,
                 ix: 0,
                 // this will be set automatically
                 chrom: target_names[tid].clone(),
-                pos0: pileup.pos() as usize,
+                pos0: pos,
                 ref_allele: ref_allele.clone(),
                 var_allele: var_allele.clone(),
                 dp: depth,
