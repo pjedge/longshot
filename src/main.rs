@@ -297,7 +297,7 @@ fn main() {
                                                                min_mapq,
                                                            alignment_parameters.ln());
 
-    eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
+    eprintln!("{} {} potential variants identified.", print_time(),varlist.lst.len());
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq: min_mapq,
@@ -317,7 +317,7 @@ fn main() {
                                                          extract_fragment_parameters,
                                                          alignment_parameters);
 
-    eprintln!("{} Calling initial genotypes and assembling haplotypes...", print_time());
+    eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
     match assemble_haps {
         true => {
             call_realigned_genotypes_no_haplotypes(&flist, &mut varlist);
@@ -325,7 +325,7 @@ fn main() {
         false => {panic!("Calling genotypes without haplotypes not currently supported.")},
     };
 
-    eprintln!("{} Refining genotypes with haplotype information...",print_time());
+    eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes(&flist, &mut varlist, &interval);
 
     eprintln!("{} Adding filter flags based on depth and variant density...",print_time());

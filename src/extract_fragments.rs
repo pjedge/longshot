@@ -5,6 +5,7 @@ use rust_htslib::bam::record::Record;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
+use chrono::prelude::*;
 use util::*;
 use bio::stats::{LogProb, PHREDProb};
 use bio::io::fasta;
@@ -711,10 +712,13 @@ pub fn extract_fragments(bamfile_name: &String,
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
     let mut fasta = fasta::IndexedReader::from_file(fastafile_name).unwrap();
     let mut ref_seq: Vec<char> = vec![];
+    let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     let mut flist: Vec<Fragment> = vec![];
 
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
+    let mut complete = 0;
+
     match interval {
         &Some(ref iv) => {
             let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
@@ -749,6 +753,12 @@ pub fn extract_fragments(bamfile_name: &String,
 
                 // get the list of variants that overlap this read
                 let read_vars = varlist.get_variants_range(interval);
+
+                // print the percentage of variants processed every 10%
+                if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
+                    complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
+                    eprintln!("{}    {}% of variants processed...",print_time(), complete*10);
+                }
 
                 let frag = extract_fragment(&record,
                                             &cigarpos_list,
@@ -796,6 +806,12 @@ pub fn extract_fragments(bamfile_name: &String,
 
                 // get the list of variants that overlap this read
                 let read_vars = varlist.get_variants_range(interval);
+
+                // print the percentage of variants processed every 10%
+                if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
+                    complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
+                    eprintln!("{}    {}% of variants processed...",print_time(), complete*10);
+                }
 
                 let frag = extract_fragment(&record,
                                             &cigarpos_list,

@@ -162,6 +162,8 @@ pub fn sum_all_alignments(v: &Vec<char>,
                 None => panic!("w_j shouldn't be empty"),
             };
 
+            //println!("{}",homopolymer);
+
             if homopolymer {
 
                 let score = match v.get(i - 1) {
@@ -253,6 +255,7 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
                                              min_band_width: usize)
                                              -> (LogProb) {
 
+    //println!("Warning: Running numerically stable alignment");
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
 
@@ -306,6 +309,7 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
                 }
                 None => panic!("w_j shouldn't be empty"),
             };
+
 
             if homopolymer {
                 let score = match v.get(i - 1) {

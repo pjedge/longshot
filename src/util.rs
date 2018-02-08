@@ -252,6 +252,7 @@ pub struct Var {
     // depth of coverage
     pub ra: usize,
     pub aa: usize,
+    pub na: usize,
     pub qual: f64,
     pub filter: String,
     pub genotype: String,
