@@ -202,67 +202,15 @@ pub struct AnchorPositions {
     pub right_anchor_read: u32,
 }
 
-pub fn find_anchors_simple(bam_record: &Record,
-                           _cigarpos_list: &Vec<CigarPos>,
-                           var_interval: GenomicInterval,
-                    _anchor_length: u32,
-                    ref_seq: &Vec<char>,
-                    target_names: &Vec<String>,
-                    _extract_params: ExtractFragmentParameters)
-                    -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
-
-    if var_interval.chrom != target_names[bam_record.tid() as usize] ||
-        (var_interval.start_pos as i32) >=
-            bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
-        (var_interval.end_pos as i32) < bam_record.pos() {
-        return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
-            "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
-        ));
-    }
-
-    let bam_cig: CigarStringView = bam_record.cigar();
-
-    let left_anchor_ref = var_interval.start_pos - 30;
-    let right_anchor_ref = var_interval.end_pos + 30;
-
-    let left_anchor_read: u32 = match bam_cig.read_pos(left_anchor_ref, false, true){
-        Ok(Some(pos)) => pos as u32,
-        _ => {return Ok(None);}
-    };
-
-    let right_anchor_read: u32 = match bam_cig.read_pos(right_anchor_ref, false, true){
-        Ok(Some(pos)) => pos as u32,
-        _ => {return Ok(None);}
-    };
-
-    // return none if any of the anchors are out of bounds
-    if right_anchor_ref as usize >= ref_seq.len() ||
-        right_anchor_read as usize >= bam_record.seq().len() {
-        return Ok(None);
-    }
-
-    if left_anchor_ref > right_anchor_ref || left_anchor_read > right_anchor_read {
-        return Ok(None);
-    }
-
-    // return anchor pos
-    Ok(Some(AnchorPositions {
-        left_anchor_ref: left_anchor_ref,
-        right_anchor_ref: right_anchor_ref,
-        left_anchor_read: left_anchor_read,
-        right_anchor_read: right_anchor_read,
-    }))
-}
-
 pub fn find_anchors(bam_record: &Record,
                     cigarpos_list: &Vec<CigarPos>,
                     var_interval: GenomicInterval,
-                    anchor_length: u32,
                     ref_seq: &Vec<char>,
                     target_names: &Vec<String>,
                     extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
 
+    let anchor_length = extract_params.anchor_length as u32;
     let anchor_k = extract_params.anchor_k;
     //let min_window_length = extract_params.min_window_length;
     let max_window_length = extract_params.max_window_length;
@@ -636,6 +584,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     calls
 }
 
+
 pub fn extract_fragment(bam_record: &Record,
                         cigarpos_list: &Vec<CigarPos>,
                         vars: Vec<Var>,
@@ -658,64 +607,88 @@ pub fn extract_fragment(bam_record: &Record,
         calls: vec![],
     };
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
-    let mut cluster_lst: Vec<Vec<Var>> = vec![];
+    let mut cluster_lst: Vec<(AnchorPositions, Vec<Var>)> = vec![];
+    let mut var_anchor_lst: Vec<(Var, AnchorPositions)> = vec![];
 
+    // populate a list with tuples of each variant, and anchor sequences for its alignment
+    for ref var in vars {
+        let var_interval = GenomicInterval{
+            chrom: var.chrom.clone(),
+            start_pos: var.pos0 as u32,
+            end_pos: var.pos0 as u32
+        };
+        match find_anchors(&bam_record,
+                                   &cigarpos_list,
+                                   var_interval,
+                                   &ref_seq,
+                                   &target_names,
+                                   extract_params).expect("CIGAR or Anchor Error while finding anchor sequences.") {
+            Some(anchors) => {var_anchor_lst.push((var.clone(), anchors));},
+            _ => {}
+        };
+    }
+
+    // now that we have anchors for each var the read covers,
+    // group the variants into clusters to align together if adjacent anchors overlap
+    // we generate anchors for the whole cluster by taking the first-left and last-right anchor pos of the cluster
     {
         // populate cluster_lst with variant clusters
         let mut var_cluster: Vec<Var> = vec![];
+        let mut var_anchors: Vec<AnchorPositions> = vec![];
+        let mut l;
 
         // generate clusters of SNVs that should be considered
-        for var in vars {
-            if var_cluster.len() == 0 ||
-                (var.pos0 - var_cluster[var_cluster.len() - 1].pos0 <
-                    extract_params.short_hap_snv_distance &&
-                    var_cluster.len() <= extract_params.short_hap_max_snvs) {
+        for (var, anc) in var_anchor_lst {
+            l = var_cluster.len();
+            if l == 0 ||
+                (anc.left_anchor_ref < var_anchors[l - 1].right_anchor_ref
+                    && l <= extract_params.short_hap_max_snvs) {
                 var_cluster.push(var);
+                var_anchors.push(anc);
             } else {
-                cluster_lst.push(var_cluster.clone());
+
+                // sequence anchor that covers the whole cluster of variants
+                let combined_anchor = AnchorPositions{
+                    left_anchor_ref: var_anchors[0].left_anchor_ref,
+                    right_anchor_ref: var_anchors[l - 1].right_anchor_ref,
+                    left_anchor_read: var_anchors[0].left_anchor_read,
+                    right_anchor_read: var_anchors[l - 1].right_anchor_read
+                };
+
+                cluster_lst.push((combined_anchor, var_cluster.clone()));
+
                 var_cluster.clear();
+                var_anchors.clear();
                 var_cluster.push(var);
+                var_anchors.push(anc);
             }
         }
-        if var_cluster.len() > 0 {
-            cluster_lst.push(var_cluster.clone());
-            var_cluster.clear();
+
+        l = var_cluster.len();
+
+        if l > 0 {
+            // sequence anchor that covers the whole cluster of variants
+            let combined_anchor = AnchorPositions{
+                left_anchor_ref: var_anchors[0].left_anchor_ref,
+                right_anchor_ref: var_anchors[l - 1].right_anchor_ref,
+                left_anchor_read: var_anchors[0].left_anchor_read,
+                right_anchor_read: var_anchors[l - 1].right_anchor_read
+            };
+
+            cluster_lst.push((combined_anchor, var_cluster.clone()));
         }
     }
 
-    for var_cluster in cluster_lst {
-        let var_interval = GenomicInterval {
-            chrom: target_names[bam_record.tid() as usize].clone(),
-            start_pos: var_cluster[0].pos0 as u32,
-            end_pos: var_cluster[var_cluster.len() - 1].pos0 as u32,
-        };
+    // now extract alleles for the variant cluster
+    for (anchors, var_cluster) in cluster_lst {
 
-        let anchor_func = match extract_params.simple_anchors {
-            true => find_anchors_simple,
-            false => find_anchors
-        };
-
-        match anchor_func(bam_record,
-                           cigarpos_list,
-                           var_interval,
-                           10,
-                           &ref_seq,
-                           target_names,
-                           extract_params)
-            .expect("CIGAR or Anchor Error while finding anchor sequences.") {
-            Some(anchors) => {
-                for call in extract_var_cluster(&read_seq,
-                                                ref_seq,
-                                                var_cluster,
-                                                anchors,
-                                                extract_params,
-                                                align_params) {
-                    fragment.calls.push(call);
-                }
-            }
-            None => {
-                continue;
-            }
+        for call in extract_var_cluster(&read_seq,
+                                        ref_seq,
+                                        var_cluster,
+                                        anchors,
+                                        extract_params,
+                                        align_params) {
+            fragment.calls.push(call);
         }
     }
 
@@ -724,7 +697,6 @@ pub fn extract_fragment(bam_record: &Record,
     } else {
         None
     }
-
 }
 
 pub fn extract_fragments(bamfile_name: &String,

@@ -40,7 +40,7 @@ int LONG_READS = 0; // if this variable is 1, the data contains long read data
 #include "find_maxcut.c"   // function compute_good_cut
 #include "post_processing.c"  // post-processing functions
 
-int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps, float min_post_hap, char* HAP) {
+int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps, char* HAP, int* PS) {
     // IMP NOTE: all SNPs start from 1 instead of 0 and all offsets are 1+
 
     if (VERBOSE) fprintf_time(stderr, "Calling Max-Likelihood-Cut based haplotype assembly algorithm\n");
@@ -52,7 +52,7 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
     float bestscore = 0, miscalls = 0;
     struct SNPfrags* snpfrag = NULL;
     struct BLOCK* clist;
-    int converged_count=0, split_count, new_components, component;
+    int converged_count=0, component;
 
     // READ FRAGMENT MATRIX
     struct fragment* Flist;
@@ -160,6 +160,7 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
     }
 
     // BLOCK SPLITTING
+    /*
     new_components = components;
     if (SPLIT_BLOCKS){
         split_count = 0;
@@ -185,12 +186,16 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
     if (!SKIP_PRUNE){
         likelihood_pruning(snps, Flist, snpfrag, HAP1, CALL_HOMOZYGOUS);
     }
+    */
 
     for (i = 0; i < snps; i++){
-        if (snpfrag[i].post_hap < log10(min_post_hap) || snpfrag[i].genotypes[0] == snpfrag[i].genotypes[2])
+
+        if (snpfrag[i].genotypes[0] == snpfrag[i].genotypes[2]) {
             HAP[i] = '-';
-        else
+        } else {
             HAP[i] = HAP1[i];
+            PS[i] = snpfrag[i].component;
+        }
     }
 
     // FREE UP MEMORY

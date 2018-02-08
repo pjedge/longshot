@@ -89,10 +89,8 @@ pub struct ExtractFragmentParameters {
     pub min_mapq: u8,
     pub alignment_type: AlignmentType,
     pub band_width: usize,
-    pub simple_anchors: bool,
     pub anchor_length: usize,
     pub anchor_k: usize,
-    pub short_hap_snv_distance: usize,
     pub short_hap_max_snvs: usize,
     pub max_window_length: usize,
 }
@@ -109,6 +107,16 @@ pub struct AlignmentParameters {
     pub extend_from_deletion: f64,
     pub match_from_deletion: f64,
     pub mismatch_from_deletion: f64,
+    pub match_from_match_homopolymer: f64,
+    pub mismatch_from_match_homopolymer: f64,
+    pub insertion_from_match_homopolymer: f64,
+    pub deletion_from_match_homopolymer: f64,
+    pub extend_from_insertion_homopolymer: f64,
+    pub match_from_insertion_homopolymer: f64,
+    pub mismatch_from_insertion_homopolymer: f64,
+    pub extend_from_deletion_homopolymer: f64,
+    pub match_from_deletion_homopolymer: f64,
+    pub mismatch_from_deletion_homopolymer: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -123,6 +131,16 @@ pub struct LnAlignmentParameters {
     pub extend_from_deletion: LogProb,
     pub match_from_deletion: LogProb,
     pub mismatch_from_deletion: LogProb,
+    pub match_from_match_homopolymer: LogProb,
+    pub mismatch_from_match_homopolymer: LogProb,
+    pub insertion_from_match_homopolymer: LogProb,
+    pub deletion_from_match_homopolymer: LogProb,
+    pub extend_from_insertion_homopolymer: LogProb,
+    pub match_from_insertion_homopolymer: LogProb,
+    pub mismatch_from_insertion_homopolymer: LogProb,
+    pub extend_from_deletion_homopolymer: LogProb,
+    pub match_from_deletion_homopolymer: LogProb,
+    pub mismatch_from_deletion_homopolymer: LogProb,
 }
 
 impl AlignmentParameters {
@@ -138,6 +156,16 @@ impl AlignmentParameters {
             extend_from_deletion: LogProb::from(Prob(self.extend_from_deletion)),
             match_from_deletion: LogProb::from(Prob(self.match_from_deletion)),
             mismatch_from_deletion: LogProb::from(Prob(self.mismatch_from_deletion)),
+            match_from_match_homopolymer: LogProb::from(Prob(self.match_from_match_homopolymer)),
+            mismatch_from_match_homopolymer: LogProb::from(Prob(self.mismatch_from_match_homopolymer)),
+            insertion_from_match_homopolymer: LogProb::from(Prob(self.insertion_from_match_homopolymer)),
+            deletion_from_match_homopolymer: LogProb::from(Prob(self.deletion_from_match_homopolymer)),
+            extend_from_insertion_homopolymer: LogProb::from(Prob(self.extend_from_insertion_homopolymer)),
+            match_from_insertion_homopolymer: LogProb::from(Prob(self.match_from_insertion_homopolymer)),
+            mismatch_from_insertion_homopolymer: LogProb::from(Prob(self.mismatch_from_insertion_homopolymer)),
+            extend_from_deletion_homopolymer: LogProb::from(Prob(self.extend_from_deletion_homopolymer)),
+            match_from_deletion_homopolymer: LogProb::from(Prob(self.match_from_deletion_homopolymer)),
+            mismatch_from_deletion_homopolymer: LogProb::from(Prob(self.mismatch_from_deletion_homopolymer)),
         }
     }
 }
@@ -229,6 +257,7 @@ pub struct Var {
     pub genotype: String,
     pub gq: f64,
     pub genotype_post: [LogProb; 4],  // genotype posteriors... [p00, p01, p10, p11]
+    pub phase_set: Option<usize>
     //pub pileup: Option(Vec<PileupElement>),
 }
 

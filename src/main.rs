@@ -19,23 +19,36 @@ mod util;
 use clap::{Arg, App};
 use chrono::prelude::*;
 
-use call_genotypes::{call_genotypes, assemble_initial_haplotypes, print_vcf, var_filter};
+use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, var_filter};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
-    match_from_match: 0.89,
+    // non-homopolymer probabilities
+    match_from_match: 0.95,
     mismatch_from_match: 0.01,
-    insertion_from_match: 0.07,
-    deletion_from_match: 0.03,
-    extend_from_insertion: 0.26,
-    match_from_insertion: 0.7317777,
-    mismatch_from_insertion: 0.0082222,
-    extend_from_deletion: 0.12,
-    match_from_deletion: 0.8702222,
-    mismatch_from_deletion: 0.0097777,
+    insertion_from_match: 0.02,
+    deletion_from_match: 0.02,
+    extend_from_insertion: 0.13,
+    match_from_insertion: 0.8609375,
+    mismatch_from_insertion: 0.0090625,
+    extend_from_deletion: 0.06,
+    match_from_deletion: 0.9290697,
+    mismatch_from_deletion: 0.010930,
+    // homopolymer probabilities
+    match_from_match_homopolymer: 0.83,
+    mismatch_from_match_homopolymer: 0.01,
+    insertion_from_match_homopolymer: 0.12,
+    deletion_from_match_homopolymer: 0.04,
+    extend_from_insertion_homopolymer: 0.5,
+    match_from_insertion_homopolymer: 0.49397590,
+    mismatch_from_insertion_homopolymer: 0.00602409,
+    extend_from_deletion_homopolymer: 0.25,
+    match_from_deletion_homopolymer: 0.7409638,
+    mismatch_from_deletion_homopolymer: 0.00903614,
 };
 
 static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
+    // non-homopolymer probabilities
     match_from_match: 0.82,
     mismatch_from_match: 0.05,
     insertion_from_match: 0.05,
@@ -46,6 +59,17 @@ static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     extend_from_deletion: 0.35,
     match_from_deletion: 0.6126,
     mismatch_from_deletion: 0.0373,
+    // homopolymer probabilities
+    match_from_match_homopolymer: 0.82,
+    mismatch_from_match_homopolymer: 0.05,
+    insertion_from_match_homopolymer: 0.05,
+    deletion_from_match_homopolymer: 0.08,
+    extend_from_insertion_homopolymer: 0.25,
+    match_from_insertion_homopolymer: 0.7069,
+    mismatch_from_insertion_homopolymer: 0.0431,
+    extend_from_deletion_homopolymer: 0.35,
+    match_from_deletion_homopolymer: 0.6126,
+    mismatch_from_deletion_homopolymer: 0.0373,
 };
 
 fn main() {
@@ -98,13 +122,6 @@ fn main() {
                 .help("Minimum mapping quality to use a read.")
                 .display_order(90)
                 .default_value("30"))
-        .arg(Arg::with_name("Simple anchors")
-                .short("s")
-                .long("simple_anchors")
-                .value_name("bool")
-                .help("Simply select anchors that are 30 bps on either side of the variants.")
-                .display_order(102)
-                .default_value("false"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
@@ -119,13 +136,6 @@ fn main() {
                 .help("A filter for low-complexity anchor sequences. A valid anchor must have no duplicates in the kmers that overlap it.")
                 .display_order(110)
                 .default_value("5"))
-        .arg(Arg::with_name("Short haplotype SNV distance")
-                .short("d")
-                .long("snv_distance")
-                .value_name("int")
-                .help("SNVs separated by distance less than d will be considered together and all their possible haplotypes will be aligned against.")
-                .display_order(120)
-                .default_value("20"))
         .arg(Arg::with_name("Short haplotype max SNVs")
                 .short("m")
                 .long("max_snvs")
@@ -195,14 +205,6 @@ fn main() {
         .parse::<u8>()
         .expect("Argument min_mapq must be an integer between 0 and 255!");
 
-    let simple_anchors = match input_args.occurrences_of("Simple anchors") {
-        0 => false,
-        1 => true,
-        _ => {
-            panic!("simple_anchors specified multiple times");
-        }
-    };
-
     let anchor_length: usize = input_args.value_of("Anchor length")
         .unwrap()
         .parse::<usize>()
@@ -213,12 +215,6 @@ fn main() {
         .parse::<usize>()
         .expect("Argument anchor_k must be a positive integer!");
     // TODO check that anchor_k is less than or equal to anchor length
-
-    let short_hap_snv_distance: usize =
-        input_args.value_of("Short haplotype SNV distance")
-            .unwrap()
-            .parse::<usize>()
-            .expect("Argument snv_distance must be a positive integer!");
 
     let short_hap_max_snvs: usize = input_args.value_of("Short haplotype max SNVs")
         .unwrap()
@@ -307,10 +303,8 @@ fn main() {
         min_mapq: min_mapq,
         alignment_type: alignment_type,
         band_width: band_width,
-        simple_anchors: simple_anchors,
         anchor_length: anchor_length,
         anchor_k: anchor_k,
-        short_hap_snv_distance: short_hap_snv_distance,
         short_hap_max_snvs: short_hap_max_snvs,
         max_window_length: max_window_length,
     };
@@ -326,9 +320,9 @@ fn main() {
     eprintln!("{} Calling initial genotypes and assembling haplotypes...", print_time());
     match assemble_haps {
         true => {
-            assemble_initial_haplotypes(&flist, &mut varlist);
+            call_realigned_genotypes_no_haplotypes(&flist, &mut varlist);
         },
-        false => {},
+        false => {panic!("Calling genotypes without haplotypes not currently supported.")},
     };
 
     eprintln!("{} Refining genotypes with haplotype information...",print_time());

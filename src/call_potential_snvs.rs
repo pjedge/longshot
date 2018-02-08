@@ -78,7 +78,7 @@ pub fn call_potential_snvs(bam_file: &String,
         let mut counts: HashMap<(String, String), usize> = HashMap::new();
         // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
         let mut depth: usize = 0;
-        let mut pileup_alleles: Vec<(String,String)> = vec![];
+        let mut pileup_alleles: Vec<(String,String, bool)> = vec![];
 
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
@@ -97,19 +97,23 @@ pub fn call_potential_snvs(bam_file: &String,
 
                 let ref_allele;
                 let var_allele;
+                let mut homopolymer;
 
                 match alignment.indel() {
                     Indel::None => {
                         // unwrapping a None value here
                         ref_allele =
                             (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+                        let ref_allele_prev =
+                            (ref_seq[pileup.pos() as usize - 1] as char).to_string().to_uppercase();
+                        let ref_allele_next =
+                            (ref_seq[pileup.pos() as usize + 1] as char).to_string().to_uppercase();
                         let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
                         var_allele = base.to_string();
-
+                        homopolymer = ref_allele == ref_allele_prev || ref_allele == ref_allele_next;
                     },
                     Indel::Ins(l) => {
-                        ref_allele =
-                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
 
                         let start = alignment.qpos().unwrap();
                         let end = start + l as usize + 1;
@@ -118,18 +122,45 @@ pub fn call_potential_snvs(bam_file: &String,
                         for i in start..end {
                             var_char.push(alignment.record().seq()[i] as char);
                         }
+                        ref_allele =
+                            (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
                         var_allele = var_char.into_iter().collect::<String>();
+
+
+                        let ref_allele_prev =
+                        (ref_seq[start - 1] as char).to_uppercase().nth(0).unwrap();
+                        let ref_allele_next =
+                            (ref_seq[end] as char).to_uppercase().nth(0).unwrap();
+                        homopolymer = true;
+                        for c in var_allele.chars() {
+                            if ! (c == ref_allele_prev && c == ref_allele_next) {
+                                homopolymer = false;
+                            }
+                        }
+
                     },
                     Indel::Del(l) => {
                         let start = pileup.pos() as usize;
                         let end = (pileup.pos() + l + 1) as usize;
                         ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
                         var_allele = (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+                        let ref_allele_prev =
+                        (ref_seq[start - 1] as char).to_uppercase().nth(0).unwrap();
+                        let ref_allele_next =
+                            (ref_seq[end] as char).to_uppercase().nth(0).unwrap();
                         //(ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+
+                        homopolymer = true;
+                        for c in ref_allele.chars() {
+                            if ! (c == ref_allele_prev && c == ref_allele_next) {
+                                homopolymer = false;
+                            }
+                        }
                     },
                 }
 
-                pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
+                pileup_alleles.push((ref_allele.clone(), var_allele.clone(), homopolymer));
                 *counts.entry((ref_allele.clone(), var_allele.clone())).or_insert(0) += 1;
             }
         }
@@ -183,23 +214,23 @@ pub fn call_potential_snvs(bam_file: &String,
         let mut snv_pileup_calls: Vec<(char, LogProb)> = vec![];
         let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
 
-        for (ref_allele, var_allele) in pileup_alleles {
+        for (ref_allele, var_allele, homopolymer) in pileup_alleles {
 
             if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
-                let qual = ln_align_params.mismatch_from_match;
+                let qual = if homopolymer {ln_align_params.mismatch_from_match_homopolymer} else {ln_align_params.mismatch_from_match};
                 snv_pileup_calls.push(('1', qual));
             } else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
                 let qual = if indel_ref_allele.len() > indel_var_allele.len() {
-                    ln_align_params.deletion_from_match
+                    if homopolymer {ln_align_params.deletion_from_match_homopolymer} else {ln_align_params.deletion_from_match}
                 } else {
-                    ln_align_params.insertion_from_match
+                    if homopolymer {ln_align_params.insertion_from_match_homopolymer} else {ln_align_params.insertion_from_match}
                 };
 
                 indel_pileup_calls.push(('1', qual));
             }
 
             if (ref_allele.clone(), var_allele.clone()) == (ref_allele.clone(), ref_allele.clone()){
-                let qual = ln_align_params.mismatch_from_match;
+                let qual = if homopolymer {ln_align_params.mismatch_from_match_homopolymer} else {ln_align_params.mismatch_from_match};
 
                 snv_pileup_calls.push(('0', qual));
                 indel_pileup_calls.push(('0', qual));
@@ -251,7 +282,8 @@ pub fn call_potential_snvs(bam_file: &String,
                 filter: ".".to_string(),
                 genotype: "./.".to_string(),
                 gq: 0.0,
-                genotype_post: [LogProb::from(Prob(0.25)); 4]
+                genotype_post: [LogProb::from(Prob(0.25)); 4],
+                phase_set: None
             };
 
             // we don't want potential SNVs that are inside a deletion, for instance.
