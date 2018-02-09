@@ -854,13 +854,13 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
             continue;
         }
 
-        let ps_str = match var.phase_set {
+        let ps = match var.phase_set {
             Some(ps) => format!(";PS={}", ps),
-            None => "".to_string()
+            None => ".".to_string()
         };
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};RA={};AA={};NA={};P00={:.2};P01={:.2};P10={:.2};P11={:.2}{}\tGT:GQ\t{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};RA={};AA={};NA={};P00={:.2};P01={:.2};P10={:.2};P11={:.2}\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.ref_allele,
@@ -875,8 +875,8 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
                        *PHREDProb::from(var.genotype_post[1]),
                        *PHREDProb::from(var.genotype_post[2]),
                        *PHREDProb::from(var.genotype_post[3]),
-                       ps_str,
                        var.genotype,
+                       ps,
                        var.gq) {
             Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
             Ok(_) => {}
