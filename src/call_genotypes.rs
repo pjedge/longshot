@@ -11,7 +11,7 @@ use chrono::prelude::*;
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
 
-static MAX_P_MISCALL_F64: f64 = 0.1;
+static MAX_P_MISCALL_F64: f64 = 0.2;
 static MIN_GQ_FOR_PHASING: f64 = 50.0;
 
 fn generate_simple_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<(char,LogProb)>> {
@@ -19,9 +19,9 @@ fn generate_simple_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<(char,
 
     for fragment in flist {
         for call in fragment.clone().calls {
-            if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
-                pileup_lst[call.var_ix].push((call.allele, call.qual));
-            }
+            //if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+            pileup_lst[call.var_ix].push((call.allele, call.qual));
+            //}
         }
     }
     pileup_lst
@@ -33,9 +33,9 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 
     for fragment in flist {
         for call in fragment.clone().calls {
-            if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
-                pileup_lst[call.var_ix].push(call);
-            }
+            //if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+            pileup_lst[call.var_ix].push(call);
+           // }
         }
     }
     pileup_lst
@@ -152,6 +152,7 @@ pub fn calculate_genotypes_without_haplotypes(pileup: &Vec<(char, LogProb)>,
                                           ref_allele: &String,
                                           var_allele: &String) -> (LogProb, LogProb, LogProb) {
 
+    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
     let ln_half = LogProb::from(Prob(0.5));
     let mut priors = vec![LogProb::from(Prob(0.25)); 4];
 
@@ -190,6 +191,11 @@ pub fn calculate_genotypes_without_haplotypes(pileup: &Vec<(char, LogProb)>,
     let mut prob11 = priors[3];
 
     for &(allele, qual) in pileup {
+
+        if qual >= ln_max_p_miscall {
+            continue;
+        }
+
         let p_call = LogProb::ln_sub_exp(LogProb::ln_one(), qual);
         let p_miscall = qual;
 
@@ -292,13 +298,14 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         }
     }
 
+    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
     let mut haps: Vec<Vec<char>> = vec![vec!['0'; n_var]; 2];
     //let mut prev_total_likelihood = LogProb::ln_zero();
     let mut prev_num_phased = 0;
 
     for hapcut2_iter in 0..10 {
 
-        let varlist_bak = (*varlist).clone();
+        //let varlist_bak = (*varlist).clone();
 
         // print the haplotype assembly iteration
         eprintln!("{}    Round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
@@ -428,7 +435,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         for hap_ix in &hap_ixs {
             for f in 0..flist.len() {
                 for call in &flist[f].calls {
-                    if var_phased[call.var_ix] && call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+                    if var_phased[call.var_ix] && call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
                         if call.allele == haps[*hap_ix][call.var_ix] {
                             p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + &call.one_minus_qual;
@@ -475,7 +482,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
 
                 for g in 0..4 {
                     for call in &pileup_lst[v] {
-                        if !(call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64))) {
+                        if call.qual >= ln_max_p_miscall {
                             continue;
                         }
 
@@ -639,7 +646,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                     // need to visit each fragment overlapping vth variant and multiply (add) in the
                     // amount the call at this site contributes to fragment likelihoods
                     for call in &pileup_lst[v] {
-                        if call.qual >= LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+                        if call.qual >= ln_max_p_miscall {
                             continue;
                         }
 
@@ -688,7 +695,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                     // amount the call at this site contributes to fragment likelihoods
 
                     for call in &pileup_lst[v] {
-                        if call.qual >= LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+                        if call.qual >= ln_max_p_miscall {
                             continue;
                         }
 
@@ -752,7 +759,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
             for hap_ix in &hap_ixs {
                 for call in &flist[f].calls {
-                    if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+                    if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
                         if call.allele == haps[*hap_ix][call.var_ix] {
                             pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
@@ -875,9 +882,9 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         if num_phased <= prev_num_phased { //if total_likelihood <= prev_total_likelihood {
 
             // restore the previous varlist
-            for i in 0..varlist.lst.len() {
-                varlist.lst[i] = varlist_bak.lst[i].clone();
-            }
+            //for i in 0..varlist.lst.len() {
+            //    varlist.lst[i] = varlist_bak.lst[i].clone();
+            //}
 
             break;
         }
