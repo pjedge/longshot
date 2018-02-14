@@ -293,14 +293,19 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
     }
 
     let mut haps: Vec<Vec<char>> = vec![vec!['0'; n_var]; 2];
+    let mut prev_total_likelihood = LogProb::ln_zero();
+    let mut prev_num_phased = 0;
 
-    for hapcut2_iter in 0..5 {
+    for hapcut2_iter in 0..10 {
+
+        let varlist_bak = (*varlist).clone();
 
         // print the haplotype assembly iteration
-        eprintln!("{}    round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
+        eprintln!("{}    Round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
 
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
         let mut vcf_buffer: Vec<Vec<u8>> = Vec::with_capacity(varlist.lst.len());
+        let mut hap1: Vec<u8> = vec![0u8; varlist.lst.len()];
 
         for i in 0..varlist.lst.len() {
 
@@ -309,6 +314,20 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                 && var.ref_allele.len() == 1 && var.var_allele.len() == 1
                 && var.gq > MIN_GQ_FOR_PHASING {
                 var_phased[i] = true;
+
+                if var.genotype == "0|1" {
+                    hap1[i] = '0' as u8;
+                } else if var.genotype == "1|0" {
+                    hap1[i] = '1' as u8;
+                } else {
+                    if rng.next_f64() < 0.5 {
+                        hap1[i] = '0' as u8;
+                    } else {
+                        hap1[i] = '1' as u8;
+                    }
+                }
+            } else {
+                hap1[i] = '-' as u8;
             }
 
             let line: String = format!("{}\t{}\t.\t{}\t{}\t.\t.\tRA={};AA={}\tGT:GQ\t{}:{}",
@@ -331,7 +350,6 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         }
 
         let frag_buffer = generate_flist_buffer(&flist, &var_phased);
-        let mut hap1: Vec<u8> = vec![0u8; varlist.lst.len()];
         let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
 
         call_hapcut2(&frag_buffer,
@@ -341,17 +359,35 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                      &mut hap1,
                      &mut phase_sets);
 
+        let m = <usize>::max_value();
+        let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
+
+        for (i,p) in phase_sets.iter().enumerate() {
+            if p < &0 {
+                continue;
+            }
+            if varlist.lst[i].pos0 < min_pos_ps[*p as usize] {
+                min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
+            }
+        }
+
         for i in 0..hap1.len() {
             match hap1[i] as char {
                 '0' => {
                     varlist.lst[i].genotype = "0|1".to_string();
-                    assert!(phase_sets[i] >= 0);
-                    varlist.lst[i].phase_set = Some(phase_sets[i] as usize);
+                    if phase_sets[i] >= 0 {
+                        varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
+                    } else {
+                        varlist.lst[i].phase_set = None;
+                    }
                 }
                 '1' => {
                     varlist.lst[i].genotype = "1|0".to_string();
-                    assert!(phase_sets[i] >= 0);
-                    varlist.lst[i].phase_set = Some(phase_sets[i] as usize);
+                    if phase_sets[i] >= 0 {
+                        varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
+                    } else {
+                        varlist.lst[i].phase_set = None;
+                    }
                 }
                 _ => {}
             }
@@ -404,7 +440,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
             }
         }
 
-        eprintln!("{}    refining genotypes using round {} haplotypes...",print_time(), hapcut2_iter+1);
+        eprintln!("{}    Refining genotypes using round {} haplotypes...",print_time(), hapcut2_iter+1);
 
         for _ in 0..max_iterations {
             let mut changed = false;
@@ -700,79 +736,154 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                 break;
             }
         }
-    }
 
-    // calculate the fraction of samples containing each genotype state
-    // this is our estimate of P(G | R,H)
+        let mut total_likelihood: LogProb = LogProb::ln_one();
+        let mut num_phased = 0;
 
-    for i in 0..varlist.lst.len() {
-        let pileup = &pileup_lst[i];
-        let var = &mut varlist.lst[i];
-
-        //let total: f64 = var.genotype_counts[0] +  var.genotype_counts[1] +
-         //                var.genotype_counts[2] +  var.genotype_counts[3];
-
-        let post00: LogProb = var.genotype_post[0];
-        let post01: LogProb = var.genotype_post[1];
-        let post10: LogProb = var.genotype_post[2];
-        let post11: LogProb = var.genotype_post[3];
-
-        let genotype: String;
-        let mut genotype_qual: f64;
-
-        /*
-        let post00_unphased = post00;
-        let post01_unphased = LogProb::ln_add_exp(post01, post10);
-        let post11_unphased = post11;
-
-        if post00_unphased > post01_unphased && post00_unphased > post11_unphased {
-            let p_call_wrong = LogProb::ln_add_exp(post01_unphased, post11_unphased);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "0|0".to_string();
-        } else if post01_unphased > post00_unphased && post01_unphased > post11_unphased {
-            let p_call_wrong = LogProb::ln_add_exp(post00_unphased, post11_unphased);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-
-            // we only show phase if variant was phased in the first round
-            // we do consider "flipping", if posteriors shifted when genotyping in round 2.
-
-            genotype = if var.genotype.contains("|") {
-                if post01 > post10 { "0|1".to_string() } else { "1|0".to_string() }
-            } else { "0/1".to_string() }
-        } else {
-            let p_call_wrong = LogProb::ln_add_exp(post00_unphased, post01_unphased);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "1|1".to_string();
-        }
-        */
-
-        if post00 > post01 && post00 > post10 && post00 > post11 {
-            let p_call_wrong = LogProb::ln_sum_exp(&vec![post01,post10,post11]);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "0|0".to_string();
-        }else if post01 > post00 && post01 > post10 && post01 > post11 {
-            let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post10,post11]);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "0|1".to_string();
-        }else if post10 > post00 && post10 > post01 && post10 > post11 {
-            let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post01,post11]);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "1|0".to_string();
-        }else {
-            let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post01,post10]);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "1|1".to_string();
+        for var in varlist.lst.iter() {
+            if (var.genotype == "0/1" || var.genotype == "0|1" || var.genotype == "1|0")
+                && var.ref_allele.len() == 1 && var.var_allele.len() == 1
+                && var.gq > MIN_GQ_FOR_PHASING {
+                num_phased += 1;
+            }
         }
 
-        let (count_ref, count_var, count_amb): (usize, usize, usize) = count_alleles(&pileup);
+        for f in 0..flist.len() {
+            let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
+            for hap_ix in &hap_ixs {
+                for call in &flist[f].calls {
+                    if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+                        // read allele matches haplotype allele
+                        if call.allele == haps[*hap_ix][call.var_ix] {
+                            pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
+                        } else { // read allele does not match haplotype allele
+                            pr[*hap_ix] = pr[*hap_ix] + call.qual;
+                        }
+                    }
+                }
+            }
+            total_likelihood = total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
+        }
 
-        var.qual = *PHREDProb::from(post00);
-        var.ra = count_ref;
-        var.aa = count_var;
-        var.na = count_amb;
-        var.genotype = genotype;
-        var.gq = genotype_qual;
-        var.filter = "PASS".to_string();
+
+        // update the various fields for the variant.
+
+        for i in 0..varlist.lst.len() {
+            let pileup = &pileup_lst[i];
+            let var = &mut varlist.lst[i];
+
+            //let total: f64 = var.genotype_counts[0] +  var.genotype_counts[1] +
+            //                var.genotype_counts[2] +  var.genotype_counts[3];
+
+            let post00: LogProb = var.genotype_post[0];
+            let post01: LogProb = var.genotype_post[1];
+            let post10: LogProb = var.genotype_post[2];
+            let post11: LogProb = var.genotype_post[3];
+
+            let genotype: String;
+            let mut genotype_qual: f64;
+
+
+            let post00_unphased = post00;
+            let post01_unphased = LogProb::ln_add_exp(post01, post10);
+            let post11_unphased = post11;
+
+            if post00_unphased > post01_unphased && post00_unphased > post11_unphased {
+                let p_call_wrong = LogProb::ln_add_exp(post01_unphased, post11_unphased);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+                genotype = match var.phase_set {
+                    Some(_) => {"0|0".to_string()}
+                    None => {"0/0".to_string()}
+                };
+            } else if post01_unphased > post00_unphased && post01_unphased > post11_unphased {
+                let p_call_wrong = LogProb::ln_add_exp(post00_unphased, post11_unphased);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+
+                // we only show phase if variant was phased in the first round
+                // we do consider "flipping", if posteriors shifted when genotyping in round 2.
+
+                genotype = match var.phase_set {
+                    Some(_) => {
+                        if post01 > post10 {
+                            "0|1".to_string()
+                        } else {
+                            "1|0".to_string()
+                        }
+                    }
+                    None => {"0/1".to_string()}
+                };
+
+            } else {
+                let p_call_wrong = LogProb::ln_add_exp(post00_unphased, post01_unphased);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+                genotype = match var.phase_set {
+                    Some(_) => {"1|1".to_string()}
+                    None => {"1/1".to_string()}
+                };
+            }
+
+            /*
+            if post00 > post01 && post00 > post10 && post00 > post11 {
+                let p_call_wrong = LogProb::ln_sum_exp(&vec![post01,post10,post11]);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+                match var.phase_set {
+                    Some(_) => {genotype = "0|0".to_string();}
+                    None => {genotype = "0/0".to_string();}
+                }
+
+            }else if post01 > post00 && post01 > post10 && post01 > post11 {
+                let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post10,post11]);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+
+                match var.phase_set {
+                    Some(_) => {genotype = "0|1".to_string();}
+                    None => {genotype = "0/1".to_string();}
+                }
+
+            }else if post10 > post00 && post10 > post01 && post10 > post11 {
+                let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post01,post11]);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+                match var.phase_set {
+                    Some(_) => {genotype = "1|0".to_string();}
+                    None => {genotype = "0/1".to_string();}
+                }
+            }else {
+                let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post01,post10]);
+                genotype_qual = *PHREDProb::from(p_call_wrong);
+
+                match var.phase_set {
+                    Some(_) => {genotype = "1|1".to_string();}
+                    None => {genotype = "1/1".to_string();}
+                }
+            }
+            */
+
+            let (count_ref, count_var, count_amb): (usize, usize, usize) = count_alleles(&pileup);
+
+            var.qual = *PHREDProb::from(post00);
+            var.ra = count_ref;
+            var.aa = count_var;
+            var.na = count_amb;
+            var.genotype = genotype;
+            var.gq = genotype_qual;
+            var.filter = "PASS".to_string();
+
+        }
+
+        eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
+
+        if num_phased <= prev_num_phased { //if total_likelihood <= prev_total_likelihood {
+
+            // restore the previous varlist
+            for i in 0..varlist.lst.len() {
+                varlist.lst[i] = varlist_bak.lst[i].clone();
+            }
+
+            break;
+        }
+
+        prev_num_phased = num_phased;
+        prev_total_likelihood = total_likelihood;
 
     }
 }
@@ -822,7 +933,8 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
 
     let headerstr = "##fileformat=VCFv4.2
 ##source=ReaperV0.1
-##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
+##FORMAT=<ID=GQ,Number=2,Type=Integer,Description=\"Genotype Quality\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
         .to_string();
 
@@ -855,7 +967,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
         }
 
         let ps = match var.phase_set {
-            Some(ps) => format!(";PS={}", ps),
+            Some(ps) => format!("{}", ps),
             None => ".".to_string()
         };
 

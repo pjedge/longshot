@@ -90,9 +90,8 @@ pub struct ExtractFragmentParameters {
     pub alignment_type: AlignmentType,
     pub band_width: usize,
     pub anchor_length: usize,
-    pub anchor_k: usize,
     pub short_hap_max_snvs: usize,
-    pub max_window_length: usize,
+    pub max_window_padding: usize,
 }
 
 #[derive(Clone, Copy)]

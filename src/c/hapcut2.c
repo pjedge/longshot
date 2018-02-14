@@ -40,9 +40,10 @@ int LONG_READS = 0; // if this variable is 1, the data contains long read data
 #include "find_maxcut.c"   // function compute_good_cut
 #include "post_processing.c"  // post-processing functions
 
-int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps, char* HAP, int* PS) {
+int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps, char* HAP1, int* PS) {
     // IMP NOTE: all SNPs start from 1 instead of 0 and all offsets are 1+
 
+    srand(1);
     if (VERBOSE) fprintf_time(stderr, "Calling Max-Likelihood-Cut based haplotype assembly algorithm\n");
 
     int iter = 0, components = 0;
@@ -101,17 +102,17 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
     read_vcf_buffer(variantbuffer, snpfrag, snps);
 
     // INITIALIZE RANDOM HAPLOTYPES
-    char* HAP1 = (char*)malloc(snps+1);
+    //char* HAP1 = (char*)malloc(snps+1);
 
-    for (i = 0; i < snps; i++) {
-        if (snpfrag[i].frags == 0) {
-            HAP1[i] = '-';
-        } else if (drand48() < 0.5) {
-            HAP1[i] = '0';
-        } else {
-            HAP1[i] = '1';
-        }
-    }
+    //for (i = 0; i < snps; i++) {
+    //    if (snpfrag[i].frags == 0) {
+    //        HAP1[i] = '-';
+    //    } else if (drand48() < 0.5) {
+    //        HAP1[i] = '0';
+    //    } else {
+    //        HAP1[i] = '1';
+    //    }
+    //}
 
     // for each block, we maintain best haplotype solution under MFR criterion
     // compute the component-wise score for 'initHAP' haplotype
@@ -190,16 +191,15 @@ int hapcut2(char** fragmentbuffer, char** variantbuffer, int fragments, int snps
 
     for (i = 0; i < snps; i++){
 
-        if (snpfrag[i].genotypes[0] == snpfrag[i].genotypes[2]) {
-            HAP[i] = '-';
+        if (HAP1[i] == '-' || snpfrag[i].genotypes[0] == snpfrag[i].genotypes[2]) {
+            HAP1[i] = '-';
         } else {
-            HAP[i] = HAP1[i];
             PS[i] = snpfrag[i].component;
         }
     }
 
     // FREE UP MEMORY
-    free(HAP1);
+    //free(HAP1);
     for (i = 0; i < snps; i++) free(snpfrag[i].elist);
     for (i = 0; i < snps; i++) free(snpfrag[i].telist);
     component = 0;

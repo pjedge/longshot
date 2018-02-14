@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use rust_htslib::bam::record::Record;
@@ -9,27 +8,10 @@ use chrono::prelude::*;
 use util::*;
 use bio::stats::{LogProb, PHREDProb};
 use bio::io::fasta;
+use bio::pattern_matching::bndm;
 use realignment;
 
 static VERBOSE: bool = false;
-
-// returns true if kmers in seq are unique, else false
-fn check_kmers_unique(seq: &Vec<char>, k: usize) -> (bool) {
-    //seq_str = seq.iter().cloned().collect();
-    let mut kmers: HashSet<&[char]> = HashSet::new();
-
-    for i in 0..(seq.len() - k + 1) {
-        let kmer = &seq[i..(i + k)]; // (&seq[i..(i+k)]).iter().cloned().collect();
-        //kmer.clone_from_slice(&seq[i..(i + k)]);
-        if kmers.contains(kmer) {
-            return false;
-        }
-
-        kmers.insert(kmer);
-    }
-
-    true
-}
 
 // an extension of the rust-htslib cigar representation
 // has the cigar operation as well as the position on the reference of the operation start,
@@ -207,14 +189,23 @@ pub fn find_anchors(bam_record: &Record,
                     cigarpos_list: &Vec<CigarPos>,
                     var_interval: GenomicInterval,
                     ref_seq: &Vec<char>,
+                    read_seq: &Vec<char>,
                     target_names: &Vec<String>,
                     extract_params: ExtractFragmentParameters)
                     -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
 
-    let anchor_length = extract_params.anchor_length as u32;
-    let anchor_k = extract_params.anchor_k;
     //let min_window_length = extract_params.min_window_length;
-    let max_window_length = extract_params.max_window_length;
+    let max_window_padding = extract_params.max_window_padding;
+
+    let anchor_length = extract_params.anchor_length as u32;
+
+    let l_max = var_interval.start_pos as usize - max_window_padding;
+    let r_max = var_interval.end_pos as usize + max_window_padding;
+    let mut ref_seq_max_window: Vec<u8> = vec![];
+
+    for c in ref_seq[l_max..r_max+1].iter() {
+        ref_seq_max_window.push(*c as u8);
+    }
 
     if var_interval.chrom != target_names[bam_record.tid() as usize] ||
         (var_interval.start_pos as i32) >=
@@ -240,6 +231,8 @@ pub fn find_anchors(bam_record: &Record,
     // find left_ix and right_ix.
     // these are the indexes into the CIGAR of the CIGAR operation holding the
     // left side of the range and right side of the range
+
+    // how slow is this? could be sped up with binary search in the future.
     for (i, cigarpos) in cigarpos_list.iter().enumerate() {
         match cigarpos.cig {
             Cigar::Match(l) |
@@ -271,28 +264,19 @@ pub fn find_anchors(bam_record: &Record,
     let mut match_len_left = 0;
     let mut seen_indel_left = false;
     let mut found_anchor_left = false;
+    //println!("**************************************************");
+    //println!("searching for left anchor...");
+
     for i in (0..left_ix + 1).rev() {
         match cigarpos_list[i].cig {
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
                 match_len_left += l;
+                let mut potential_anchor = false;
                 if seen_indel_left && match_len_left > anchor_length {
                     // we have found a sufficiently long match and it's NOT the cigar op containing var_interval.start_pos
                     left_anchor_ref = cigarpos_list[i].ref_pos + match_len_left - anchor_length;
                     left_anchor_read = cigarpos_list[i].read_pos + match_len_left - anchor_length;
-                    let l: usize = left_anchor_ref as usize - anchor_k;
-                    let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
-
-                    if l > 0 && r < ref_seq.len() &&
-                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
-                        found_anchor_left = true;
-                        break;
-
-                    } else if match_len_left > (max_window_length / 2) as u32{
-                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
-                        // once we've hit the window size limit
-                        found_anchor_left = true;
-                        break;
-                    }
+                    potential_anchor = true;
                 } else if !seen_indel_left &&
                     cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length {
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.start_pos
@@ -301,17 +285,52 @@ pub fn find_anchors(bam_record: &Record,
                     left_anchor_read = cigarpos_list[i].read_pos +
                         (var_interval.start_pos - anchor_length -
                             cigarpos_list[i].ref_pos);
-                    let l: usize = left_anchor_ref as usize - anchor_k;
-                    let r: usize = (left_anchor_ref + anchor_length) as usize + anchor_k;
+                    potential_anchor = true;
+                }
 
-                    if l > 0 && r < ref_seq.len() &&
-                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
-                        found_anchor_left = true;
-                        break;
-                    } else if match_len_left > (max_window_length / 2) as u32{
-                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
-                        // once we've hit the window size limit
-                        found_anchor_left = true;
+                if potential_anchor {
+                    while left_anchor_ref >= cigarpos_list[i].ref_pos {
+
+                        let l_anc: usize = left_anchor_ref as usize;
+                        let r_anc: usize = (left_anchor_ref + anchor_length) as usize;
+                        if l_anc <= 0 || r_anc >= ref_seq.len() {
+                            continue;
+                        }
+
+                        // check if there is an exact match between anchor sequence on read and ref
+                        let anchor_on_read: Vec<char> = read_seq[(left_anchor_read as usize)..
+                            (left_anchor_read + anchor_length) as usize]
+                            .to_vec();
+                        assert_eq!(anchor_on_read.len(),anchor_length as usize);
+                        let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
+                        let anchor_match = anchor_on_read == anchor_on_ref;
+
+                        // check that the anchor sequence is unique in the region
+                        let mut pattern: Vec<u8>= vec![];
+                        for c in anchor_on_ref.iter() {
+                            pattern.push(*c as u8);
+                        };
+                        assert_eq!(pattern.len(), anchor_length as usize);
+                        let bndm = bndm::BNDM::new(&pattern);
+                        let occ: Vec<usize> = bndm.find_all(&ref_seq_max_window).collect();
+
+                        //println!("ref_seq_max_window: {}", String::from_utf8(ref_seq_max_window.clone()).unwrap());
+                        //println!("anchor_on_ref: {}", String::from_utf8(pattern.clone()).unwrap());
+                        //let s: String = anchor_on_read.into_iter().collect();
+                        //println!("anchor_on_read: {}", s);
+                        //println!("pattern: {}", String::from_utf8(pattern.clone()).unwrap());
+                        //println!("anchor_match: {} occ.len(): {} l_anc <= l_max: {}", anchor_match, occ.len(), l_anc <= l_max);
+                        //println!("***************");
+
+                        if (anchor_match && occ.len() == 1) || l_anc <= l_max {
+                            found_anchor_left = true;
+                            break;
+                        }
+
+                        left_anchor_ref -= 1;
+                        left_anchor_read -= 1;
+                    }
+                    if found_anchor_left {
                         break;
                     }
                 }
@@ -337,6 +356,8 @@ pub fn find_anchors(bam_record: &Record,
         return Ok(None); // failed to find a left anchor
     }
 
+    //println!("**************************************************");
+    //println!("searching for right anchor...");
     // step forwards to find right anchor
     let mut match_len_right = 0;
     let mut seen_indel_right = false;
@@ -345,25 +366,14 @@ pub fn find_anchors(bam_record: &Record,
         match cigarpos_list[i].cig {
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
                 match_len_right += l;
+                let mut potential_anchor = false;
                 if seen_indel_right && match_len_right > anchor_length {
                     // we have found a sufficiently long match and it's NOT the cigar op containing var_interval.end_pos
                     right_anchor_ref = cigarpos_list[i].ref_pos + l - match_len_right +
                         anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos + l - match_len_right +
                         anchor_length;
-                    let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
-                    let r: usize = right_anchor_ref as usize + anchor_k;
-
-                    if l > 0 && r < ref_seq.len() &&
-                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
-                        found_anchor_right = true;
-                        break;
-                    } else if match_len_right > (max_window_length / 2) as u32{
-                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
-                        // once we've hit the window size limit
-                        found_anchor_right = true;
-                        break;
-                    }
+                    potential_anchor = true;
                 } else if !seen_indel_right &&
                     cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length {
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.end_pos
@@ -372,17 +382,52 @@ pub fn find_anchors(bam_record: &Record,
                     right_anchor_read = cigarpos_list[i].read_pos +
                         (var_interval.end_pos + anchor_length -
                             cigarpos_list[i].ref_pos);
-                    let l: usize = (right_anchor_ref - anchor_length) as usize - anchor_k;
-                    let r: usize = right_anchor_ref as usize + anchor_k;
+                    potential_anchor = true;
+                }
 
-                    if l > 0 && r < ref_seq.len() &&
-                        check_kmers_unique(&ref_seq[l..r + 1].to_vec(), anchor_k) {
-                        found_anchor_right = true;
-                        break;
-                    } else if match_len_right > (max_window_length / 2) as u32{
-                        // added 1/16/18 -- new idea is to leave in arbitrary 'anchors'
-                        // once we've hit the window size limit
-                        found_anchor_right = true;
+                if potential_anchor {
+                    while right_anchor_ref < cigarpos_list[i].ref_pos + l {
+
+                        let l_anc: usize = (right_anchor_ref - anchor_length) as usize;
+                        let r_anc: usize = right_anchor_ref as usize;
+                        if l_anc <= 0 || r_anc >= ref_seq.len() {
+                            continue;
+                        }
+
+                        // check if there is an exact match between anchor sequence on read and ref
+                        let anchor_on_read: Vec<char> = read_seq[(right_anchor_read - anchor_length) as usize..
+                            right_anchor_read as usize]
+                            .to_vec();
+                        assert_eq!(anchor_on_read.len(),anchor_length as usize);
+                        let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
+                        let anchor_match = anchor_on_read == anchor_on_ref;
+
+                        // check that the anchor sequence is unique in the region
+                        let mut pattern: Vec<u8> = vec![];
+                        for c in anchor_on_ref.iter() {
+                            pattern.push(*c as u8);
+                        };
+                        assert_eq!(pattern.len(), anchor_length as usize);
+                        let bndm = bndm::BNDM::new(&pattern);
+                        let occ: Vec<usize> = bndm.find_all(&ref_seq_max_window).collect();
+
+                        //println!("ref_seq_max_window: {}", String::from_utf8(ref_seq_max_window.clone()).unwrap());
+                        //println!("anchor_on_ref: {}", String::from_utf8(pattern.clone()).unwrap());
+                        //let s: String = anchor_on_read.into_iter().collect();
+                        //println!("anchor_on_read: {}", s);
+                        //println!("pattern: {}", String::from_utf8(pattern.clone()).unwrap());
+                        //println!("anchor_match: {} occ.len(): {} r_anc >= r_max: {}", anchor_match, occ.len(), r_anc >= r_max);
+                        //println!("***************");
+
+                        if (anchor_match && occ.len() == 1) || r_anc >= r_max {
+                            found_anchor_right = true;
+                            break;
+                        }
+
+                        right_anchor_ref += 1;
+                        right_anchor_read += 1;
+                    }
+                    if found_anchor_right {
                         break;
                     }
                 }
@@ -403,7 +448,6 @@ pub fn find_anchors(bam_record: &Record,
             }
         }
     }
-
 
     if !found_anchor_right {
         return Ok(None); // failed to find a right anchor
@@ -622,6 +666,7 @@ pub fn extract_fragment(bam_record: &Record,
                                    &cigarpos_list,
                                    var_interval,
                                    &ref_seq,
+                                   &read_seq,
                                    &target_names,
                                    extract_params).expect("CIGAR or Anchor Error while finding anchor sequences.") {
             Some(anchors) => {var_anchor_lst.push((var.clone(), anchors));},
@@ -757,7 +802,9 @@ pub fn extract_fragments(bamfile_name: &String,
                 // print the percentage of variants processed every 10%
                 if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
                     complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
-                    eprintln!("{}    {}% of variants processed...",print_time(), complete*10);
+                    if complete < 10 {
+                        eprintln!("{}    {}% of variants processed...", print_time(), complete * 10);
+                    }
                 }
 
                 let frag = extract_fragment(&record,
@@ -775,6 +822,9 @@ pub fn extract_fragments(bamfile_name: &String,
 
                 prev_tid = tid;
             }
+
+            eprintln!("{}    100% of variants processed.",print_time());
+
         }
         &None => {
             let bam = bam::Reader::from_path(bamfile_name).unwrap();
@@ -810,7 +860,9 @@ pub fn extract_fragments(bamfile_name: &String,
                 // print the percentage of variants processed every 10%
                 if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
                     complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
-                    eprintln!("{}    {}% of variants processed...",print_time(), complete*10);
+                    if complete < 10 {
+                        eprintln!("{}    {}% of variants processed...",print_time(), complete*10);
+                    }
                 }
 
                 let frag = extract_fragment(&record,
@@ -828,6 +880,9 @@ pub fn extract_fragments(bamfile_name: &String,
 
                 prev_tid = tid;
             }
+
+            eprintln!("{}    100% of variants processed.",print_time());
+
         }
     };
 
@@ -851,61 +906,4 @@ pub fn extract_fragments(bamfile_name: &String,
 mod tests {
     use super::*;
 
-    // helper function for more efficient testing of check_kmers_unique function
-    fn test_check_kmers_helper(test_str: String, k: usize, exp_result: bool) {
-        let mut test_vec: Vec<char> = vec![];
-        let mut test_vec_backup: Vec<char> = vec![];
-
-        for c in test_str.chars() {
-            let u: char = c as char;
-            test_vec.push(u);
-            test_vec_backup.push(u);
-        }
-        // test that function computes the expected result
-        assert_eq!(exp_result, check_kmers_unique(&test_vec, k));
-        // check that the original vector is not consumed or mutated by comparing to a backup
-        assert_eq!(test_vec, test_vec_backup);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_pass_1() {
-        // expect true. basic test, all 3-mers are unique
-        test_check_kmers_helper("AAATGCGCCA".to_string(), 3, true);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_pass_2() {
-        // expect true. AAAT, a 4-mer, is repeated, but no 5-mers are repeated
-        test_check_kmers_helper("AAATGCGAAATCCAAGAATGA".to_string(), 5, true);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_fail_1() {
-        //expect false because AAAT, a 4-mer, is repeated.
-        test_check_kmers_helper("AAATGCGAAATCCA".to_string(), 4, false);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_fail_end() {
-        // check that result is false if last kmer ('GAATGA') is repeated.
-        test_check_kmers_helper("AAATGAATGACAAGAATGA".to_string(), 6, false);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_fail_beginning() {
-        // check that result is false if first kmer ('GAATGA') is repeated.
-        test_check_kmers_helper("GAATGAAAATGAATGACAAG".to_string(), 6, false);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_fail_overlap() {
-        // check that result is false if overlapping kmers ('TGATG' -> 'TGATGATG') are repeated
-        test_check_kmers_helper("CCCCTGATGATGACCCC".to_string(), 5, false);
-    }
-
-    #[test]
-    fn test_check_kmers_unique_expect_pass_3() {
-        // check that overlap test returns true if we insert a 'C'
-        test_check_kmers_helper("CCCCTGATCATGACCCC".to_string(), 5, true);
-    }
 }
