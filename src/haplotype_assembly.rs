@@ -36,7 +36,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         line.push(' ' as u8);
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] {
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)){
                 if c.var_ix - prev_call == 1 {
                     line.push(c.allele as u8)
                 } else {
