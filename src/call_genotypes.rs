@@ -293,7 +293,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
     }
 
     let mut haps: Vec<Vec<char>> = vec![vec!['0'; n_var]; 2];
-    let mut prev_total_likelihood = LogProb::ln_zero();
+    //let mut prev_total_likelihood = LogProb::ln_zero();
     let mut prev_num_phased = 0;
 
     for hapcut2_iter in 0..10 {
@@ -883,7 +883,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
         }
 
         prev_num_phased = num_phased;
-        prev_total_likelihood = total_likelihood;
+        //prev_total_likelihood = total_likelihood;
 
     }
 }
