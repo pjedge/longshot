@@ -24,21 +24,21 @@ use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, pars
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     // non-homopolymer probabilities
-    match_from_match: 0.95,
+    match_from_match: 0.85,
     mismatch_from_match: 0.01,
-    insertion_from_match: 0.02,
+    insertion_from_match: 0.12,
     deletion_from_match: 0.02,
-    extend_from_insertion: 0.13,
-    match_from_insertion: 0.8609375,
-    mismatch_from_insertion: 0.0090625,
-    extend_from_deletion: 0.06,
-    match_from_deletion: 0.9290697,
-    mismatch_from_deletion: 0.010930,
+    extend_from_insertion: 0.5,
+    match_from_insertion: 0.49397590,
+    mismatch_from_insertion: 0.00602409,
+    extend_from_deletion: 0.25,
+    match_from_deletion: 0.7409638,
+    mismatch_from_deletion: 0.00903614,
     // homopolymer probabilities
-    match_from_match_homopolymer: 0.83,
+    match_from_match_homopolymer: 0.85,
     mismatch_from_match_homopolymer: 0.01,
     insertion_from_match_homopolymer: 0.12,
-    deletion_from_match_homopolymer: 0.04,
+    deletion_from_match_homopolymer: 0.02,
     extend_from_insertion_homopolymer: 0.5,
     match_from_insertion_homopolymer: 0.49397590,
     mismatch_from_insertion_homopolymer: 0.00602409,
@@ -105,7 +105,7 @@ fn main() {
         .arg(Arg::with_name("Region")
                 .short("r")
                 .long("region")
-                .value_name("VCF")
+                .value_name("string")
                 .help("Region in format <chrom> or <chrom:start-stop> in which to call variants.")
                 .display_order(40)
                 .takes_value(true))
@@ -128,28 +128,21 @@ fn main() {
                 .value_name("int")
                 .help("Length of indel-free anchor sequence on the left and right side of read realignment window.")
                 .display_order(100)
-                .default_value("10"))
-        .arg(Arg::with_name("Anchor k")
-                .short("k")
-                .long("anchor_k")
-                .value_name("int")
-                .help("A filter for low-complexity anchor sequences. A valid anchor must have no duplicates in the kmers that overlap it.")
-                .display_order(110)
-                .default_value("5"))
+                .default_value("6"))
         .arg(Arg::with_name("Short haplotype max SNVs")
                 .short("m")
                 .long("max_snvs")
                 .value_name("int")
                 .help("Cut off short haplotypes after this many SNVs. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
                 .display_order(130)
-                .default_value("5"))
-        .arg(Arg::with_name("Max window length")
+                .default_value("3"))
+        .arg(Arg::with_name("Max window padding")
                 .short("W")
                 .long("max_window")
                 .value_name("int")
-                .help("Ignore a variant/short haplotype if the realignment window for read or reference is larger than w bases.")
+                .help("Maximum \"padding\" bases on either side of variant realignment window")
                 .display_order(150)
-                .default_value("200"))
+                .default_value("50"))
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
@@ -210,18 +203,12 @@ fn main() {
         .parse::<usize>()
         .expect("Argument anchormust be a positive integer!");
 
-    let anchor_k: usize = input_args.value_of("Anchor k")
-        .unwrap()
-        .parse::<usize>()
-        .expect("Argument anchor_k must be a positive integer!");
-    // TODO check that anchor_k is less than or equal to anchor length
-
     let short_hap_max_snvs: usize = input_args.value_of("Short haplotype max SNVs")
         .unwrap()
         .parse::<usize>()
         .expect("Argument max_snvs must be a positive integer!");
 
-    let max_window_length: usize = input_args.value_of("Max window length")
+    let max_window_padding: usize = input_args.value_of("Max window padding")
         .unwrap()
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
@@ -304,9 +291,8 @@ fn main() {
         alignment_type: alignment_type,
         band_width: band_width,
         anchor_length: anchor_length,
-        anchor_k: anchor_k,
         short_hap_max_snvs: short_hap_max_snvs,
-        max_window_length: max_window_length,
+        max_window_padding: max_window_padding,
     };
 
     eprintln!("{} Generating condensed read data for SNVs...",print_time());
