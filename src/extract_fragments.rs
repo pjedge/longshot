@@ -166,7 +166,9 @@ pub fn create_augmented_cigarlist(refpos: u32,
                     "'hard clip' (H) found in between operations, contradicting SAMv1 spec that hard clips can only be at the ends of reads".to_owned()
                 ));
             }
-            &Cigar::HardClip(_) => {}
+            &Cigar::HardClip(_) => {
+                j += 1;
+            }
             &Cigar::Back(_) => {
                 return Err(CigarOrAnchorError::UnsupportedOperation(
                     "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
@@ -294,7 +296,7 @@ pub fn find_anchors(bam_record: &Record,
                         let l_anc: usize = left_anchor_ref as usize;
                         let r_anc: usize = (left_anchor_ref + anchor_length) as usize;
                         if l_anc <= 0 || r_anc >= ref_seq.len() {
-                            continue;
+                            break;
                         }
 
                         // check if there is an exact match between anchor sequence on read and ref
@@ -391,7 +393,7 @@ pub fn find_anchors(bam_record: &Record,
                         let l_anc: usize = (right_anchor_ref - anchor_length) as usize;
                         let r_anc: usize = right_anchor_ref as usize;
                         if l_anc <= 0 || r_anc >= ref_seq.len() {
-                            continue;
+                            break;
                         }
 
                         // check if there is an exact match between anchor sequence on read and ref
@@ -486,6 +488,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                        extract_params: ExtractFragmentParameters,
                        align_params: AlignmentParameters)
                        -> Vec<FragCall> {
+
     let mut calls: Vec<FragCall> = vec![];
 
     //let ref_window = ref_seq[(anchors.left_anchor_ref as usize)..
@@ -501,6 +504,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     let mut max_hap: usize = 0;
     let n_vars: usize = var_cluster.len() as usize; // number of variants in cluster
     let n_haps: usize = 2usize.pow(n_vars as u32); // number of possible haplotypes for cluster
+    assert!(n_vars <= extract_params.short_hap_max_snvs);
 
     let in_hap = |var: usize, hap: usize| (hap & 2usize.pow(var as u32)) > 0;
 
@@ -639,6 +643,7 @@ pub fn extract_fragment(bam_record: &Record,
                         align_params: AlignmentParameters)
                         -> Option<Fragment> {
 
+
     if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
         bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
         {
@@ -647,6 +652,9 @@ pub fn extract_fragment(bam_record: &Record,
 
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname());
+
+    if VERBOSE {println!("Extracting fragment for read {}...", id);}
+
     let mut fragment = Fragment {
         id: id,
         calls: vec![],
@@ -688,7 +696,7 @@ pub fn extract_fragment(bam_record: &Record,
             l = var_cluster.len();
             if l == 0 ||
                 (anc.left_anchor_ref < var_anchors[l - 1].right_anchor_ref
-                    && l <= extract_params.short_hap_max_snvs) {
+                    && l < extract_params.short_hap_max_snvs) {
                 var_cluster.push(var);
                 var_anchors.push(anc);
             } else {
@@ -752,6 +760,7 @@ pub fn extract_fragments(bamfile_name: &String,
                          extract_params: ExtractFragmentParameters,
                          align_params: AlignmentParameters)
                          -> Vec<Fragment> {
+
     let t_names = parse_target_names(&bamfile_name);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter

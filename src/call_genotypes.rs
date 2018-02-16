@@ -940,6 +940,14 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
 
     let headerstr = "##fileformat=VCFv4.2
 ##source=ReaperV0.1
+##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">
+##INFO=<ID=RA,Number=1,Type=Integer,Description=\"Number of Observed Reference Alleles\">
+##INFO=<ID=AA,Number=1,Type=Integer,Description=\"Number of Observed Variant Alleles\">
+##INFO=<ID=NA,Number=1,Type=Integer,Description=\"Number of Observed Ambiguous Alleles\">
+##INFO=<ID=P00,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 0|0 Phased Genotype\">
+##INFO=<ID=P01,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 0|1 Phased Genotype\">
+##INFO=<ID=P10,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 1|0 Phased Genotype\">
+##INFO=<ID=P11,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 1|1 Phased Genotype\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=GQ,Number=2,Type=Integer,Description=\"Genotype Quality\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"

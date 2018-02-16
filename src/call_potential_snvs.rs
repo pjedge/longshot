@@ -257,6 +257,7 @@ pub fn call_potential_snvs(bam_file: &String,
             LogProb::ln_zero()
         };
 
+        /*
         let indel_qual = if !indel_ref_allele.contains("N") && !indel_var_allele.contains("N") {
             let (_indel_post00, indel_post01, indel_post11) = calculate_genotypes_without_haplotypes(&indel_pileup_calls, &genotype_priors, &indel_ref_allele, &indel_var_allele);
             LogProb::ln_add_exp(indel_post01, indel_post11)
@@ -271,6 +272,9 @@ pub fn call_potential_snvs(bam_file: &String,
         } else {
             (indel_ref_allele, indel_var_allele, indel_qual)
         };
+        */
+
+        let (ref_allele, var_allele, qual) = (snv_ref_allele, snv_var_allele, snv_qual);
 
         next_valid_pos = (pos+1) as u32;
 
