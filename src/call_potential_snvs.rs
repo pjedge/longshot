@@ -300,7 +300,9 @@ pub fn call_potential_snvs(bam_file: &String,
                 genotype: "./.".to_string(),
                 gq: 0.0,
                 genotype_post: [LogProb::from(Prob(0.25)); 4],
-                phase_set: None
+                phase_set: None,
+                mec: 0,
+                mec_frac: 0.0
             };
 
             // we don't want potential SNVs that are inside a deletion, for instance.

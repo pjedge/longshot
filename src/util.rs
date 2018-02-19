@@ -257,7 +257,9 @@ pub struct Var {
     pub genotype: String,
     pub gq: f64,
     pub genotype_post: [LogProb; 4],  // genotype posteriors... [p00, p01, p10, p11]
-    pub phase_set: Option<usize>
+    pub phase_set: Option<usize>,
+    pub mec: usize,
+    pub mec_frac: f64
     //pub pileup: Option(Vec<PileupElement>),
 }
 
