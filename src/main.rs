@@ -19,7 +19,7 @@ mod util;
 use clap::{Arg, App};
 use chrono::prelude::*;
 
-use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, var_filter};
+use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, var_filter, calculate_mec};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -143,6 +143,13 @@ fn main() {
                 .help("Maximum \"padding\" bases on either side of variant realignment window")
                 .display_order(150)
                 .default_value("50"))
+        .arg(Arg::with_name("Max MEC Fraction")
+            .short("M")
+            .long("max_MEC_fraction")
+            .value_name("float")
+            .help("Flag SNVs for which the Phase Group MEC fraction exceeds this amount.")
+            .display_order(155)
+            .default_value("0.05"))
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
@@ -184,7 +191,6 @@ fn main() {
 
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
-    // TODO check that min_alt_frac is between 0 and 1
 
     let max_cov: Option<u32> = match input_args.value_of("Max coverage") {
         Some(cov) => {
@@ -212,6 +218,15 @@ fn main() {
         .unwrap()
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
+
+    let max_mec_frac:f64 = input_args.value_of("Max MEC Fraction")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument max_mec_frac must be a positive float!");
+
+    if !(max_mec_frac >= 0.0 && max_mec_frac <= 1.0) {
+        panic!("Max MEC Fraction must be a float between 0.0 and 1.0.");
+    }
 
     let mut alignment_type = AlignmentType::NumericallyStableAllAlignment;
 
@@ -312,10 +327,12 @@ fn main() {
     };
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes(&flist, &mut varlist, &interval);
+    call_genotypes(&flist, &mut varlist);
+
+    calculate_mec(&flist, &mut varlist);
 
     eprintln!("{} Adding filter flags based on depth and variant density...",print_time());
-    var_filter(&mut varlist, 50.0, 500, 10, max_cov);
+    var_filter(&mut varlist, 50.0, 500, 10, max_cov, max_mec_frac);
 
     eprintln!("{} Printing VCF file...",print_time());
     print_vcf(&varlist, &interval, indels, output_vcf_file);

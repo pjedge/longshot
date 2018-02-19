@@ -273,8 +273,7 @@ pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &m
 }
 
 pub fn call_genotypes(flist: &Vec<Fragment>,
-                      varlist: &mut VarList,
-                      interval: &Option<GenomicInterval>) {
+                      varlist: &mut VarList) {
     let genotype_priors = estimate_genotype_priors();
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -303,7 +302,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
     //let mut prev_total_likelihood = LogProb::ln_zero();
     let mut prev_num_phased = 0;
 
-    for hapcut2_iter in 0..10 {
+    for hapcut2_iter in 0..max_iterations {
 
         //let varlist_bak = (*varlist).clone();
 
@@ -462,6 +461,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
 
                 let var = &mut varlist.lst[v];
 
+                /*
                 match interval {
                     &Some(ref iv) => {
                         if var.chrom != iv.chrom ||
@@ -472,7 +472,7 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                     }
                     &None => {}
                 }
-
+                */
                 let mut p_reads: [LogProb; 4] = [LogProb::ln_one(); 4];
 
                 // let g be the current genotype being considered to switch to
@@ -829,42 +829,6 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
                 };
             }
 
-            /*
-            if post00 > post01 && post00 > post10 && post00 > post11 {
-                let p_call_wrong = LogProb::ln_sum_exp(&vec![post01,post10,post11]);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-                match var.phase_set {
-                    Some(_) => {genotype = "0|0".to_string();}
-                    None => {genotype = "0/0".to_string();}
-                }
-
-            }else if post01 > post00 && post01 > post10 && post01 > post11 {
-                let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post10,post11]);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-
-                match var.phase_set {
-                    Some(_) => {genotype = "0|1".to_string();}
-                    None => {genotype = "0/1".to_string();}
-                }
-
-            }else if post10 > post00 && post10 > post01 && post10 > post11 {
-                let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post01,post11]);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-                match var.phase_set {
-                    Some(_) => {genotype = "1|0".to_string();}
-                    None => {genotype = "0/1".to_string();}
-                }
-            }else {
-                let p_call_wrong = LogProb::ln_sum_exp(&vec![post00,post01,post10]);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-
-                match var.phase_set {
-                    Some(_) => {genotype = "1|1".to_string();}
-                    None => {genotype = "1/1".to_string();}
-                }
-            }
-            */
-
             let (count_ref, count_var, count_amb): (usize, usize, usize) = count_alleles(&pileup);
 
             var.qual = *PHREDProb::from(post00);
@@ -895,7 +859,71 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
     }
 }
 
-pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>) {
+pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
+
+    let hap_ixs = vec![0, 1];
+    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
+
+    for mut var in &mut varlist.lst {
+        var.mec = 0;
+        var.mec_frac = 0.0;
+    }
+
+    for f in 0..flist.len() {
+
+        let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
+
+        for &hap_ix in &hap_ixs {
+            for call in &flist[f].calls {
+                if call.qual < ln_max_p_miscall {
+                    let mut chs = varlist.lst[call.var_ix].genotype.chars();
+                    let g1 = chs.next();
+                    let sep = chs.next();
+                    let g2 = chs.next();
+                    let g = vec![g1.unwrap(),g2.unwrap()];
+                    if sep.unwrap() != '|' {
+                        continue; // only care about phased variants.
+                    }
+                    // read allele matches haplotype allele
+                    if call.allele != g[hap_ix] {
+                        mismatched_vars[hap_ix].push(call.var_ix);
+                    }
+                }
+            }
+        }
+
+        let min_error_hap = if mismatched_vars[0].len() < mismatched_vars[1].len() { 0 } else { 1 };
+
+        for &ix in &mismatched_vars[min_error_hap] {
+            varlist.lst[ix].mec += 1;
+        }
+    }
+
+    let mut block_mec: HashMap<usize, usize> = HashMap::new();
+    let mut block_total: HashMap<usize, usize> = HashMap::new();
+
+    for mut var in &mut varlist.lst {
+        match var.phase_set {
+            Some(ps) => {
+                *block_mec.entry(ps).or_insert(0) += var.mec;
+                *block_total.entry(ps).or_insert(0) += var.ra + var.aa;
+            }
+            None => {}
+        }
+    }
+
+    for mut var in &mut varlist.lst {
+        match var.phase_set {
+            Some(ps) => {
+                var.mec_frac = *block_mec.get(&ps).unwrap() as f64 / *block_total.get(&ps).unwrap() as f64;
+            }
+            None => {}
+        }
+    }
+}
+
+pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, max_mec_frac: f64) {
+
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].qual < density_qual { continue; }
 
@@ -927,6 +955,15 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
         }
         None => {}
     }
+    for i in 0..varlist.lst.len() {
+        if varlist.lst[i].mec_frac >= max_mec_frac {
+            if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
+                varlist.lst[i].filter = "psmf".to_string();
+            } else {
+                varlist.lst[i].filter.push_str(";psmf");
+            }
+        }
+    }
 }
 
 pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: String) {
@@ -948,6 +985,9 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
 ##INFO=<ID=P01,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 0|1 Phased Genotype\">
 ##INFO=<ID=P10,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 1|0 Phased Genotype\">
 ##INFO=<ID=P11,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 1|1 Phased Genotype\">
+##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
+##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
+##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=GQ,Number=2,Type=Integer,Description=\"Genotype Quality\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
@@ -987,7 +1027,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
         };
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};RA={};AA={};NA={};P00={:.2};P01={:.2};P10={:.2};P11={:.2}\tGT:PS:GQ\t{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};RA={};AA={};NA={};P00={:.2};P01={:.2};P10={:.2};P11={:.2};MEC={};MF={};PSMF={:.5}\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.ref_allele,
@@ -1002,6 +1042,9 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
                        *PHREDProb::from(var.genotype_post[1]),
                        *PHREDProb::from(var.genotype_post[2]),
                        *PHREDProb::from(var.genotype_post[3]),
+                       var.mec,
+                       (var.mec as f64 / (var.ra + var.aa) as f64),
+                       var.mec_frac,
                        var.genotype,
                        ps,
                        var.gq) {
