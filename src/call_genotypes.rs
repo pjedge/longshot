@@ -955,6 +955,7 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
         }
         None => {}
     }
+    /*
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].mec_frac >= max_mec_frac {
             if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
@@ -964,6 +965,7 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
             }
         }
     }
+    */
 }
 
 pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: String) {
