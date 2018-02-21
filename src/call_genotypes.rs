@@ -273,7 +273,10 @@ pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &m
 }
 
 pub fn call_genotypes(flist: &Vec<Fragment>,
-                      varlist: &mut VarList) {
+                      varlist: &mut VarList,
+                      interval: &Option<GenomicInterval>,
+                      variant_debug_directory: &Option<String>) {
+
     let genotype_priors = estimate_genotype_priors();
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -841,6 +844,9 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
 
         }
 
+        let debug_vcf_str = format!("3.{}.haplotype_genotype_iteration.vcf", hapcut2_iter).to_owned();
+        print_variant_debug(&varlist, &interval, &variant_debug_directory,&debug_vcf_str);
+
         eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
         if num_phased <= prev_num_phased { //if total_likelihood <= prev_total_likelihood {
@@ -968,8 +974,8 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
     */
 }
 
-pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: String) {
-    let vcf_path = Path::new(&output_vcf_file);
+pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool) {
+    let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
     // Open a file in write-only mode, returns `io::Result<File>`
     let mut file = match File::create(&vcf_path) {
@@ -1013,16 +1019,16 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
             &None => {}
         }
 
+        if !print_whole_varlist {
+            if var.genotype == "0/0".to_string() ||
+                var.genotype == "0|0".to_string(){
+                continue;
+            }
 
-        if var.genotype == "0/0".to_string() ||
-            var.genotype == "0|0".to_string(){
-            continue;
+            if !indels && (var.ref_allele.len() != 1 || var.var_allele.len() != 1) {
+                continue;
+            }
         }
-
-        if !indels && (var.ref_allele.len() != 1 || var.var_allele.len() != 1) {
-            continue;
-        }
-
         let ps = match var.phase_set {
             Some(ps) => format!("{}", ps),
             None => ".".to_string()
@@ -1054,4 +1060,17 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
             Ok(_) => {}
         }
     }
+}
+
+pub fn print_variant_debug(varlist: &VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str){
+    match variant_debug_directory {
+        &Some(ref dir) => {
+            let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
+            Some(s) => {s.to_owned()},
+            None => {panic!("Invalid unicode provided for variant debug directory");}
+            };
+            print_vcf(&varlist, &interval, true, &outfile, true);
+        }
+        &None => {}
+    };
 }
