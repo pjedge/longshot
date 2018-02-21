@@ -928,7 +928,7 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
     }
 }
 
-pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, max_mec_frac: f64) {
+pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, _max_mec_frac: f64) {
 
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].qual < density_qual { continue; }
