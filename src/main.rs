@@ -18,8 +18,11 @@ mod util;
 //mod de_bruijn;
 use clap::{Arg, App};
 use chrono::prelude::*;
+use std::fs::create_dir;
+use std::path::Path;
 
-use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, var_filter, calculate_mec};
+
+use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, print_variant_debug, var_filter, calculate_mec};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
 
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -182,6 +185,12 @@ fn main() {
             .long("max_alignment")
             .help("Use max alignment algorithm rather than all-alignments algorithm.")
             .display_order(165))
+        .arg(Arg::with_name("Variant debug directory")
+            .short("d")
+            .long("variant_debug_dir")
+            .value_name("path")
+            .help("write out current information about variants at each step of algorithm to files in this directory")
+            .display_order(210))
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -195,6 +204,20 @@ fn main() {
     let max_cov: Option<u32> = match input_args.value_of("Max coverage") {
         Some(cov) => {
             Some(cov.parse::<u32>().expect("Argument max_cov must be a positive integer!"))
+        }
+        None => None,
+    };
+
+    let variant_debug_directory: Option<String> = match input_args.value_of("Variant debug directory") {
+        Some(dir) => {
+            if Path::new(&dir).exists() {
+                panic!("Variant debug directory already exists.");
+            }
+            match create_dir(&dir) {
+                Ok(_) => {},
+                Err(_) => {panic!("Error creating variant debug directory.");}
+            }
+            Some(dir.to_string())
         }
         None => None,
     };
@@ -288,6 +311,7 @@ fn main() {
         }
     };
 
+
     let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     //let bam_file: String = "test_data/test.bam".to_string();
@@ -298,6 +322,8 @@ fn main() {
                                                                max_cov,
                                                                min_mapq,
                                                            alignment_parameters.ln());
+
+    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf");
 
     eprintln!("{} {} potential variants identified.", print_time(),varlist.lst.len());
 
@@ -326,8 +352,10 @@ fn main() {
         false => {panic!("Calling genotypes without haplotypes not currently supported.")},
     };
 
+    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf");
+
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes(&flist, &mut varlist);
+    call_genotypes(&flist, &mut varlist, &interval,  &variant_debug_directory);
 
     calculate_mec(&flist, &mut varlist);
 
@@ -335,5 +363,6 @@ fn main() {
     var_filter(&mut varlist, 50.0, 500, 10, max_cov, max_mec_frac);
 
     eprintln!("{} Printing VCF file...",print_time());
-    print_vcf(&varlist, &interval, indels, output_vcf_file);
+    print_variant_debug(&varlist, &interval,&variant_debug_directory, &"4.0.final_genotypes.vcf");
+    print_vcf(&varlist, &interval, indels, output_vcf_file, false);
 }
