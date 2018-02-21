@@ -995,7 +995,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
 ##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
 ##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
-##FORMAT=<ID=GQ,Number=2,Type=Integer,Description=\"Genotype Quality\">
+##FORMAT=<ID=GQ,Number=2,Type=Float,Description=\"Genotype Quality\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
         .to_string();
 
