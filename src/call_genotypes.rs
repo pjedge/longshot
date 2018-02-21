@@ -972,8 +972,8 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
     }
 }
 
-pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: String, print_whole_varlist: bool) {
-    let vcf_path = Path::new(&output_vcf_file);
+pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool) {
+    let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
     // Open a file in write-only mode, returns `io::Result<File>`
     let mut file = match File::create(&vcf_path) {
@@ -1067,7 +1067,7 @@ pub fn print_variant_debug(varlist: &VarList, interval: &Option<GenomicInterval>
             Some(s) => {s.to_owned()},
             None => {panic!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(&varlist, &interval, true, outfile.to_string(), true);
+            print_vcf(&varlist, &interval, true, &outfile, true);
         }
         &None => {}
     };

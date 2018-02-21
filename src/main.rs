@@ -20,7 +20,7 @@ use clap::{Arg, App};
 use chrono::prelude::*;
 use std::fs::create_dir;
 use std::path::Path;
-
+use std::fs::remove_dir_all;
 
 use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, print_variant_debug, var_filter, calculate_mec};
 use util::{GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
@@ -76,6 +76,7 @@ static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
 };
 
 fn main() {
+    eprintln!("");
 
     let input_args = App::new("Reaper (REAlign error PronE Reads)")
         .version("0.1")
@@ -158,6 +159,11 @@ fn main() {
                 .long("fast_alignment")
                 .help("Use non-numerically stable alignment algorithm. Is significantly faster but may be less accurate or have unexpected behaviour.")
                 .display_order(160))
+        .arg(Arg::with_name("Force overwrite")
+            .short("F")
+            .long("force_overwrite")
+            .help("If output files (VCF or variant debug directory) exist, delete and overwrite them.")
+            .display_order(164))
         .arg(Arg::with_name("Band width")
                 .short("B")
                 .long("band_width")
@@ -201,6 +207,14 @@ fn main() {
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
 
+    let force = match input_args.occurrences_of("Force overwrite") {
+        0 => false,
+        1 => true,
+        _ => {
+            panic!("force_overwrite specified multiple times");
+        }
+    };
+
     let max_cov: Option<u32> = match input_args.value_of("Max coverage") {
         Some(cov) => {
             Some(cov.parse::<u32>().expect("Argument max_cov must be a positive integer!"))
@@ -208,10 +222,33 @@ fn main() {
         None => None,
     };
 
+    let vcf = Path::new(&output_vcf_file);
+    if vcf.is_file() {
+        if !force {
+            eprintln!("ERROR: Variant output file already exists. Rerun with -F option to force overwrite.");
+            return;
+        }
+    }
+
+    let bai_str = bamfile_name.clone() + ".bai";
+    if !Path::new(&bai_str).is_file() {
+        eprintln!("ERROR: BAM file must be indexed with samtools index. Index file should have same name with .bai appended.");
+        return;
+    }
+
     let variant_debug_directory: Option<String> = match input_args.value_of("Variant debug directory") {
         Some(dir) => {
-            if Path::new(&dir).exists() {
-                panic!("Variant debug directory already exists.");
+            let p = Path::new(&dir);
+            if p.exists() {
+                if force {
+                    match remove_dir_all(p) {
+                        Ok(_) => {},
+                        Err(_) => {panic!("Error removing variant debug directory.")}
+                    }
+                } else {
+                    eprintln!("ERROR: Variant debug directory already exists. Rerun with -F option to force overwrite.");
+                    return;
+                }
             }
             match create_dir(&dir) {
                 Ok(_) => {},
@@ -302,7 +339,6 @@ fn main() {
         }
     };
 
-
     let indels = match input_args.occurrences_of("Indels") {
         0 => false,
         1 => true,
@@ -364,5 +400,5 @@ fn main() {
 
     eprintln!("{} Printing VCF file...",print_time());
     print_variant_debug(&varlist, &interval,&variant_debug_directory, &"4.0.final_genotypes.vcf");
-    print_vcf(&varlist, &interval, indels, output_vcf_file, false);
+    print_vcf(&varlist, &interval, indels, &output_vcf_file, false);
 }
