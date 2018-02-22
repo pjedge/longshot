@@ -160,8 +160,7 @@ fn main() {
             .long("max_MEC_fraction")
             .value_name("float")
             .help("Flag SNVs for which the Phase Group MEC fraction exceeds this amount.")
-            .display_order(155)
-            .default_value("0.05"))
+            .display_order(155))
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
@@ -280,14 +279,24 @@ fn main() {
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
 
-    let max_mec_frac:f64 = input_args.value_of("Max MEC Fraction")
-        .unwrap()
-        .parse::<f64>()
-        .expect("Argument max_mec_frac must be a positive float!");
+    let max_mec_frac = match input_args.occurrences_of("Max MEC Fraction") {
+        0 => None,
+        1 => {
+            let frac:f64 = input_args.value_of("Max MEC Fraction")
+                .unwrap()
+                .parse::<f64>()
+                .expect("Argument max_mec_frac must be a positive float!");
 
-    if !(max_mec_frac >= 0.0 && max_mec_frac <= 1.0) {
-        panic!("Max MEC Fraction must be a float between 0.0 and 1.0.");
-    }
+            if !(frac >= 0.0 && frac <= 1.0) {
+                panic!("Max MEC Fraction must be a float between 0.0 and 1.0.");
+            }
+
+            Some(frac)
+        },
+        _ => {
+            panic!("max_mec_frac specified multiple times");
+        }
+    };
 
     let mut alignment_type = AlignmentType::NumericallyStableAllAlignment;
 
@@ -369,8 +378,12 @@ fn main() {
                 let calculated_cov = (mean_coverage as f64 * frac) as u32;
 
                 eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
-                eprintln!("{} Max read coverage set to {}.",print_time(), calculated_cov);
-
+                if calculated_cov > 0 {
+                    eprintln!("{} Max read coverage set to {}.",print_time(), calculated_cov);
+                } else {
+                    eprintln!("{} ERROR: Max read coverage set to 0.",print_time());
+                    return;
+                }
                 Some(calculated_cov)
             }
             None => None,
