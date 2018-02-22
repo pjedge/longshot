@@ -928,7 +928,7 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
     }
 }
 
-pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, _max_mec_frac: f64) {
+pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, max_mec_frac: Option<f64>) {
 
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].qual < density_qual { continue; }
@@ -961,17 +961,20 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
         }
         None => {}
     }
-    /*
-    for i in 0..varlist.lst.len() {
-        if varlist.lst[i].mec_frac >= max_mec_frac {
-            if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
-                varlist.lst[i].filter = "psmf".to_string();
-            } else {
-                varlist.lst[i].filter.push_str(";psmf");
+    match max_mec_frac {
+        Some(frac) => {
+            for i in 0..varlist.lst.len() {
+                if varlist.lst[i].mec_frac >= frac {
+                    if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
+                        varlist.lst[i].filter = "psmf".to_string();
+                    } else {
+                        varlist.lst[i].filter.push_str(";psmf");
+                    }
+                }
             }
-        }
+        },
+        None => {}
     }
-    */
 }
 
 pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool) {
