@@ -3,8 +3,13 @@ use std::collections::HashMap;
 use bio::stats::{LogProb, Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
+use chrono::prelude::*;
 
 static INDEX_FREQ: usize = 1000;
+
+pub fn print_time() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
 
 // this is really ugly. TODO a less verbose implementation
 pub fn parse_region_string(region_string: Option<&str>,
