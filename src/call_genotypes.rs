@@ -11,6 +11,7 @@ use chrono::prelude::*;
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
 
+// THESE SHOULD BE COMMAND LINE PARAMS
 static MAX_P_MISCALL_F64: f64 = 0.2;
 static MIN_GQ_FOR_PHASING: f64 = 50.0;
 
