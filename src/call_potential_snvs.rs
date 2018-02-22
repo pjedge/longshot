@@ -81,30 +81,6 @@ pub fn call_potential_snvs(bam_file: &String,
         let mut pileup_alleles: Vec<(String,String, bool)> = vec![];
         let pos: usize = pileup.pos() as usize;
 
-        if pos == 75253 {
-
-            for alignment in pileup.alignments() {
-                if !alignment.is_del() && !alignment.is_refskip() {
-                    match alignment.indel() {
-                        Indel::None => {
-                            // unwrapping a None value here
-                            let ref_allele =
-                                (ref_seq[pos] as char).to_string().to_uppercase();
-                            let ref_allele_char = ref_allele.chars().nth(0).unwrap();
-                            let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
-                            let id: String = u8_to_string(alignment.record().qname());
-
-                            let var_allele = base.to_string();
-                            println!("read ID: {} ref_allele: {} var_allele: {}", id, ref_allele, var_allele);
-                        },
-                        _ => {}
-                    }
-                }
-            }
-
-            panic!("done");
-        }
-
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
             let record = alignment.record();
