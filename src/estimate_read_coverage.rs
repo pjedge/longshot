@@ -16,6 +16,7 @@ pub fn calculate_mean_coverage(bam_file: &String,
     // or a totally separate pileup from the unindexed file if not.
     // TODO: try to reproduce as a minimal example and possibly raise issue on Rust-htslib repo
     let bam = bam::Reader::from_path(bam_file).unwrap();
+    /*
     let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
     let bam_pileup = match interval {
         &Some(ref iv) => {
@@ -25,6 +26,12 @@ pub fn calculate_mean_coverage(bam_file: &String,
         }
         &None => bam.pileup(),
     };
+    */
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    //let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
+    //bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+    let bam_pileup = bam_ix.pileup();
+
 
     let mut prev_tid = 4294967295;
     let mut bam_covered_positions = 0;

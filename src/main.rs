@@ -16,39 +16,28 @@ mod call_genotypes;
 mod realignment;
 mod util;
 mod estimate_read_coverage;
-//mod de_bruijn;
+mod estimate_alignment_parameters;
+
 use clap::{Arg, App};
 use std::fs::create_dir;
 use std::path::Path;
 use std::fs::remove_dir_all;
 
 use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, print_variant_debug, var_filter, calculate_mec};
-use util::{print_time, GenomicInterval, ExtractFragmentParameters, AlignmentParameters, parse_region_string, AlignmentType};
+use util::{print_time, GenomicInterval, ExtractFragmentParameters, parse_region_string, AlignmentType};
 use estimate_read_coverage::calculate_mean_coverage;
+use estimate_alignment_parameters::estimate_alignment_parameters;
 
+/*
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     // non-homopolymer probabilities
     match_from_match: 0.85,
-    mismatch_from_match: 0.01,
     insertion_from_match: 0.12,
     deletion_from_match: 0.02,
     extend_from_insertion: 0.5,
     match_from_insertion: 0.49397590,
-    mismatch_from_insertion: 0.00602409,
     extend_from_deletion: 0.25,
     match_from_deletion: 0.7409638,
-    mismatch_from_deletion: 0.00903614,
-    // homopolymer probabilities
-    match_from_match_homopolymer: 0.85,
-    mismatch_from_match_homopolymer: 0.01,
-    insertion_from_match_homopolymer: 0.12,
-    deletion_from_match_homopolymer: 0.02,
-    extend_from_insertion_homopolymer: 0.5,
-    match_from_insertion_homopolymer: 0.49397590,
-    mismatch_from_insertion_homopolymer: 0.00602409,
-    extend_from_deletion_homopolymer: 0.25,
-    match_from_deletion_homopolymer: 0.7409638,
-    mismatch_from_deletion_homopolymer: 0.00903614,
 };
 
 static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -63,20 +52,10 @@ static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
     extend_from_deletion: 0.35,
     match_from_deletion: 0.6126,
     mismatch_from_deletion: 0.0373,
-    // homopolymer probabilities
-    match_from_match_homopolymer: 0.82,
-    mismatch_from_match_homopolymer: 0.05,
-    insertion_from_match_homopolymer: 0.05,
-    deletion_from_match_homopolymer: 0.08,
-    extend_from_insertion_homopolymer: 0.25,
-    match_from_insertion_homopolymer: 0.7069,
-    mismatch_from_insertion_homopolymer: 0.0431,
-    extend_from_deletion_homopolymer: 0.35,
-    match_from_deletion_homopolymer: 0.6126,
-    mismatch_from_deletion_homopolymer: 0.0373,
 };
-
+*/
 fn main() {
+
     eprintln!("");
 
     let input_args = App::new("Reaper (REAlign error PronE Reads)")
@@ -177,12 +156,6 @@ fn main() {
                 .help("Minimum width of alignment band. Band will increase in size if sequences are different lengths.")
                 .display_order(170)
                 .default_value("20"))
-        .arg(Arg::with_name("Read technology")
-                .short("t")
-                .long("read_technology")
-                .help("Which read technology is being used (\"ont\" or \"pacbio\").")
-                .default_value("pacbio")
-                .display_order(180))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -321,25 +294,10 @@ fn main() {
         }
     };
 
-    let mut band_width: usize = input_args.value_of("Band width")
+    let band_width: usize = input_args.value_of("Band width")
         .unwrap()
         .parse::<usize>()
         .expect("Argument band_width must be a positive integer!");
-
-    let alignment_parameters;
-    match input_args.value_of("Read technology").unwrap() {
-        "pacbio" | "Pacbio" | "PacBio" | "PACBIO" => {
-            alignment_parameters = PACBIO_ALIGNMENT_PARAMETERS.clone();
-        }
-        "ont" | "ONT" => {
-            alignment_parameters = ONT_ALIGNMENT_PARAMETERS.clone();
-            band_width = 50
-        }
-        _ => {
-            panic!("Invalid read technology argument.");
-        }
-    }
-
 
     let assemble_haps = match input_args.occurrences_of("No haplotypes") {
         0 => true,
@@ -390,6 +348,18 @@ fn main() {
         },
     };
 
+    let extract_fragment_parameters = ExtractFragmentParameters {
+        min_mapq: min_mapq,
+        alignment_type: alignment_type,
+        band_width: band_width,
+        anchor_length: anchor_length,
+        short_hap_max_snvs: short_hap_max_snvs,
+        max_window_padding: max_window_padding,
+    };
+
+    eprintln!("{} Estimating alignment parameters...",print_time());
+    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval);
+
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("{} Calling potential SNVs using pileup...",print_time());
     let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
@@ -402,15 +372,6 @@ fn main() {
     print_variant_debug(&varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf");
 
     eprintln!("{} {} potential variants identified.", print_time(),varlist.lst.len());
-
-    let extract_fragment_parameters = ExtractFragmentParameters {
-        min_mapq: min_mapq,
-        alignment_type: alignment_type,
-        band_width: band_width,
-        anchor_length: anchor_length,
-        short_hap_max_snvs: short_hap_max_snvs,
-        max_window_padding: max_window_padding,
-    };
 
     eprintln!("{} Generating condensed read data for SNVs...",print_time());
     let flist = extract_fragments::extract_fragments(&bamfile_name,
