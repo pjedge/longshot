@@ -155,7 +155,7 @@ pub fn calculate_genotypes_without_haplotypes(pileup: &Vec<(char, LogProb)>,
 
     let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
     let ln_half = LogProb::from(Prob(0.5));
-    let mut priors = vec![LogProb::from(Prob(0.25)); 4];
+    let mut priors: Vec<LogProb> = vec![LogProb::from(Prob(0.25)); 4];
 
     for g in 0..4 {
         if ref_allele.len() == 1 && var_allele.len() == 1 {

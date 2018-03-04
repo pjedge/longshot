@@ -38,6 +38,7 @@ pub fn call_potential_snvs(bam_file: &String,
     // so we need to iterate over the fetched indexed pileup if there's a region,
     // or a totally separate pileup from the unindexed file if not.
     // TODO: try to reproduce as a minimal example and possibly raise issue on Rust-htslib repo
+    /*
     let bam = bam::Reader::from_path(bam_file).unwrap();
     let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
     let bam_pileup = match interval {
@@ -48,6 +49,18 @@ pub fn call_potential_snvs(bam_file: &String,
         }
         &None => bam.pileup(),
     };
+    */
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+
+    match interval {
+        &Some(ref iv) => {
+            let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
+            bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        }
+        &None => {},
+    };
+
+    let bam_pileup = bam_ix.pileup();
 
     let mut next_valid_pos = 0;
 
@@ -78,7 +91,7 @@ pub fn call_potential_snvs(bam_file: &String,
         let mut counts: HashMap<(String, String), usize> = HashMap::new();
         // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
         let mut depth: usize = 0;
-        let mut pileup_alleles: Vec<(String,String, bool)> = vec![];
+        let mut pileup_alleles: Vec<(String,String)> = vec![];
         let pos: usize = pileup.pos() as usize;
 
         // pileup the bases for a single position and count number of each base
@@ -98,29 +111,16 @@ pub fn call_potential_snvs(bam_file: &String,
 
                 let ref_allele;
                 let var_allele;
-                let mut homopolymer;
-
-                let ref_allele_prev: char = if pos >= 1 && pos <= ref_seq.len() {
-                    (ref_seq[pos - 1] as char).to_uppercase().nth(0).unwrap()
-                } else {
-                    'N'
-                };
-
-                let mut ref_allele_next: char = match ref_seq.get(pos + 1) {
-                    Some(&r) => (r as char).to_uppercase().nth(0).unwrap(),
-                    None => 'N'
-                };
 
                 match alignment.indel() {
                     Indel::None => {
                         // unwrapping a None value here
                         ref_allele =
                             (ref_seq[pos] as char).to_string().to_uppercase();
-                        let ref_allele_char = ref_allele.chars().nth(0).unwrap();
+
                         let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
 
                         var_allele = base.to_string();
-                        homopolymer = ref_allele_char == ref_allele_prev || ref_allele_char == ref_allele_next;
                     },
                     Indel::Ins(l) => {
 
@@ -146,13 +146,6 @@ pub fn call_potential_snvs(bam_file: &String,
 
                         var_allele = var_char.into_iter().collect::<String>();
 
-                        homopolymer = true;
-                        for c in var_allele.chars() {
-                            if ! (c == ref_allele_prev && c == ref_allele_next) {
-                                homopolymer = false;
-                            }
-                        }
-
                     },
                     Indel::Del(l) => {
                         let start = pos;
@@ -161,22 +154,10 @@ pub fn call_potential_snvs(bam_file: &String,
                         ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
                         var_allele = (ref_seq[pos] as char).to_string().to_uppercase();
 
-                        // need to reassign this based on where the deletion ends
-                        ref_allele_next = match ref_seq.get(end) {
-                            Some(&r) => (r as char).to_uppercase().nth(0).unwrap(),
-                            None => 'N'
-                        };
-
-                        homopolymer = true;
-                        for c in ref_allele.chars() {
-                            if ! (c == ref_allele_prev && c == ref_allele_next) {
-                                homopolymer = false;
-                            }
-                        }
                     },
                 }
 
-                pileup_alleles.push((ref_allele.clone(), var_allele.clone(), homopolymer));
+                pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
                 *counts.entry((ref_allele.clone(), var_allele.clone())).or_insert(0) += 1;
             }
         }
@@ -186,14 +167,13 @@ pub fn call_potential_snvs(bam_file: &String,
             _ => {}
         }
 
-        //let mut var_allele = "N".to_string();
         let mut snv_max_count: u32 = 0;
         let mut snv_ref_allele = 'N'.to_string();
         let mut snv_var_allele = 'N'.to_string();
-        //let mut var_allele = "N".to_string();
-        let mut indel_max_count: u32 = 0;
-        let mut indel_ref_allele = 'N'.to_string();
-        let mut indel_var_allele = 'N'.to_string();
+
+        //let mut indel_max_count: u32 = 0;
+        //let mut indel_ref_allele = 'N'.to_string();
+        //let mut indel_var_allele = 'N'.to_string();
 
         // iterate over everything.
 
@@ -210,42 +190,42 @@ pub fn call_potential_snvs(bam_file: &String,
                     snv_ref_allele = r.clone();
                     snv_var_allele = v.clone();
                 }
-            } else {
+            } /*else {
                 // potential indel
                 if count > indel_max_count as usize {
                     indel_max_count = count as u32;
                     indel_ref_allele = r.clone();
                     indel_var_allele = v.clone();
                 }
-            }
+            }*/
         }
 
         // vectors contain entries with (call, qual)
         // call is '0' or '1' (or potentially '2'...)
         // qual is a LogProb probability of miscall
         let mut snv_pileup_calls: Vec<(char, LogProb)> = vec![];
-        let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
+        //let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
 
-        for (ref_allele, var_allele, homopolymer) in pileup_alleles {
+        for (ref_allele, var_allele) in pileup_alleles {
 
             if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
-                let qual = if homopolymer {ln_align_params.mismatch_from_match_homopolymer} else {ln_align_params.mismatch_from_match};
+                let qual = ln_align_params.emission_probs.not_equal;
                 snv_pileup_calls.push(('1', qual));
-            } else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
+            } /*else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
                 let qual = if indel_ref_allele.len() > indel_var_allele.len() {
-                    if homopolymer {ln_align_params.deletion_from_match_homopolymer} else {ln_align_params.deletion_from_match}
+                    ln_align_params.emission_probs.deletion
                 } else {
-                    if homopolymer {ln_align_params.insertion_from_match_homopolymer} else {ln_align_params.insertion_from_match}
+                    ln_align_params.emission_probs.insertion
                 };
 
                 indel_pileup_calls.push(('1', qual));
-            }
+            } */
 
             if (ref_allele.clone(), var_allele.clone()) == (ref_allele.clone(), ref_allele.clone()){
-                let qual = if homopolymer {ln_align_params.mismatch_from_match_homopolymer} else {ln_align_params.mismatch_from_match};
+                let qual = ln_align_params.emission_probs.not_equal;
 
                 snv_pileup_calls.push(('0', qual));
-                indel_pileup_calls.push(('0', qual));
+                //indel_pileup_calls.push(('0', qual));
             }
         }
 
