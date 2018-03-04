@@ -167,14 +167,13 @@ pub fn call_potential_snvs(bam_file: &String,
             _ => {}
         }
 
-        //let mut var_allele = "N".to_string();
         let mut snv_max_count: u32 = 0;
         let mut snv_ref_allele = 'N'.to_string();
         let mut snv_var_allele = 'N'.to_string();
-        //let mut var_allele = "N".to_string();
-        let mut indel_max_count: u32 = 0;
-        let mut indel_ref_allele = 'N'.to_string();
-        let mut indel_var_allele = 'N'.to_string();
+
+        //let mut indel_max_count: u32 = 0;
+        //let mut indel_ref_allele = 'N'.to_string();
+        //let mut indel_var_allele = 'N'.to_string();
 
         // iterate over everything.
 
@@ -191,42 +190,42 @@ pub fn call_potential_snvs(bam_file: &String,
                     snv_ref_allele = r.clone();
                     snv_var_allele = v.clone();
                 }
-            } else {
+            } /*else {
                 // potential indel
                 if count > indel_max_count as usize {
                     indel_max_count = count as u32;
                     indel_ref_allele = r.clone();
                     indel_var_allele = v.clone();
                 }
-            }
+            }*/
         }
 
         // vectors contain entries with (call, qual)
         // call is '0' or '1' (or potentially '2'...)
         // qual is a LogProb probability of miscall
         let mut snv_pileup_calls: Vec<(char, LogProb)> = vec![];
-        let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
+        //let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
 
         for (ref_allele, var_allele) in pileup_alleles {
 
             if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
-                let qual = ln_align_params.state_probs.match_neq;
+                let qual = ln_align_params.emission_probs.not_equal;
                 snv_pileup_calls.push(('1', qual));
-            } else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
+            } /*else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
                 let qual = if indel_ref_allele.len() > indel_var_allele.len() {
-                    ln_align_params.state_probs.deletion
+                    ln_align_params.emission_probs.deletion
                 } else {
-                    ln_align_params.state_probs.insertion
+                    ln_align_params.emission_probs.insertion
                 };
 
                 indel_pileup_calls.push(('1', qual));
-            }
+            } */
 
             if (ref_allele.clone(), var_allele.clone()) == (ref_allele.clone(), ref_allele.clone()){
-                let qual = ln_align_params.state_probs.match_neq;
+                let qual = ln_align_params.emission_probs.not_equal;
 
                 snv_pileup_calls.push(('0', qual));
-                indel_pileup_calls.push(('0', qual));
+                //indel_pileup_calls.push(('0', qual));
             }
         }
 

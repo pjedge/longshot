@@ -11,6 +11,10 @@ pub fn print_time() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+// use this spacer instead of calling print_time() to have the spaces match up with
+// lines that document the time
+pub static SPACER: &str = "                   ";
+
 // this is really ugly. TODO a less verbose implementation
 pub fn parse_region_string(region_string: Option<&str>,
                            bamfile_name: &String)
@@ -142,52 +146,43 @@ impl TransitionProbs {
 }
 
 #[derive(Clone, Copy)]
-pub struct StateProbs {
-    pub match_eq: f64,
-    pub match_neq: f64,
-    pub insertion: f64,
-    pub deletion: f64,
+pub struct EmissionProbs {
+    pub equal: f64,
+    pub not_equal: f64
 }
 
 #[derive(Clone, Copy)]
-pub struct LnStateProbs {
-    pub match_eq: LogProb,
-    pub match_neq: LogProb,
-    pub insertion: LogProb,
-    pub deletion: LogProb,
+pub struct LnEmissionProbs {
+    pub equal: LogProb,
+    pub not_equal: LogProb
 }
 
-impl StateProbs {
-    pub fn ln(&self) -> LnStateProbs {
-        LnStateProbs {
-            match_eq: LogProb::from(Prob(self.match_eq)),
-            match_neq: LogProb::from(Prob(self.match_neq)),
-            deletion: LogProb::from(Prob(self.deletion)),
-            insertion: LogProb::from(Prob(self.insertion))
+impl EmissionProbs {
+    pub fn ln(&self) -> LnEmissionProbs {
+        LnEmissionProbs {
+            equal: LogProb::from(Prob(self.equal)),
+            not_equal: LogProb::from(Prob(self.not_equal))
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct AlignmentParameters {
-    pub eq: TransitionProbs,
-    pub neq: TransitionProbs,
-    pub state_probs: StateProbs
+    pub transition_probs: TransitionProbs,
+    pub emission_probs: EmissionProbs
 }
 
 #[derive(Clone, Copy)]
 pub struct LnAlignmentParameters {
-    pub eq: LnTransitionProbs,
-    pub neq: LnTransitionProbs,
-    pub state_probs: LnStateProbs
+    pub transition_probs: LnTransitionProbs,
+    pub emission_probs: LnEmissionProbs
 }
 
 impl AlignmentParameters {
     pub fn ln(&self) -> LnAlignmentParameters {
         LnAlignmentParameters {
-            eq: self.eq.ln(),
-            neq: self.neq.ln(),
-            state_probs: self.state_probs.ln()
+            transition_probs: self.transition_probs.ln(),
+            emission_probs: self.emission_probs.ln()
         }
     }
 }
