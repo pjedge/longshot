@@ -11,6 +11,10 @@ pub fn print_time() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+// use this spacer instead of calling print_time() to have the spaces match up with
+// lines that document the time
+pub static SPACER: &str = "                   ";
+
 // this is really ugly. TODO a less verbose implementation
 pub fn parse_region_string(region_string: Option<&str>,
                            bamfile_name: &String)
@@ -99,94 +103,90 @@ pub struct ExtractFragmentParameters {
     pub max_window_padding: usize,
 }
 
+// these parameters describe state transition probabilities for a pair HMM
+// there are two kinds: "eq" transition probs and "neq" transition_probs
+// the correct kind to use depends on sequence context.
+// the "eq" probabilities are for the case where accepting a match results in equal bases
+// the "neq" probabilities are for the case where accepting a match results in different bases
+
 #[derive(Clone, Copy)]
-pub struct AlignmentParameters {
+pub struct TransitionProbs {
     pub match_from_match: f64,
-    pub mismatch_from_match: f64,
     pub insertion_from_match: f64,
     pub deletion_from_match: f64,
-    pub extend_from_insertion: f64,
+    pub insertion_from_insertion: f64,
     pub match_from_insertion: f64,
-    pub mismatch_from_insertion: f64,
-    pub extend_from_deletion: f64,
+    pub deletion_from_deletion: f64,
     pub match_from_deletion: f64,
-    pub mismatch_from_deletion: f64,
-    pub match_from_match_homopolymer: f64,
-    pub mismatch_from_match_homopolymer: f64,
-    pub insertion_from_match_homopolymer: f64,
-    pub deletion_from_match_homopolymer: f64,
-    pub extend_from_insertion_homopolymer: f64,
-    pub match_from_insertion_homopolymer: f64,
-    pub mismatch_from_insertion_homopolymer: f64,
-    pub extend_from_deletion_homopolymer: f64,
-    pub match_from_deletion_homopolymer: f64,
-    pub mismatch_from_deletion_homopolymer: f64,
 }
 
 #[derive(Clone, Copy)]
-pub struct LnAlignmentParameters {
+pub struct LnTransitionProbs {
     pub match_from_match: LogProb,
-    pub mismatch_from_match: LogProb,
     pub insertion_from_match: LogProb,
     pub deletion_from_match: LogProb,
-    pub extend_from_insertion: LogProb,
+    pub insertion_from_insertion: LogProb,
     pub match_from_insertion: LogProb,
-    pub mismatch_from_insertion: LogProb,
-    pub extend_from_deletion: LogProb,
+    pub deletion_from_deletion: LogProb,
     pub match_from_deletion: LogProb,
-    pub mismatch_from_deletion: LogProb,
-    pub match_from_match_homopolymer: LogProb,
-    pub mismatch_from_match_homopolymer: LogProb,
-    pub insertion_from_match_homopolymer: LogProb,
-    pub deletion_from_match_homopolymer: LogProb,
-    pub extend_from_insertion_homopolymer: LogProb,
-    pub match_from_insertion_homopolymer: LogProb,
-    pub mismatch_from_insertion_homopolymer: LogProb,
-    pub extend_from_deletion_homopolymer: LogProb,
-    pub match_from_deletion_homopolymer: LogProb,
-    pub mismatch_from_deletion_homopolymer: LogProb,
 }
 
-impl AlignmentParameters {
-    pub fn ln(&self) -> LnAlignmentParameters {
-        LnAlignmentParameters {
+impl TransitionProbs {
+    pub fn ln(&self) -> LnTransitionProbs {
+        LnTransitionProbs {
             match_from_match: LogProb::from(Prob(self.match_from_match)),
-            mismatch_from_match: LogProb::from(Prob(self.mismatch_from_match)),
             insertion_from_match: LogProb::from(Prob(self.insertion_from_match)),
             deletion_from_match: LogProb::from(Prob(self.deletion_from_match)),
-            extend_from_insertion: LogProb::from(Prob(self.extend_from_insertion)),
+            insertion_from_insertion: LogProb::from(Prob(self.insertion_from_insertion)),
             match_from_insertion: LogProb::from(Prob(self.match_from_insertion)),
-            mismatch_from_insertion: LogProb::from(Prob(self.mismatch_from_insertion)),
-            extend_from_deletion: LogProb::from(Prob(self.extend_from_deletion)),
+            deletion_from_deletion: LogProb::from(Prob(self.deletion_from_deletion)),
             match_from_deletion: LogProb::from(Prob(self.match_from_deletion)),
-            mismatch_from_deletion: LogProb::from(Prob(self.mismatch_from_deletion)),
-            match_from_match_homopolymer: LogProb::from(Prob(self.match_from_match_homopolymer)),
-            mismatch_from_match_homopolymer: LogProb::from(Prob(self.mismatch_from_match_homopolymer)),
-            insertion_from_match_homopolymer: LogProb::from(Prob(self.insertion_from_match_homopolymer)),
-            deletion_from_match_homopolymer: LogProb::from(Prob(self.deletion_from_match_homopolymer)),
-            extend_from_insertion_homopolymer: LogProb::from(Prob(self.extend_from_insertion_homopolymer)),
-            match_from_insertion_homopolymer: LogProb::from(Prob(self.match_from_insertion_homopolymer)),
-            mismatch_from_insertion_homopolymer: LogProb::from(Prob(self.mismatch_from_insertion_homopolymer)),
-            extend_from_deletion_homopolymer: LogProb::from(Prob(self.extend_from_deletion_homopolymer)),
-            match_from_deletion_homopolymer: LogProb::from(Prob(self.match_from_deletion_homopolymer)),
-            mismatch_from_deletion_homopolymer: LogProb::from(Prob(self.mismatch_from_deletion_homopolymer)),
         }
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct AlignmentCounts {
-    pub match_from_match: usize,
-    pub mismatch_from_match: usize,
-    pub insertion_from_match: usize,
-    pub deletion_from_match: usize,
-    pub extend_from_insertion: usize,
-    pub match_from_insertion: usize,
-    pub mismatch_from_insertion: usize,
-    pub extend_from_deletion: usize,
-    pub match_from_deletion: usize,
-    pub mismatch_from_deletion: usize,
+pub struct EmissionProbs {
+    pub equal: f64,
+    pub not_equal: f64
 }
+
+#[derive(Clone, Copy)]
+pub struct LnEmissionProbs {
+    pub equal: LogProb,
+    pub not_equal: LogProb
+}
+
+impl EmissionProbs {
+    pub fn ln(&self) -> LnEmissionProbs {
+        LnEmissionProbs {
+            equal: LogProb::from(Prob(self.equal)),
+            not_equal: LogProb::from(Prob(self.not_equal))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct AlignmentParameters {
+    pub transition_probs: TransitionProbs,
+    pub emission_probs: EmissionProbs
+}
+
+#[derive(Clone, Copy)]
+pub struct LnAlignmentParameters {
+    pub transition_probs: LnTransitionProbs,
+    pub emission_probs: LnEmissionProbs
+}
+
+impl AlignmentParameters {
+    pub fn ln(&self) -> LnAlignmentParameters {
+        LnAlignmentParameters {
+            transition_probs: self.transition_probs.ln(),
+            emission_probs: self.emission_probs.ln()
+        }
+    }
+}
+
 
 pub fn u8_to_string(u: &[u8]) -> String {
     String::from_utf8(u.to_vec()).unwrap()
