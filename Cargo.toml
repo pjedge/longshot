@@ -10,6 +10,7 @@ quick-error = "1.2.0"
 clap = "2.26.2"
 chrono = "0.4"
 rand = "0.4"
+petgraph = "0.4.11"
 
 [build-dependencies]
 cc = "1.0"

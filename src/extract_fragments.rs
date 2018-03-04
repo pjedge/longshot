@@ -5,7 +5,7 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
-use bio::stats::{LogProb, PHREDProb};
+use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use realignment;
@@ -583,7 +583,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
         if VERBOSE {
             let hap_seq_str: String = hap_window.into_iter().collect();
-            println!("hap:{} {} {}", hap, hap_seq_str, *PHREDProb::from(score));
+            println!("hap:{} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
         }
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
@@ -593,9 +593,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             max_hap = hap;
         }
     }
-    if VERBOSE {
-        println!("--------------------------------------");
-    }
+
 
     for v in 0..n_vars {
         if in_hap(v, max_hap) {
@@ -604,7 +602,9 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             // quality score is the probability call is wrong, in other words the ratio of the
             // sum of haplotype scores that had a '0' here over the total sum of scores
             let qual = allele_scores0[v] - score_total;
-
+            if VERBOSE {
+                println!("adding call: {} {} {} {}; allele = 1; qual = {};", var_cluster[v].chrom, var_cluster[v].pos0, var_cluster[v].ref_allele, var_cluster[v].var_allele, *Prob::from(qual));
+            }
             calls.push(FragCall {
                 frag_ix: None,
                 var_ix: var_cluster[v].ix,
@@ -618,7 +618,9 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             // quality score is the probability call is wrong, in other words the ratio of the
             // sum of haplotype scores that had a '1' here over the total sum of scores
             let qual = allele_scores1[v] - score_total;
-
+            if VERBOSE {
+                println!("adding call: {} {} {} {}; allele = 0; qual = {};", var_cluster[v].chrom, var_cluster[v].pos0, var_cluster[v].ref_allele, var_cluster[v].var_allele, *Prob::from(qual));
+            }
             calls.push(FragCall {
                 frag_ix: None,
                 var_ix: var_cluster[v].ix,
@@ -627,6 +629,10 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 one_minus_qual: LogProb::ln_one_minus_exp(&qual)
             });
         }
+    }
+
+    if VERBOSE {
+        println!("--------------------------------------");
     }
 
     calls

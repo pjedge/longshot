@@ -8,6 +8,7 @@ extern crate quick_error;
 extern crate core;
 extern crate chrono;
 extern crate rand;
+extern crate petgraph;
 
 mod haplotype_assembly;
 mod call_potential_snvs;
@@ -17,6 +18,7 @@ mod realignment;
 mod util;
 mod estimate_read_coverage;
 mod estimate_alignment_parameters;
+mod poa;
 
 use clap::{Arg, App};
 use std::fs::create_dir;
@@ -27,6 +29,8 @@ use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, pri
 use util::{print_time, GenomicInterval, ExtractFragmentParameters, parse_region_string, AlignmentType};
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
+
+use poa::poa_multiple_sequence_alignment;
 
 /*
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -55,6 +59,9 @@ static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
 };
 */
 fn main() {
+
+    poa_multiple_sequence_alignment("test.fa");
+    return;
 
     eprintln!("");
 
