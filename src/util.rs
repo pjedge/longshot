@@ -241,6 +241,7 @@ pub struct FragCall {
 pub struct Fragment {
     pub id: String,
     pub calls: Vec<FragCall>,
+    pub p_read_hap: [LogProb; 2]
 }
 
 

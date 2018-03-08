@@ -6,9 +6,12 @@ use bio::io::fasta;
 use std::char;
 use util::{LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
 use rust_htslib::bam::pileup::Indel;
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use bio::stats::{LogProb, Prob};
 use call_genotypes::{estimate_genotype_priors, calculate_genotypes_without_haplotypes};
+use spoa::poa_multiple_sequence_alignment;
+use std::ascii::AsciiExt;
+use std::str;
 
 static VARLIST_CAPACITY: usize = 1000000;
 
@@ -291,6 +294,197 @@ pub fn call_potential_snvs(bam_file: &String,
             varlist.push(new_var);
         }
 
+        prev_tid = tid;
+    }
+    VarList::new(varlist)
+}
+
+pub fn call_potential_variants_poa(bam_file: &String,
+                                   fasta_file: &String,
+                                   interval: &Option<GenomicInterval>,
+                                   h1: &HashSet<String>,
+                                   h2: &HashSet<String>,
+                                   _max_coverage: Option<u32>,
+                                   min_mapq: u8,
+                                   _ln_align_params: LnAlignmentParameters)
+                                    -> VarList {
+
+    //let potential_snv_qual = LogProb::from(Prob(0.5));
+    let target_names = parse_target_names(&bam_file);
+
+    //let genotype_priors = estimate_genotype_priors();
+    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
+
+    let varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
+
+    // pileup over all covered sites
+    let mut ref_seq: Vec<u8> = vec![];
+    let mut prev_tid = 4294967295;
+
+    // there is a really weird bug going on here,
+    // hence the duplicate file handles to the bam file.
+    // if an indexed reader is used, and fetch is never called, pileup() hangs.
+    // so we need to iterate over the fetched indexed pileup if there's a region,
+    // or a totally separate pileup from the unindexed file if not.
+    // TODO: try to reproduce as a minimal example and possibly raise issue on Rust-htslib repo
+
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+
+    match interval {
+        &Some(ref iv) => {
+            let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
+            bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        }
+        &None => {},
+    };
+
+    let bam_pileup = bam_ix.pileup();
+
+    //let mut next_valid_pos = 0;
+
+    for p in bam_pileup {
+
+        let pileup = p.unwrap();
+
+        let tid: usize = pileup.tid() as usize;
+
+        if tid != prev_tid {
+            fasta.read_all(&target_names[tid], &mut ref_seq).expect("Failed to read fasta sequence record.");
+            //next_valid_pos = 0;
+        }
+
+        if pileup.pos() % 50 != 0 {
+            prev_tid = tid;
+            continue;
+        }
+
+        if !(pileup.pos() == 220700) {
+            prev_tid = tid;
+            continue;
+        }
+
+        let mut all_read_seqs: Vec<Vec<u8>> = vec![];
+        let mut h1_read_seqs: Vec<Vec<u8>> = vec![];
+        let mut h2_read_seqs: Vec<Vec<u8>> = vec![];
+
+        let d:usize = 50;
+
+        let pos_ref = pileup.pos() as usize;
+        let l_ref: usize = pos_ref - d;
+        let r_ref: usize = pos_ref + d;
+        let ref_window = &ref_seq[l_ref..r_ref + 1];
+        println!("ref: {}", u8_to_string(ref_window));
+        // pileup the bases for a single position and count number of each base
+        for alignment in pileup.alignments() {
+            let record = alignment.record();
+
+            // may be faster to implement this as bitwise operation on raw flag in the future?
+            if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                record.is_quality_check_failed() ||
+                record.is_duplicate() {
+                continue;
+            }
+
+            let pos_read = match alignment.qpos() {
+                Some(t) => t as usize,
+                None => {continue;}
+            };
+
+            let l_read = if pos_read >= d {pos_read - d} else {0};
+            let mut r_read = pos_read + d;
+
+            let len = alignment.record().seq().len();
+            if r_read >= len {
+                r_read = len - 1;
+            }
+
+            let mut read_seq: Vec<u8> = vec![];
+            for i in l_read..r_read {
+                let c = AsciiExt::to_ascii_uppercase(&alignment.record().seq()[i]);
+                read_seq.push(c)
+            }
+            //let read_seq = dna_vec(&alignment.record().seq()[l_read..r_read]);
+
+            all_read_seqs.push(read_seq.clone());
+
+            let read_id = u8_to_string(alignment.record().qname());
+
+            if h1.contains(&read_id) {
+                h1_read_seqs.push(read_seq.clone());
+            }
+
+            if h2.contains(&read_id) {
+                h2_read_seqs.push(read_seq.clone());
+            }
+        }
+
+        println!("{}:{}-{}",target_names[tid].clone(),l_ref, r_ref);
+        println!("-------");
+
+        println!("All read seqs:", );
+        for (i,seq) in all_read_seqs.iter().enumerate() {
+            println!(">seq{}",i);
+            println!("{}", str::from_utf8(&seq.clone()).unwrap());
+        }
+        println!("-------");
+        println!("H1 read seqs:", );
+        for (i,seq) in h1_read_seqs.iter().enumerate() {
+            println!(">seq{}",i);
+            println!("{}", str::from_utf8(&seq.clone()).unwrap());
+        }
+
+        println!("-------");
+        println!("H2 read seqs:", );
+        for (i,seq) in h2_read_seqs.iter().enumerate() {
+            println!(">seq{}",i);
+            println!("{}", str::from_utf8(&seq.clone()).unwrap());
+        }
+        println!("-------");
+
+        let mut consensus_all: Vec<u8> = vec![0u8; 300];
+        let mut consensus_h1: Vec<u8> = vec![0u8; 300];
+        let mut consensus_h2: Vec<u8> = vec![0u8; 300];
+
+        poa_multiple_sequence_alignment(&all_read_seqs, &mut consensus_all);
+        poa_multiple_sequence_alignment(&h1_read_seqs, &mut consensus_h1);
+        poa_multiple_sequence_alignment(&h2_read_seqs, &mut consensus_h2);
+
+        println!("{:?}",consensus_all);
+        println!("{:?}",consensus_h1);
+        println!("{:?}",consensus_h2);
+        println!("------------------------------------------------------");
+        /*
+        if qual > potential_snv_qual &&
+            !ref_allele.contains("N") && !var_allele.contains("N") &&
+            (ref_allele.clone(), var_allele.clone()) !=
+                (ref_base_str.clone(), ref_base_str.clone()){
+
+            let tid: usize = pileup.tid() as usize;
+            let new_var = Var {
+                ix: 0,
+                // this will be set automatically
+                chrom: target_names[tid].clone(),
+                pos0: pos,
+                ref_allele: ref_allele.clone(),
+                var_allele: var_allele.clone(),
+                dp: depth,
+                ra: 0,
+                aa: 0,
+                na: 0,
+                qual: 0.0,
+                filter: ".".to_string(),
+                genotype: "./.".to_string(),
+                gq: 0.0,
+                genotype_post: [LogProb::from(Prob(0.25)); 4],
+                phase_set: None,
+                mec: 0,
+                mec_frac: 0.0
+            };
+
+            varlist.push(new_var);
+
+        }
+        */
         prev_tid = tid;
     }
     VarList::new(varlist)

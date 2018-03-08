@@ -18,7 +18,8 @@ mod realignment;
 mod util;
 mod estimate_read_coverage;
 mod estimate_alignment_parameters;
-mod poa;
+//mod poa;
+mod spoa;
 
 use clap::{Arg, App};
 use std::fs::create_dir;
@@ -29,8 +30,9 @@ use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, pri
 use util::{print_time, GenomicInterval, ExtractFragmentParameters, parse_region_string, AlignmentType};
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
-
-use poa::poa_multiple_sequence_alignment;
+use bio::stats::{LogProb,Prob};
+//use poa::poa_multiple_sequence_alignment;
+use haplotype_assembly::separate_reads_by_haplotype;
 
 /*
 static PACBIO_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
@@ -60,8 +62,8 @@ static ONT_ALIGNMENT_PARAMETERS: AlignmentParameters = AlignmentParameters {
 */
 fn main() {
 
-    poa_multiple_sequence_alignment("test.fa");
-    return;
+    //poa::test();
+    //return;
 
     eprintln!("");
 
@@ -381,7 +383,7 @@ fn main() {
     eprintln!("{} {} potential variants identified.", print_time(),varlist.lst.len());
 
     eprintln!("{} Generating condensed read data for SNVs...",print_time());
-    let flist = extract_fragments::extract_fragments(&bamfile_name,
+    let mut flist = extract_fragments::extract_fragments(&bamfile_name,
                                                          &fasta_file,
                                                          &varlist,
                                                          &interval,
@@ -399,7 +401,19 @@ fn main() {
     print_variant_debug(&varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf");
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes(&flist, &mut varlist, &interval,  &variant_debug_directory);
+    call_genotypes(&mut flist, &mut varlist, &interval,  &variant_debug_directory);
+
+    let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
+
+    let mut _varlist2 = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
+                                                               &fasta_file,
+                                                               &interval,
+                                                               &h1,
+                                                               &h2,
+                                                               max_cov,
+                                                               min_mapq,
+                                                               alignment_parameters.ln());
+
 
     calculate_mec(&flist, &mut varlist);
 
