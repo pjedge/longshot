@@ -1,13 +1,34 @@
 // calls HapCUT2 as a static library
 use util::Fragment;
 use bio::stats::{LogProb, Prob, PHREDProb};
+use std::collections::HashSet;
 
 static MAX_QUAL_F64: f64 = 0.2;
+
+pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
+
+    let mut h1 = HashSet::new();
+    let mut h2 = HashSet::new();
+
+    for ref f in flist {
+        let total = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
+        let p_read_hap0 = f.p_read_hap[0] - total;
+        let p_read_hap1 = f.p_read_hap[1] - total;
+
+        if p_read_hap0 > threshold {
+            h1.insert(f.id.clone());
+        } else if p_read_hap1 > threshold {
+            h2.insert(f.id.clone());
+        }
+    }
+
+    (h1,h2)
+}
 
 pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -> Vec<Vec<u8>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
     for frag in flist {
-        let prev_call = phase_variant.len() + 1;
+        let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
         let mut blocks = 0;
         let mut n_calls = 0;
@@ -15,9 +36,10 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         for c in frag.clone().calls {
             if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)) {
                 n_calls += 1;
-                if c.var_ix - prev_call != 1 {
+                if prev_call > phase_variant.len() || c.var_ix - prev_call != 1 {
                     blocks += 1;
                 }
+                prev_call = c.var_ix
             }
         }
         if n_calls < 2 {
@@ -35,9 +57,11 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         }
         line.push(' ' as u8);
 
+        let mut prev_call = phase_variant.len() + 1;
+
         for c in frag.clone().calls {
             if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)){
-                if c.var_ix - prev_call == 1 {
+                if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
                     line.push(c.allele as u8)
                 } else {
                     line.push(' ' as u8);
@@ -52,6 +76,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
                     qint = 126;
                 }
                 quals.push(qint as u8);
+                prev_call = c.var_ix
             }
         }
         line.push(' ' as u8);
@@ -77,7 +102,7 @@ extern "C" {
                fragments: usize,
                snps: usize,
                hap1: *mut u8,
-               phase_sets: *mut i32,);
+               phase_sets: *mut i32);
 }
 
 pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,

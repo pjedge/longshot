@@ -273,7 +273,7 @@ pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &m
     }
 }
 
-pub fn call_genotypes(flist: &Vec<Fragment>,
+pub fn call_genotypes(flist: &mut Vec<Fragment>,
                       varlist: &mut VarList,
                       interval: &Option<GenomicInterval>,
                       variant_debug_directory: &Option<String>) {
@@ -843,6 +843,10 @@ pub fn call_genotypes(flist: &Vec<Fragment>,
             var.gq = genotype_qual;
             var.filter = "PASS".to_string();
 
+        }
+
+        for i in 0..flist.len() {
+            flist[i].p_read_hap = [p_read_hap[0][i], p_read_hap[1][i]];
         }
 
         let debug_vcf_str = format!("3.{}.haplotype_genotype_iteration.vcf", hapcut2_iter).to_owned();

@@ -663,6 +663,7 @@ pub fn extract_fragment(bam_record: &Record,
     let mut fragment = Fragment {
         id: id,
         calls: vec![],
+        p_read_hap: [LogProb::from(Prob(0.5)),LogProb::from(Prob(0.5))]
     };
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
     let mut cluster_lst: Vec<(AnchorPositions, Vec<Var>)> = vec![];
