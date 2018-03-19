@@ -11,7 +11,14 @@ use bio::stats::{LogProb, Prob};
 use call_genotypes::{estimate_genotype_priors, calculate_genotypes_without_haplotypes};
 use spoa::poa_multiple_sequence_alignment;
 use std::ascii::AsciiExt;
-use std::str;
+
+//use std::str;
+use bio::alignment::Alignment;
+use bio::alignment::pairwise::banded::*;
+use bio::alignment::AlignmentOperation::*;
+//use bio::alignment::sparse::hash_kmers;
+//use bio::alignment::pairwise::{MIN_SCORE, Scoring};
+//use bio::alignment::AlignmentOperation::*;
 
 static VARLIST_CAPACITY: usize = 1000000;
 
@@ -299,6 +306,151 @@ pub fn call_potential_snvs(bam_file: &String,
     VarList::new(varlist)
 }
 
+// alignment: a rust-bio alignment object where x is a read consensus window, and y is the window from the reference
+//
+// l_ref: the 0-indexed position on the reference of the start of the reference window
+fn extract_variants_from_alignment(alignment: &Alignment,
+                                   consensus: &Vec<u8>,
+                                   ref_window: &Vec<u8>,
+                                   l_ref: usize,
+                                   chrom: String,
+                                   depth: usize,
+                                   boundary: usize) -> Vec<Var>{
+
+    let mut ref_pos = alignment.ystart;
+    let mut read_pos = alignment.xstart;
+
+    let mut new_vars: Vec<Var> = vec![];
+    for o in 0..alignment.operations.len() {
+        //println!("read: {} ref: {}", ref_window[ref_pos] as char, consensus_all[read_pos] as char);
+        let op = alignment.operations[o];
+        let next_op = if o + 1 < alignment.operations.len() {
+            alignment.operations[o + 1]
+        } else {
+            Match
+        };
+
+        if ref_pos >= boundary && ref_pos <= ref_window.len() - boundary {
+            if op == Subst {
+                let new_var = Var {
+                    ix: 0,
+                    // this will be set automatically
+                    chrom: chrom.clone(),
+                    pos0: l_ref + ref_pos,
+                    ref_allele: (ref_window[ref_pos] as char).to_string(),
+                    var_allele: (consensus[read_pos] as char).to_string(),
+                    dp: depth,
+                    ra: 0,
+                    aa: 0,
+                    na: 0,
+                    qual: 0.0,
+                    filter: ".".to_string(),
+                    genotype: "./.".to_string(),
+                    gq: 0.0,
+                    genotype_post: [LogProb::from(Prob(0.25)); 4],
+                    phase_set: None,
+                    mec: 0,
+                    mec_frac: 0.0
+                };
+                new_vars.push(new_var);
+            }
+
+            if (op == Match || op == Subst) && next_op == Ins {
+                let mut ref_allele = vec![ref_window[ref_pos]];
+                let mut var_allele = vec![consensus[read_pos]];
+                let mut offset = 1;
+                for o2 in o + 1..alignment.operations.len() {
+                    if alignment.operations[o2] == Ins {
+                        var_allele.push(consensus[read_pos + offset]);
+                    } else {
+                        break;
+                    }
+                    offset += 1;
+                }
+
+                let new_var = Var {
+                    ix: 0,
+                    // this will be set automatically
+                    chrom: chrom.clone(),
+                    pos0: l_ref + ref_pos,
+                    ref_allele: u8_to_string(&ref_allele),
+                    var_allele: u8_to_string(&var_allele),
+                    dp: depth,
+                    ra: 0,
+                    aa: 0,
+                    na: 0,
+                    qual: 0.0,
+                    filter: ".".to_string(),
+                    genotype: "./.".to_string(),
+                    gq: 0.0,
+                    genotype_post: [LogProb::from(Prob(0.25)); 4],
+                    phase_set: None,
+                    mec: 0,
+                    mec_frac: 0.0
+                };
+                new_vars.push(new_var);
+            }
+
+            if (op == Match || op == Subst) && next_op == Del {
+                let mut ref_allele = vec![ref_window[ref_pos]];
+                let mut var_allele = vec![consensus[read_pos]];
+                let mut offset = 1;
+
+                for o2 in o + 1..alignment.operations.len() {
+                    if alignment.operations[o2] == Del {
+                        ref_allele.push(ref_window[ref_pos + offset]);
+                    } else {
+                        break;
+                    }
+                    offset += 1;
+                }
+                let new_var = Var {
+                    ix: 0,
+                    // this will be set automatically
+                    chrom: chrom.clone(),
+                    pos0: l_ref + ref_pos,
+                    ref_allele: u8_to_string(&ref_allele),
+                    var_allele: u8_to_string(&var_allele),
+                    dp: depth,
+                    ra: 0,
+                    aa: 0,
+                    na: 0,
+                    qual: 0.0,
+                    filter: ".".to_string(),
+                    genotype: "./.".to_string(),
+                    gq: 0.0,
+                    genotype_post: [LogProb::from(Prob(0.25)); 4],
+                    phase_set: None,
+                    mec: 0,
+                    mec_frac: 0.0
+                };
+                new_vars.push(new_var);
+            }
+        }
+
+
+        match op {
+            Match => {
+                ref_pos += 1;
+                read_pos += 1;
+            },
+            Subst => {
+                ref_pos += 1;
+                read_pos += 1;
+            },
+            Ins => {
+                read_pos += 1;
+            },
+            Del => {
+                ref_pos += 1;
+            },
+            _ => {panic!("Unexpected alignment operation.");}
+        }
+    }
+
+    new_vars
+}
+
 pub fn call_potential_variants_poa(bam_file: &String,
                                    fasta_file: &String,
                                    interval: &Option<GenomicInterval>,
@@ -342,6 +494,8 @@ pub fn call_potential_variants_poa(bam_file: &String,
 
     //let mut next_valid_pos = 0;
 
+    let d:usize = 50;
+
     for p in bam_pileup {
 
         let pileup = p.unwrap();
@@ -353,12 +507,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             //next_valid_pos = 0;
         }
 
-        if pileup.pos() % 50 != 0 {
-            prev_tid = tid;
-            continue;
-        }
-
-        if !(pileup.pos() == 220700) {
+        if pileup.pos() % d as u32 != 0 {
             prev_tid = tid;
             continue;
         }
@@ -367,13 +516,14 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h1_read_seqs: Vec<Vec<u8>> = vec![];
         let mut h2_read_seqs: Vec<Vec<u8>> = vec![];
 
-        let d:usize = 50;
-
         let pos_ref = pileup.pos() as usize;
         let l_ref: usize = pos_ref - d;
         let r_ref: usize = pos_ref + d;
-        let ref_window = &ref_seq[l_ref..r_ref + 1];
-        println!("ref: {}", u8_to_string(ref_window));
+        let mut ref_window: Vec<u8> = vec![];
+        for i in l_ref..r_ref + 1 {
+            ref_window.push(AsciiExt::to_ascii_uppercase(&ref_seq[i]));
+        }
+
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
             let record = alignment.record();
@@ -403,6 +553,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 let c = AsciiExt::to_ascii_uppercase(&alignment.record().seq()[i]);
                 read_seq.push(c)
             }
+            read_seq.push('\0' as u8);
             //let read_seq = dna_vec(&alignment.record().seq()[l_read..r_read]);
 
             all_read_seqs.push(read_seq.clone());
@@ -417,7 +568,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 h2_read_seqs.push(read_seq.clone());
             }
         }
-
+        /*
         println!("{}:{}-{}",target_names[tid].clone(),l_ref, r_ref);
         println!("-------");
 
@@ -440,19 +591,102 @@ pub fn call_potential_variants_poa(bam_file: &String,
             println!("{}", str::from_utf8(&seq.clone()).unwrap());
         }
         println!("-------");
+        */
 
-        let mut consensus_all: Vec<u8> = vec![0u8; 300];
-        let mut consensus_h1: Vec<u8> = vec![0u8; 300];
-        let mut consensus_h2: Vec<u8> = vec![0u8; 300];
+        let score = |a: u8, b: u8| if a == b {5i32} else {-4i32};
+        let k = 6;  // kmer match length
+        let w = 20;  // Window size for creating the band
+        let mut aligner = Aligner::new(-8, -2, score, k, w);
 
-        poa_multiple_sequence_alignment(&all_read_seqs, &mut consensus_all);
-        poa_multiple_sequence_alignment(&h1_read_seqs, &mut consensus_h1);
-        poa_multiple_sequence_alignment(&h2_read_seqs, &mut consensus_h2);
+        let consensus_max_len = 200;
+        let min_reads = 5;
 
-        println!("{:?}",consensus_all);
-        println!("{:?}",consensus_h1);
-        println!("{:?}",consensus_h2);
+        let all_vars: Option<Vec<Var>> = if all_read_seqs.len() >= min_reads {
+            let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&all_read_seqs, &mut consensus_all);
+            let all_alignment = aligner.local(&consensus_all, &ref_window);
+            //println!("{}\n", all_alignment.pretty(&consensus_all, &ref_window));
+            Some(extract_variants_from_alignment(&all_alignment,
+                                            &consensus_all,
+                                            &ref_window, l_ref,
+                                            target_names[tid].clone(),
+                                            all_read_seqs.len(),
+                                             25))
+
+        } else {
+            None
+        };
+
+        let h1_vars: Option<Vec<Var>> = if h1_read_seqs.len() >= min_reads {
+            let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&h1_read_seqs, &mut consensus_h1);
+            let h1_alignment = aligner.local(&consensus_h1, &ref_window);
+            //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
+            Some(extract_variants_from_alignment(&h1_alignment,
+                                              &consensus_h1,
+                                              &ref_window, l_ref,
+                                              target_names[tid].clone(),
+                                              all_read_seqs.len(),
+                                               25))
+
+        } else {
+            None
+        };
+
+        let h2_vars: Option<Vec<Var>> = if h2_read_seqs.len() >= min_reads {
+            let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&h2_read_seqs, &mut consensus_h2);
+            let h2_alignment = aligner.local(&consensus_h2, &ref_window);
+            //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
+            Some(extract_variants_from_alignment(&h2_alignment,
+                                            &consensus_h2,
+                                            &ref_window, l_ref,
+                                            target_names[tid].clone(),
+                                            all_read_seqs.len(),
+                                            25))
+
+        } else {
+            None
+        };
+
+
+        match all_vars {
+            Some(vars) => {
+                for var in vars {
+                    println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                }
+            },
+            None => {}
+        }
+
+        match h1_vars {
+            Some(vars) => {
+                for var in vars {
+                    println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                }
+            },
+            None => {}
+        }
+
+        match h2_vars {
+            Some(vars) => {
+                for var in vars {
+                    println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                }
+            },
+            None => {}
+        }
+
+
+        //println!("------------------------------------------------------");
+
+        /*
+        println!("{:?}",u8_to_string(&consensus_all));
+        println!("{:?}",u8_to_string(&consensus_h1));
+        println!("{:?}",u8_to_string(&consensus_h2));
         println!("------------------------------------------------------");
+        */
+
         /*
         if qual > potential_snv_qual &&
             !ref_allele.contains("N") && !var_allele.contains("N") &&

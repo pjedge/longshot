@@ -4,7 +4,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void poa_func(char** seqs, int num_seqs, char* consensus, int consensus_len);
+unsigned poa_func(char** seqs, int num_seqs, char* consensus, int consensus_len);
 #ifdef __cplusplus
 }
 #endif

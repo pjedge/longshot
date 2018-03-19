@@ -3,7 +3,7 @@ extern "C" {
     fn poa_func(seqs: *const *const u8,
                num_seqs: usize,
                consensus: *const u8,
-               consensus_len: usize);
+               consensus_len: usize) -> u32;
 }
 
 pub fn poa_multiple_sequence_alignment(seqs: &Vec<Vec<u8>>, consensus: &mut Vec<u8>) {
@@ -19,9 +19,11 @@ pub fn poa_multiple_sequence_alignment(seqs: &Vec<Vec<u8>>, consensus: &mut Vec<
             seq_ptrs.push(seq.as_ptr());
         }
 
-        poa_func(seq_ptrs.as_ptr(),
+        let len = poa_func(seq_ptrs.as_ptr(),
                 num_seqs,
                 consensus.as_ptr(),
                 consensus_len);
+
+        consensus.truncate(len as usize);
     }
 }
