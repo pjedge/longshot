@@ -3,7 +3,11 @@
 
 extern "C" {
 
-    void poa_func(char** seqs, int num_seqs, char* consensus, int consensus_len) {
+    unsigned poa_func(char** seqs, int num_seqs, char* consensus, int consensus_len) {
+
+        if (num_seqs == 0) {
+            return (unsigned) 0;
+        }
 
         std::vector<std::string> sequences;
 
@@ -22,13 +26,20 @@ extern "C" {
         std::string cns = graph->generate_consensus();
 
         int l = cns.length();
-        if (l > consensus_len - 1) {
-            l = consensus_len - 1;
+        if (l > consensus_len) {
+            l = consensus_len;
         }
+
         for (int i = 0; i < l; i++){
             consensus[i] = cns[i];
         }
 
         sequences.clear();
+        //delete &sequences;
+        //delete &cns;
+        //delete &graph;
+        //delete &alignment_engine;
+
+        return (unsigned) l;
     }
 }
