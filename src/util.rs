@@ -4,8 +4,9 @@ use bio::stats::{LogProb, Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use chrono::prelude::*;
+use std::cmp::Ordering;
 
-static INDEX_FREQ: usize = 1000;
+pub static INDEX_FREQ: usize = 1000;
 
 pub fn print_time() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
@@ -249,6 +250,7 @@ pub struct Fragment {
 pub struct Var {
     pub ix: usize,
     // index of this variant in the global var list
+    pub tid: usize,
     pub chrom: String,
     pub pos0: usize,
     pub ref_allele: String,
@@ -264,10 +266,35 @@ pub struct Var {
     pub gq: f64,
     pub genotype_post: [LogProb; 4],  // genotype posteriors... [p00, p01, p10, p11]
     pub phase_set: Option<usize>,
+    pub indel_site: bool,
     pub mec: usize,
     pub mec_frac: f64
     //pub pileup: Option(Vec<PileupElement>),
 }
+
+impl Ord for Var {
+    fn cmp(&self, other: &Var) -> Ordering {
+        if self.tid == other.tid {
+            self.pos0.cmp(&other.pos0)
+        } else {
+            self.tid.cmp(&other.tid)
+        }
+    }
+}
+
+impl PartialOrd for Var {
+    fn partial_cmp(&self, other: &Var) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Var {
+    fn eq(&self, other: &Var) -> bool {
+        self.tid == other.tid && self.pos0 == other.pos0
+    }
+}
+
+impl Eq for Var {}
 
 #[derive(Debug, Clone)]
 pub struct VarList {
@@ -287,7 +314,7 @@ impl VarList {
         v.index_lst();
         v
     }
-    fn index_lst(&mut self) {
+    pub fn index_lst(&mut self) {
         // need to throw error if list isn't sorted
 
         // for every chromosome, get the position of the last variant
