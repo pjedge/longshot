@@ -10,11 +10,11 @@ git clone --recursive https://github.com/pjedge/reaper
 ```
 Next, build the SPOA library with 
 ```
-cd src/poa/spoa
-mdkir build
-cd build
+mkdir src/poa/spoa/build
+cd src/poa/spoa/build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make
+cd ../../../../
 ```
 Next, install the Rust programming language. Reaper requires Rust 1.4 which comes with the cargo package manager. You can install rust with the following command:
 ```
