@@ -5,6 +5,7 @@ Reaper is a prototype SNV caller for long error prone reads such as Pacific Bios
 
 ## dependencies
 * cmake
+* libclang
 * spoa (see installation)
 * rust 1.4 (see installation)
 * various rust dependencies (automatically managed by cargo)
