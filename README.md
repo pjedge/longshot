@@ -3,12 +3,18 @@ The REAlign error PronE Reads variant caller.
 
 Reaper is a prototype SNV caller for long error prone reads such as Pacific Biosciences SMRT.
 
+## dependencies
+--cmake
+--spoa (see installation)
+--rust 1.4 (see installation)
+--various rust dependencies (automatically managed by cargo)
+
 ## installation
 First, clone the repository with --recursive (this downloads Reaper and the SPOA library dependency):
 ```
 git clone --recursive https://github.com/pjedge/reaper
 ```
-Next, build the SPOA library with 
+Next, build the SPOA library (requires cmake) with 
 ```
 mkdir src/poa/spoa/build
 cd src/poa/spoa/build
