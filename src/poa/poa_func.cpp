@@ -15,7 +15,7 @@ extern "C" {
             sequences.push_back((std::string) seqs[i]);
         }
 
-        auto alignment_engine = spoa::createAlignmentEngine(static_cast<spoa::AlignmentType>(0), 5, -4, -8);
+        auto alignment_engine = spoa::createAlignmentEngine(static_cast<spoa::AlignmentType>(1), -0.12, -4.82, -2.81);
         auto graph = spoa::createGraph();
 
         for (const auto& it: sequences) {
@@ -35,10 +35,6 @@ extern "C" {
         }
 
         sequences.clear();
-        //delete &sequences;
-        //delete &cns;
-        //delete &graph;
-        //delete &alignment_engine;
 
         return (unsigned) l;
     }

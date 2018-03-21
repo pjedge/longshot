@@ -27,7 +27,7 @@ use std::path::Path;
 use std::fs::remove_dir_all;
 
 use call_genotypes::{call_genotypes, call_realigned_genotypes_no_haplotypes, print_vcf, print_variant_debug, var_filter, calculate_mec};
-use util::{print_time, GenomicInterval, ExtractFragmentParameters, parse_region_string, AlignmentType};
+use util::{Var, print_time, GenomicInterval, ExtractFragmentParameters, parse_region_string, AlignmentType};
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use bio::stats::{LogProb,Prob};
@@ -170,10 +170,10 @@ fn main() {
                 .long("no_haps")
                 .help("Don't call HapCUT2 to phase variants.")
                 .display_order(190))
-        .arg(Arg::with_name("Indels")
+        .arg(Arg::with_name("No Indels")
             .short("i")
-            .long("indels")
-            .help("Report short indels -- called indels are wildly inaccurate but are used internally to avoid false SNVs.")
+            .long("no_indels")
+            .help("Do not report short indels -- called indels are relatively inaccurate but are helpful avoid false SNVs.")
             .display_order(200))
         .arg(Arg::with_name("Max alignment")
             .short("x")
@@ -316,11 +316,11 @@ fn main() {
         }
     };
 
-    let indels = match input_args.occurrences_of("Indels") {
-        0 => false,
-        1 => true,
+    let indels = match input_args.occurrences_of("No Indels") {
+        0 => true,
+        1 => false,
         _ => {
-            panic!("Indels specified multiple times");
+            panic!("No Indels specified multiple times");
         }
     };
 
@@ -405,7 +405,14 @@ fn main() {
 
     let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
 
-    let mut _varlist2 = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+
+    eprintln!("{} Using partial order alignment MSA to find new variants...",print_time());
+
+    let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
                                                                &fasta_file,
                                                                &interval,
                                                                &h1,
@@ -414,6 +421,71 @@ fn main() {
                                                                min_mapq,
                                                                alignment_parameters.ln());
 
+    varlist_poa.append(&mut varlist.lst.clone());
+    varlist_poa.sort();
+
+    let mut new_vlst: Vec<Var> = vec![];
+    // any variants that start at or after area_start, but before area_end, are added to the group
+    let mut var_group = vec![];
+    let mut area_tid = varlist_poa[0].tid;
+    let mut area_start = varlist_poa[0].pos0;
+    let mut area_end = varlist_poa[0].pos0 + varlist_poa[0].ref_allele.len();
+
+    for var in varlist_poa {
+        if var.tid == area_tid && var.pos0 >= area_start && var.pos0 < area_end {
+            var_group.push(var.clone());
+            // the new var might overlap, but also extend the variant area
+            if var.pos0 + var.ref_allele.len() > area_end {
+                area_end = var.pos0 + var.ref_allele.len();
+            }
+        } else {
+            // choose the "largest" variant from the current group
+            // add it to the finalized variant list
+            let mut max_var_ix = 0;
+            let mut max_var_size = 0;
+            for (i, v) in var_group.iter().enumerate() {
+                if v.ref_allele.len() + v.var_allele.len() > max_var_size {
+                    max_var_size = v.ref_allele.len() + v.var_allele.len();
+                    max_var_ix = i;
+                }
+            }
+            new_vlst.push(var_group[max_var_ix].clone());
+
+            // clear out the variant group and add the current variant
+            var_group.clear();
+            var_group.push(var.clone());
+            // set the new "variant area" within which new variants will be said to overlap with this one
+            area_tid = var.tid;
+            area_start = var.pos0;
+            area_end = var.pos0 + var.ref_allele.len();
+        }
+    }
+
+    for i in 0..new_vlst.len() {
+        new_vlst[i].ix = i;
+    }
+
+    varlist.lst = new_vlst;
+    varlist.index_lst();
+
+    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf");
+
+    eprintln!("{} POST-POA {} potential variants identified.", print_time(),varlist.lst.len());
+
+    eprintln!("{} POST-POA Generating condensed read data for SNVs...",print_time());
+    let mut flist = extract_fragments::extract_fragments(&bamfile_name,
+                                                         &fasta_file,
+                                                         &varlist,
+                                                         &interval,
+                                                         extract_fragment_parameters,
+                                                         alignment_parameters);
+
+    eprintln!("{} POST-POA Iteratively assembling haplotypes and refining genotypes...",print_time());
+    call_genotypes(&mut flist, &mut varlist, &interval,  &variant_debug_directory);
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////
 
     calculate_mec(&flist, &mut varlist);
 
