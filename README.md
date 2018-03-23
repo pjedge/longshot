@@ -16,11 +16,11 @@ First, clone the repository with --recursive (this downloads Reaper and the SPOA
 git clone --recursive https://github.com/pjedge/reaper
 cd reaper
 ```
-Next, build the SPOA library (requires cmake) with 
+Next, build the SPOA library (requires cmake) with position independent code on: 
 ```
 mkdir src/poa/spoa/build
 cd src/poa/spoa/build
-CC=gcc CXX=g++ cmake -DCMAKE_BUILD_TYPE=Release ..
+CC=gcc CXX=g++ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=TRUE ..
 make
 cd ../../../../
 ```
