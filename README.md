@@ -14,6 +14,7 @@ Reaper is a prototype SNV caller for long error prone reads such as Pacific Bios
 First, clone the repository with --recursive (this downloads Reaper and the SPOA library dependency):
 ```
 git clone --recursive https://github.com/pjedge/reaper
+cd reaper
 ```
 Next, build the SPOA library (requires cmake) with 
 ```
