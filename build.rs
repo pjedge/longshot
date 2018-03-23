@@ -16,7 +16,8 @@ fn main() {
 
     cc::Build::new()
         .cpp(true)
-        .static_flag(false)
+        .shared_flag(false)
+        .static_flag(true)
         .flag_if_supported("-O3")
         .flag_if_supported("-D_GNU_SOURCE")
         .flag_if_supported("-Wall")
@@ -29,17 +30,4 @@ fn main() {
 
         println!("cargo:rustc-flags=-L src/poa/spoa/build/lib/ -l spoa");
         //println!("cargo:rustc-flags=-l dylib=stdc++ -lspoa");
-    /*
-    cc::Build::new()
-        .flag_if_supported("-O3")
-        .flag_if_supported("-D_GNU_SOURCE")
-        .flag_if_supported("-Wall")
-        .file("src/poa/poa_func.o")
-        .file("src/poa/poa.c")
-        .compile("poa");
-    */
-
 }
-// .include("src/poa/spoa/include/")
-// .flag_if_supported("-Lsrc/poa/spoa/build/lib/")
-// .flag_if_supported("-lspoa")
