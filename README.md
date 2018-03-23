@@ -55,3 +55,42 @@ Usage:
 ```
 $ ./target/release/reaper --help
 ```
+
+## troubleshooting
+### linker errors
+For example:
+```
+error: linking with `cc` failed: exit code: 1
+...
+...
+...
+= note: src/poa/spoa/build/lib//libspoa.a(graph.cpp.o): In function `spoa::Node::coverage() const':
+          graph.cpp:(.text+0x1ce5): undefined reference to `std::__detail::_Prime_rehash_policy::_M_next_bkt(unsigned long) const'
+...
+...
+...
+```
+Your system may have multiple versions of your linker that are causing a conflict. Rustc may be calling to a different or old version of the linker. In this case, specify the linker (in linux, gcc) as follows:
+```
+rustc -vV
+```
+Note the build target after "host: ", i.e. "x86_64-unknown-linux-gnu".
+```
+mkdir .cargo
+nano .cargo/config
+```
+edit the config file to have these contents:
+```
+[target.<target-name>]
+linker = "</path/to/linker>"
+```
+for example,
+```
+[target.x86_64-unknown-linux-gnu]
+linker = "/opt/gnu/gcc/bin/gcc"
+```
+then,
+```
+cargo clean
+cargo build --release
+```
