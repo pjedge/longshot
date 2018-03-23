@@ -4,6 +4,7 @@ The REAlign error PronE Reads variant caller.
 Reaper is a prototype SNV caller for long error prone reads such as Pacific Biosciences SMRT.
 
 ## dependencies
+* gcc/g++ >= 4.8
 * cmake
 * libclang
 * dependencies of HTSlib (TODO)
