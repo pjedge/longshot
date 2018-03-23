@@ -231,7 +231,7 @@ pub fn parse_target_names(bam_file: &String) -> Vec<String> {
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub frag_ix: Option<usize>, // index into variant list
+    pub frag_ix: Option<usize>, // index into fragment list
     pub var_ix: usize, // index into variant list
     pub allele: char, // allele call
     pub qual: LogProb, // LogProb probability the call is an error
@@ -249,6 +249,7 @@ pub struct Fragment {
 #[derive(Debug, Clone)]
 pub struct Var {
     pub ix: usize,
+    pub old_ix: Option<usize>,
     // index of this variant in the global var list
     pub tid: usize,
     pub chrom: String,
@@ -268,7 +269,8 @@ pub struct Var {
     pub phase_set: Option<usize>,
     pub indel_site: bool,
     pub mec: usize,
-    pub mec_frac: f64
+    pub mec_frac: f64,
+    pub called: bool
     //pub pileup: Option(Vec<PileupElement>),
 }
 
@@ -389,6 +391,12 @@ impl VarList {
             i += 1;
         }
         vlst
+    }
+
+    pub fn backup_indices(&mut self) {
+        for ref mut var in &mut self.lst {
+            var.old_ix = Some(var.ix);
+        }
     }
 }
 
