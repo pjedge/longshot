@@ -19,7 +19,7 @@ Next, build the SPOA library (requires cmake) with
 ```
 mkdir src/poa/spoa/build
 cd src/poa/spoa/build
-cmake -DCMAKE_BUILD_TYPE=Release ..
+CC=gcc CXX=g++ cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 cd ../../../../
 ```
