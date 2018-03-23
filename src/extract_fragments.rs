@@ -5,6 +5,7 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
+use std::collections::HashMap;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
@@ -645,15 +646,9 @@ pub fn extract_fragment(bam_record: &Record,
                         ref_seq: &Vec<char>,
                         target_names: &Vec<String>,
                         extract_params: ExtractFragmentParameters,
-                        align_params: AlignmentParameters)
-                        -> Option<Fragment> {
-
-
-    if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
-        bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
-        {
-            return None;
-        }
+                        align_params: AlignmentParameters,
+                        old_frag: Option<Fragment>)
+                        -> Fragment {
 
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname());
@@ -665,6 +660,13 @@ pub fn extract_fragment(bam_record: &Record,
         calls: vec![],
         p_read_hap: [LogProb::from(Prob(0.5)),LogProb::from(Prob(0.5))]
     };
+
+    if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
+        bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
+        {
+            return fragment;
+        }
+
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
     let mut cluster_lst: Vec<(AnchorPositions, Vec<Var>)> = vec![];
     let mut var_anchor_lst: Vec<(Var, AnchorPositions)> = vec![];
@@ -740,8 +742,69 @@ pub fn extract_fragment(bam_record: &Record,
     }
 
     // now extract alleles for the variant cluster
+
+    let mut old_frag_ix = 0; // hold onto index in old fragment
+    // save reallocation of this hashmap for every variant
+    let mut new_var_ix: HashMap<usize, usize> = HashMap::with_capacity(extract_params.short_hap_max_snvs);
+
     for (anchors, var_cluster) in cluster_lst {
 
+        // some new variants may have been added after performing POA multiple sequence alignment.
+        // if these new variants are too close to existing variant cluster, they will all need to be
+        // realigned. otherwise, if this "variant cluster" didn't change, just reuse the old fragment calls
+        match &old_frag {
+            &Some(ref old_f) => {
+                // if var.called is true, then this variant existed before POA
+                let mut changed = false;
+                for ref var in &var_cluster {
+                    if !var.called { // this is a new variant from POA
+                        assert_eq!(var.old_ix, None);
+                        changed = true;
+                        break;
+                    }
+                }
+
+                // the fragment cluster didn't change, so convert the old varlist indices to new ones
+                // and just re-use the calls without realigning anything.
+                if !changed {
+
+                    // map old varlist indices to new ones
+                    assert!(new_var_ix.is_empty()); // shouldn't ever have to clear this hashmap
+
+                    for ref var in &var_cluster {
+                        match var.old_ix {
+                            Some(old_ix) => {
+                                new_var_ix.insert(old_ix, var.ix);
+                            },
+                            None => {panic!("Attempted to reuse fragment call in an unchanged variant \
+                                 cluster, but var.old_ix was None.")}
+                        }
+                    }
+
+                    // convert the varlist indices in the old calls and push them to the fragment
+                    while !new_var_ix.is_empty() {
+                        let call = old_f.calls[old_frag_ix];
+
+                        match new_var_ix.remove(&call.var_ix){
+                            Some(new_ix) => {
+                                let mut new_call = call.clone();
+                                new_call.var_ix = new_ix;
+                                fragment.calls.push(new_call);
+                            },
+                            None => {}
+                        }
+
+                        old_frag_ix += 1;
+                    }
+
+                    // skip to the next var_cluster or else we would double-add the fragment calls!
+                    continue;
+                }
+            }
+            &None => {}
+        }
+
+        // extract the calls for the fragment
         for call in extract_var_cluster(&read_seq,
                                         ref_seq,
                                         var_cluster,
@@ -752,11 +815,7 @@ pub fn extract_fragment(bam_record: &Record,
         }
     }
 
-    if fragment.calls.len() > 0 {
-        Some(fragment)
-    } else {
-        None
-    }
+    fragment
 }
 
 pub fn extract_fragments(bamfile_name: &String,
@@ -764,7 +823,8 @@ pub fn extract_fragments(bamfile_name: &String,
                          varlist: &VarList,
                          interval: &Option<GenomicInterval>,
                          extract_params: ExtractFragmentParameters,
-                         align_params: AlignmentParameters)
+                         align_params: AlignmentParameters,
+                         old_flist: Option<Vec<Fragment>>)
                          -> Vec<Fragment> {
 
     let t_names = parse_target_names(&bamfile_name);
@@ -783,8 +843,16 @@ pub fn extract_fragments(bamfile_name: &String,
             let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
             let iv_tid = bam.header().tid(iv.chrom.as_bytes()).unwrap();
             bam.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
-            for r in bam.records() {
+            for (i,r) in bam.records().enumerate() {
                 let record = r.unwrap();
+
+                let old_frag: Option<Fragment> = match &old_flist {
+                    &Some(ref fl) => {
+                        assert_eq!(fl[i].id, u8_to_string(record.qname()));
+                        Some(fl[i].clone())
+                    }
+                    &None => {None}
+                };
 
                 let tid: usize = record.tid() as usize;
                 let chrom: String = t_names[record.tid() as usize].clone();
@@ -827,12 +895,10 @@ pub fn extract_fragments(bamfile_name: &String,
                                             &ref_seq,
                                             &t_names,
                                             extract_params,
-                                            align_params);
+                                            align_params,
+                                            old_frag);
 
-                match frag {
-                    Some(f) => {flist.push(f);}
-                    None => {}
-                }
+                flist.push(frag);
 
                 prev_tid = tid;
             }
@@ -842,8 +908,17 @@ pub fn extract_fragments(bamfile_name: &String,
         }
         &None => {
             let mut bam = bam::Reader::from_path(bamfile_name).unwrap();
-            for r in bam.records() {
+            for (i,r) in bam.records().enumerate() {
+
                 let record = r.unwrap();
+
+                let old_frag: Option<Fragment> = match &old_flist {
+                    &Some(ref fl) => {
+                        assert_eq!(fl[i].id, u8_to_string(record.qname()));
+                        Some(fl[i].clone())
+                    }
+                    &None => {None}
+                };
 
                 let tid: usize = record.tid() as usize;
                 let chrom: String = t_names[record.tid() as usize].clone();
@@ -885,12 +960,10 @@ pub fn extract_fragments(bamfile_name: &String,
                                             &ref_seq,
                                             &t_names,
                                             extract_params,
-                                            align_params);
+                                            align_params,
+                                            old_frag);
 
-                match frag {
-                    Some(f) => {flist.push(f);}
-                    None => {}
-                }
+                flist.push(frag);
 
                 prev_tid = tid;
             }

@@ -12,7 +12,7 @@ use call_genotypes::{estimate_genotype_priors, calculate_genotypes_without_haplo
 use spoa::poa_multiple_sequence_alignment;
 use std::ascii::AsciiExt;
 
-//use std::str;
+use std::str;
 use bio::alignment::Alignment;
 use bio::alignment::pairwise::banded::*;
 use bio::alignment::AlignmentOperation::*;
@@ -21,6 +21,7 @@ use bio::alignment::AlignmentOperation::*;
 //use bio::alignment::AlignmentOperation::*;
 
 static VARLIST_CAPACITY: usize = 1000000;
+static VERBOSE: bool = false; //true;
 
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
@@ -276,7 +277,8 @@ pub fn call_potential_snvs(bam_file: &String,
             let tid: usize = pileup.tid() as usize;
             let new_var = Var {
                 ix: 0,
-                // this will be set automatically,
+                old_ix: None,
+                // these will be set automatically,
                 tid: tid,
                 chrom: target_names[tid].clone(),
                 pos0: pos,
@@ -294,7 +296,8 @@ pub fn call_potential_snvs(bam_file: &String,
                 phase_set: None,
                 indel_site: false,
                 mec: 0,
-                mec_frac: 0.0
+                mec_frac: 0.0,
+                called: false
             };
 
             // we don't want potential SNVs that are inside a deletion, for instance.
@@ -337,6 +340,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
             if op == Subst {
                 let new_var = Var {
                     ix: 0,
+                    old_ix: None,
                     // this will be set automatically,
                     tid: tid,
                     chrom: chrom.clone(),
@@ -355,7 +359,8 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     phase_set: None,
                     indel_site: false,
                     mec: 0,
-                    mec_frac: 0.0
+                    mec_frac: 0.0,
+                    called: false
                 };
                 new_vars.push(new_var);
             }
@@ -375,6 +380,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
 
                 let new_var = Var {
                     ix: 0,
+                    old_ix: None,
                     // this will be set automatically,
                     tid: tid,
                     chrom: chrom.clone(),
@@ -393,7 +399,8 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     phase_set: None,
                     indel_site: false,
                     mec: 0,
-                    mec_frac: 0.0
+                    mec_frac: 0.0,
+                    called: false
                 };
                 new_vars.push(new_var);
             }
@@ -413,6 +420,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                 }
                 let new_var = Var {
                     ix: 0,
+                    old_ix: None,
                     // this will be set automatically
                     tid: tid,
                     chrom: chrom.clone(),
@@ -431,7 +439,8 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     phase_set: None,
                     indel_site: false,
                     mec: 0,
-                    mec_frac: 0.0
+                    mec_frac: 0.0,
+                    called: false
                 };
                 new_vars.push(new_var);
             }
@@ -501,12 +510,14 @@ pub fn call_potential_variants_poa(bam_file: &String,
 
     let bam_pileup = bam_ix.pileup();
 
-    //let mut next_valid_pos = 0;
+    let alignment_type: i32 = 0;
+    let match_score: i32 = 5;
+    let mismatch_score: i32 = -4;
+    let gap_score: i32 = -2;
 
     let d:usize = 50;
 
     for p in bam_pileup {
-
         let pileup = p.unwrap();
 
         let tid: usize = pileup.tid() as usize;
@@ -553,10 +564,10 @@ pub fn call_potential_variants_poa(bam_file: &String,
 
             let pos_read = match alignment.qpos() {
                 Some(t) => t as usize,
-                None => {continue;}
+                None => { continue; }
             };
 
-            let l_read = if pos_read >= d {pos_read - d} else {0};
+            let l_read = if pos_read >= d { pos_read - d } else { 0 };
             let mut r_read = pos_read + d;
 
             let len = alignment.record().seq().len();
@@ -588,38 +599,32 @@ pub fn call_potential_variants_poa(bam_file: &String,
             }
         }
 
-        let mut all_seqs: Vec<Vec<u8>> = vec![ref_window_nullterm.clone(); all_seq_count / 4];
-        let mut h1_seqs: Vec<Vec<u8>> = vec![ref_window_nullterm.clone(); h1_seq_count / 4];
-        let mut h2_seqs: Vec<Vec<u8>> = vec![ref_window_nullterm.clone(); h2_seq_count / 4];
+        if VERBOSE {
+            println!("{}:{}-{}", target_names[tid].clone(), l_ref, r_ref);
+            println!("-------");
 
-        all_seqs.append(&mut all_read_seqs);
-        h1_seqs.append(&mut h1_read_seqs);
-        h2_seqs.append(&mut h2_read_seqs);
+            println!("All read seqs:", );
+            for (i, seq) in all_read_seqs.iter().enumerate() {
+                println!(">seq{}", i);
+                println!("{}", str::from_utf8(&seq.clone()).unwrap());
+            }
+            println!("-------");
+            println!("H1 read seqs:", );
+            for (i, seq) in h1_read_seqs.iter().enumerate() {
+                println!(">seq{}", i);
+                println!("{}", str::from_utf8(&seq.clone()).unwrap());
+            }
 
-        /*
-        println!("{}:{}-{}",target_names[tid].clone(),l_ref, r_ref);
-        println!("-------");
-
-        println!("All read seqs:", );
-        for (i,seq) in all_read_seqs.iter().enumerate() {
-            println!(">seq{}",i);
-            println!("{}", str::from_utf8(&seq.clone()).unwrap());
+            println!("-------");
+            println!("H2 read seqs:", );
+            for (i, seq) in h2_read_seqs.iter().enumerate() {
+                println!(">seq{}", i);
+                println!("{}", str::from_utf8(&seq.clone()).unwrap());
+            }
+            println!("-------");
         }
-        println!("-------");
-        println!("H1 read seqs:", );
-        for (i,seq) in h1_read_seqs.iter().enumerate() {
-            println!(">seq{}",i);
-            println!("{}", str::from_utf8(&seq.clone()).unwrap());
-        }
 
-        println!("-------");
-        println!("H2 read seqs:", );
-        for (i,seq) in h2_read_seqs.iter().enumerate() {
-            println!(">seq{}",i);
-            println!("{}", str::from_utf8(&seq.clone()).unwrap());
-        }
-        println!("-------");
-        */
+        
 
         let score = |a: u8, b: u8| if a == b {5i32} else {-4i32};
         let k = 6;  // kmer match length
@@ -629,27 +634,11 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let consensus_max_len = 200;
         let min_reads = 5;
 
-        let mut all_vars: Option<Vec<Var>> = if all_seq_count >= min_reads {
-            let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
-            poa_multiple_sequence_alignment(&all_seqs, &mut consensus_all);
-            let all_alignment = aligner.local(&consensus_all, &ref_window);
-            //println!("{}\n", all_alignment.pretty(&consensus_all, &ref_window));
-            Some(extract_variants_from_alignment(&all_alignment,
-                                            &consensus_all,
-                                            &ref_window,
-                                                 l_ref,
-                                            tid,
-                                            target_names[tid].clone(),
-                                            all_seq_count,
-                                             25))
-
-        } else {
-            None
-        };
-
         let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
             let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
-            poa_multiple_sequence_alignment(&h1_seqs, &mut consensus_h1);
+            poa_multiple_sequence_alignment(&h1_read_seqs, ref_window_nullterm.clone(),
+                                            h1_seq_count as i32 / 2,&mut consensus_h1, alignment_type,
+                                            match_score, mismatch_score, gap_score);
             let h1_alignment = aligner.local(&consensus_h1, &ref_window);
             //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
             Some(extract_variants_from_alignment(&h1_alignment,
@@ -667,7 +656,9 @@ pub fn call_potential_variants_poa(bam_file: &String,
 
         let mut h2_vars: Option<Vec<Var>> = if h2_seq_count >= min_reads {
             let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
-            poa_multiple_sequence_alignment(&h2_seqs, &mut consensus_h2);
+            poa_multiple_sequence_alignment(&h2_read_seqs, ref_window_nullterm.clone(),
+                                            h2_seq_count as i32 / 2,&mut consensus_h2, alignment_type,
+                                            match_score, mismatch_score, gap_score);
             let h2_alignment = aligner.local(&consensus_h2, &ref_window);
             //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
             Some(extract_variants_from_alignment(&h2_alignment,
@@ -683,34 +674,64 @@ pub fn call_potential_variants_poa(bam_file: &String,
             None
         };
 
-        /*
-        match all_vars {
-            Some(vars) => {
-                for var in vars {
-                    println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
-                }
-            },
-            None => {}
+        let mut all_vars: Option<Vec<Var>> = if h1_vars == None
+                                             && h2_vars == None
+                                             && all_seq_count >= min_reads {
+            let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
+                                            all_seq_count as i32 / 2,
+                                            &mut consensus_all, alignment_type,
+                                            match_score, mismatch_score, gap_score);
+            let all_alignment = aligner.local(&consensus_all, &ref_window);
+            //println!("{}\n", all_alignment.pretty(&consensus_all, &ref_window));
+            Some(extract_variants_from_alignment(&all_alignment,
+                                                 &consensus_all,
+                                                 &ref_window,
+                                                 l_ref,
+                                                 tid,
+                                                 target_names[tid].clone(),
+                                                 all_seq_count,
+                                                 25))
+
+        } else {
+            None
+        };
+
+        if VERBOSE {
+
+            /*
+            match &all_vars {
+                &Some(ref vars) => {
+                    println!("ALL READS VARS:");
+                    for var in vars {
+                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                    }
+                },
+                &None => {}
+            }*/
+
+            match &h1_vars {
+                &Some(ref vars) => {
+                    println!("H1 VARS:");
+                    for var in vars {
+                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                    }
+                },
+                &None => {}
+            }
+
+            match &h2_vars {
+                &Some(ref vars) => {
+                    println!("H2 VARS:");
+                    for var in vars {
+                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                    }
+                },
+                &None => {}
+            }
+            println!("----------------------------------------------------------------------------");
         }
 
-        match h1_vars {
-            Some(vars) => {
-                for var in vars {
-                    println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
-                }
-            },
-            None => {}
-        }
-
-        match h2_vars {
-            Some(vars) => {
-                for var in vars {
-                    println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
-                }
-            },
-            None => {}
-        }
-        */
         match all_vars {
             Some(mut vars) => { varlist.append(&mut vars); }
             None => {}

@@ -276,7 +276,8 @@ pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &m
 pub fn call_genotypes(flist: &mut Vec<Fragment>,
                       varlist: &mut VarList,
                       interval: &Option<GenomicInterval>,
-                      variant_debug_directory: &Option<String>) {
+                      variant_debug_directory: &Option<String>,
+                      program_step: usize) {
 
     let genotype_priors = estimate_genotype_priors();
     let n_var = varlist.lst.len();
@@ -645,7 +646,10 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
 
                 // the quality score of this variant has increased above the limit
                 // we add it from the pool of phased variants
-                if new_qual >= MIN_GQ_FOR_PHASING && var_phased[v] == false {
+                if new_qual >= MIN_GQ_FOR_PHASING
+                    && var.ref_allele.len() == 1
+                    && var.var_allele.len() == 1
+                    && var_phased[v] == false {
 
                     // need to visit each fragment overlapping vth variant and multiply (add) in the
                     // amount the call at this site contributes to fragment likelihoods
@@ -740,7 +744,6 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                     var_phased[v] = false;
                 }
             }
-
 
             // if the haplotypes have not changed in this iteration, then we break
             if !changed {
@@ -842,6 +845,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
             var.genotype = genotype;
             var.gq = genotype_qual;
             var.filter = "PASS".to_string();
+            var.called = true;
 
         }
 
@@ -849,7 +853,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
             flist[i].p_read_hap = [p_read_hap[0][i], p_read_hap[1][i]];
         }
 
-        let debug_vcf_str = format!("3.{}.haplotype_genotype_iteration.vcf", hapcut2_iter).to_owned();
+        let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
         print_variant_debug(&varlist, &interval, &variant_debug_directory,&debug_vcf_str);
 
         eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
