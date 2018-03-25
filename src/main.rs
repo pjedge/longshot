@@ -497,8 +497,10 @@ fn main() {
                                                          &interval,
                                                          extract_fragment_parameters,
                                                          alignment_parameters,
-                                                          Some(flist));
+                                                          None);  // Some(flist)
 
+
+    call_realigned_genotypes_no_haplotypes(&flist2, &mut varlist2); // temporary
     print_variant_debug(&varlist2, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf");
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
