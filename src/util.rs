@@ -255,7 +255,7 @@ pub struct Var {
     pub chrom: String,
     pub pos0: usize,
     pub ref_allele: String,
-    pub var_allele: Vec<String>,
+    pub var_allele: String,
     pub dp: usize,
     // depth of coverage
     pub ra: usize,
