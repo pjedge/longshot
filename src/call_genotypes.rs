@@ -481,7 +481,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                 let mut p_reads: [LogProb; 4] = [LogProb::ln_one(); 4];
 
                 // let g be the current genotype being considered to switch to
-                // then p_read_g[g] contains a vector of tuples (frag_ix, p_read_h0, p_read_h0)
+                // then p_read_g[g] contains a vector of tuples (frag_ix, p_read_h0, p_read_h1
                 // that have the probability of each fragment under the new genotypes
                 let mut p_read_g: Vec<Vec<(usize, LogProb, LogProb)>> = vec![vec![]; 4];
 
@@ -642,107 +642,6 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                     p_read_hap[1][frag_ix] = p_read_h1;
                 }
 
-                let new_qual: f64 = *PHREDProb::from(max_val);
-
-                // the quality score of this variant has increased above the limit
-                // we add it from the pool of phased variants
-                if new_qual >= MIN_GQ_FOR_PHASING
-                    && var.ref_allele.len() == 1
-                    && var.var_allele.len() == 1
-                    && var_phased[v] == false {
-
-                    // need to visit each fragment overlapping vth variant and multiply (add) in the
-                    // amount the call at this site contributes to fragment likelihoods
-                    for call in &pileup_lst[v] {
-                        if call.qual >= ln_max_p_miscall {
-                            continue;
-                        }
-
-                        let frag_ix = match call.frag_ix {
-                            Some(f_ix) => f_ix,
-                            None => panic!("ERROR: Fragment index is missing in pileup iteration.")
-                        };
-
-                        match call.allele {
-                            '0' => {
-                                match haps[0][v] {
-                                    '0' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] + call.one_minus_qual; },
-                                    '1' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] + call.qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                                match haps[1][v] {
-                                    '0' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] + call.one_minus_qual; },
-                                    '1' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] + call.qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                            },
-                            '1' => {
-                                match haps[0][v] {
-                                    '0' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] + call.qual; },
-                                    '1' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] + call.one_minus_qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                                match haps[1][v] {
-                                    '0' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] + call.qual; },
-                                    '1' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] + call.one_minus_qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                            },
-                            _ => { panic!("Invalid allele in fragment.") }
-                        }
-                    }
-
-                    var_phased[v] = true;
-                }
-
-                // the quality score of this variant has dipped below the limit
-                // we remove it from the pool of phased variants
-                if new_qual < MIN_GQ_FOR_PHASING && var_phased[v] == true {
-
-                    // need to visit each fragment overlapping vth variant and divide (subtract) out the
-                    // amount the call at this site contributes to fragment likelihoods
-
-                    for call in &pileup_lst[v] {
-                        if call.qual >= ln_max_p_miscall {
-                            continue;
-                        }
-
-                        let frag_ix = match call.frag_ix {
-                            Some(f_ix) => f_ix,
-                            None => panic!("ERROR: Fragment index is missing in pileup iteration.")
-                        };
-
-                        match call.allele {
-                            '0' => {
-                                match haps[0][v] {
-                                    '0' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] - call.one_minus_qual; },
-                                    '1' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] - call.qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                                match haps[1][v] {
-                                    '0' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] - call.one_minus_qual; },
-                                    '1' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] - call.qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                            },
-                            '1' => {
-                                match haps[0][v] {
-                                    '0' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] - call.qual; },
-                                    '1' => { p_read_hap[0][frag_ix] = p_read_hap[0][frag_ix] - call.one_minus_qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                                match haps[1][v] {
-                                    '0' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] - call.qual; },
-                                    '1' => { p_read_hap[1][frag_ix] = p_read_hap[1][frag_ix] - call.one_minus_qual; },
-                                    _ => { panic!("Invalid allele in haplotype."); }
-                                }
-                            },
-                            _ => { panic!("Invalid allele in fragment.") }
-                        }
-                    }
-
-                    var_phased[v] = false;
-                }
             }
 
             // if the haplotypes have not changed in this iteration, then we break
@@ -847,6 +746,10 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
             var.filter = "PASS".to_string();
             var.called = true;
 
+            if var.chrom == "chr20".to_string() && var.pos0 == 66369 && (var.genotype == "0|0".to_string() ||  var.genotype == "0|0".to_string()) {
+                println!("[chr20 66370 G A] FALSE NEGATIVE");
+            }
+
         }
 
         for i in 0..flist.len() {
@@ -858,6 +761,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
 
         eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
+
         if num_phased <= prev_num_phased { //if total_likelihood <= prev_total_likelihood {
 
             // restore the previous varlist
@@ -867,7 +771,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
 
             break;
         }
-
+        
         prev_num_phased = num_phased;
         //prev_total_likelihood = total_likelihood;
 
