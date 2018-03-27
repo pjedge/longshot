@@ -182,10 +182,6 @@ pub fn call_potential_snvs(bam_file: &String,
         let mut snv_ref_allele = 'N'.to_string();
         let mut snv_var_allele = 'N'.to_string();
 
-        //let mut indel_max_count: u32 = 0;
-        //let mut indel_ref_allele = 'N'.to_string();
-        //let mut indel_var_allele = 'N'.to_string();
-
         // iterate over everything.
 
         for (&(ref r, ref v), &count) in &counts {
@@ -201,14 +197,7 @@ pub fn call_potential_snvs(bam_file: &String,
                     snv_ref_allele = r.clone();
                     snv_var_allele = v.clone();
                 }
-            } /*else {
-                // potential indel
-                if count > indel_max_count as usize {
-                    indel_max_count = count as u32;
-                    indel_ref_allele = r.clone();
-                    indel_var_allele = v.clone();
-                }
-            }*/
+            }
         }
 
         // vectors contain entries with (call, qual)
@@ -222,15 +211,7 @@ pub fn call_potential_snvs(bam_file: &String,
             if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
                 let qual = ln_align_params.emission_probs.not_equal;
                 snv_pileup_calls.push(('1', qual));
-            } /*else if (ref_allele.clone(), var_allele.clone()) == (indel_ref_allele.clone(), indel_var_allele.clone()) {
-                let qual = if indel_ref_allele.len() > indel_var_allele.len() {
-                    ln_align_params.emission_probs.deletion
-                } else {
-                    ln_align_params.emission_probs.insertion
-                };
-
-                indel_pileup_calls.push(('1', qual));
-            } */
+            }
 
             if (ref_allele.clone(), var_allele.clone()) == (ref_allele.clone(), ref_allele.clone()){
                 let qual = ln_align_params.emission_probs.not_equal;
@@ -248,22 +229,6 @@ pub fn call_potential_snvs(bam_file: &String,
             LogProb::ln_zero()
         };
 
-        /*
-        let indel_qual = if !indel_ref_allele.contains("N") && !indel_var_allele.contains("N") {
-            let (_indel_post00, indel_post01, indel_post11) = calculate_genotypes_without_haplotypes(&indel_pileup_calls, &genotype_priors, &indel_ref_allele, &indel_var_allele);
-            LogProb::ln_add_exp(indel_post01, indel_post11)
-        } else {
-            LogProb::ln_zero()
-        };
-
-        //println!("{} {}",*Prob::from(snv_qual),*Prob::from(indel_qual));
-
-        let (ref_allele, var_allele, qual) = if snv_qual > indel_qual {
-            (snv_ref_allele, snv_var_allele, snv_qual)
-        } else {
-            (indel_ref_allele, indel_var_allele, indel_qual)
-        };
-        */
 
         let (ref_allele, var_allele, qual) = (snv_ref_allele, snv_var_allele, snv_qual);
 
