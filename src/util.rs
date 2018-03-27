@@ -254,20 +254,18 @@ pub struct Var {
     pub tid: usize,
     pub chrom: String,
     pub pos0: usize,
-    pub ref_allele: String,
-    pub var_allele: Vec<String>,
+    pub alleles: Vec<String>, // ref allele is alleles[0] and each that follows is a variant allele
     pub dp: usize,
     // depth of coverage
-    pub ra: usize,
-    pub aa: usize,
-    pub na: usize,
+//    pub allele_counts: Vec<String>, // indices match up with those of Var.alleles
+    pub ambiguous_count: usize,
     pub qual: f64,
     pub filter: String,
     pub genotype: String,
     pub gq: f64,
-    pub genotype_post: [LogProb; 4],  // genotype posteriors... [p00, p01, p10, p11]
+    pub genotype_post: Vec<Vec<LogProb>>,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
+    // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
-    pub indel_site: bool,
     pub mec: usize,
     pub mec_frac: f64,
     pub called: bool
@@ -367,6 +365,10 @@ impl VarList {
         }
     }
 
+    fn longest_allele_len(&self) -> usize {
+        self.lst[i].alleles.iter().map(|x| x.len()).max().unwrap()
+    }
+
     pub fn get_variants_range(&self, interval: GenomicInterval) -> (Vec<Var>) {
         // vector of variants to fill and return
         let mut vlst: Vec<Var> = vec![];
@@ -384,7 +386,8 @@ impl VarList {
 
         let mut i = self.ix.get(&interval.chrom).unwrap()[index_pos];
 
-        while i < self.lst.len() && self.lst[i].pos0 <= interval.end_pos as usize {
+        while i < self.lst.len() &&
+            self.lst[i].pos0 + self.longest_allele_len() <= interval.end_pos as usize {
             if self.lst[i].pos0 >= interval.start_pos as usize {
                 vlst.push(self.lst[i].clone());
             }
