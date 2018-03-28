@@ -83,7 +83,7 @@ fn main() {
             .value_name("float")
             .help("Maximum coverage (of reads passing filters) to consider position as a potential SNV, as a fraction of the mean coverage. For example, \"-c 2.0\" throws out positions with more than twice the mean coverage.")
             .display_order(79)
-            .default_value("1.75"))
+            .default_value("2.0"))
         .arg(Arg::with_name("Max coverage")
                 .short("C")
                 .long("max_cov")
