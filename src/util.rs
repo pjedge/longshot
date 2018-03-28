@@ -261,7 +261,7 @@ pub struct Var {
     pub ambiguous_count: usize,
     pub qual: f64,
     pub filter: String,
-    pub genotype: String,
+    pub genotype: [u8; 2],
     pub gq: f64,
     pub genotype_post: Vec<Vec<LogProb>>,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
