@@ -42,101 +42,113 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
     pileup_lst
 }
 
-pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
-    // estimate prior probability of genotypes using strategy described here:
-    // http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
-    // "prior probability of each genotype"
-    let het_snp_rate = LogProb::from(Prob(0.0005));
-    let hom_snp_rate = LogProb::from(Prob(0.001));
+pub struct GenotypePriors {
+    snv_priors: HashMap<(char, (char, char)), LogProb>, // (ref_allele, (allele1, allele2)) -> P(G)
+    indel_prior: LogProb
+}
 
-    // key of diploid_genotype_priors is (char,(char,char)) (ref_allele, G=(allele1,allele2))
-    // key of haploid priors is (char, char) which is (ref_allele, allele1)
-    let mut diploid_genotype_priors: HashMap<(char,(char,char)), LogProb> = HashMap::new();
-    let mut haploid_genotype_priors: HashMap<(char,char), LogProb> = HashMap::new();
+impl GenotypePriors {
+    fn estimate_SNV_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
+        // estimate prior probability of genotypes using strategy described here:
+        // http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
+        // "prior probability of each genotype"
+        let het_snp_rate = LogProb::from(Prob(0.0005));
+        let hom_snp_rate = LogProb::from(Prob(0.001));
 
-    // define base transitions
-    let mut transition: HashMap<char, char> = HashMap::new();
-    transition.insert('A','G');
-    transition.insert('G','A');
-    transition.insert('T','C');
-    transition.insert('C','T');
+        // key of diploid_genotype_priors is (char,(char,char)) (ref_allele, G=(allele1,allele2))
+        // key of haploid priors is (char, char) which is (ref_allele, allele1)
+        let mut diploid_genotype_priors: HashMap<(char,(char,char)), LogProb> = HashMap::new();
+        let mut haploid_genotype_priors: HashMap<(char,char), LogProb> = HashMap::new();
 
-    let alleles: Vec<char> = vec!['A','C','G','T'];
-    let genotypes: Vec<(char,char)> = vec![('A', 'A'), ('A', 'C'), ('A', 'G'), ('A', 'T'),
-                                       ('C', 'C'), ('C', 'G'), ('C', 'T'),
-                                       ('G', 'G'), ('G', 'T'),
-                                       ('T', 'T')];
+        // define base transitions
+        let mut transition: HashMap<char, char> = HashMap::new();
+        transition.insert('A','G');
+        transition.insert('G','A');
+        transition.insert('T','C');
+        transition.insert('C','T');
+
+        let alleles: Vec<char> = vec!['A','C','G','T'];
+        let genotypes: Vec<(char,char)> = vec![('A', 'A'), ('A', 'C'), ('A', 'G'), ('A', 'T'),
+                                               ('C', 'C'), ('C', 'G'), ('C', 'T'),
+                                               ('G', 'G'), ('G', 'T'),
+                                               ('T', 'T')];
 
 
-    for aref in &alleles {
-        let allele = *aref;
-        // priors on haploid alleles
-        haploid_genotype_priors.insert((allele,allele), LogProb::ln_one_minus_exp(&hom_snp_rate));
-        haploid_genotype_priors.insert((allele,*transition.get(&allele).unwrap()), hom_snp_rate + LogProb::from(Prob(4.0/6.0)));
+        for aref in &alleles {
+            let allele = *aref;
+            // priors on haploid alleles
+            haploid_genotype_priors.insert((allele,allele), LogProb::ln_one_minus_exp(&hom_snp_rate));
+            haploid_genotype_priors.insert((allele,*transition.get(&allele).unwrap()), hom_snp_rate + LogProb::from(Prob(4.0/6.0)));
 
-        for tref in &alleles{
-            let transversion = *tref;
-            if haploid_genotype_priors.contains_key(&(allele,transversion)){
-                continue;
+            for tref in &alleles{
+                let transversion = *tref;
+                if haploid_genotype_priors.contains_key(&(allele,transversion)){
+                    continue;
+                }
+                haploid_genotype_priors.insert((allele,transversion), hom_snp_rate + LogProb::from(Prob(1.0/6.0)));
+
             }
-            haploid_genotype_priors.insert((allele,transversion), hom_snp_rate + LogProb::from(Prob(1.0/6.0)));
 
+            for gt in &genotypes {
+                let (g1, g2) = *gt;
+                // probability of homozygous reference is the probability of neither het or hom SNP
+                if g1 == g2 && g1 == allele {
+                    let snp_rate = LogProb::ln_add_exp(het_snp_rate, hom_snp_rate);
+                    let one_minus_snp_rate = LogProb::ln_one_minus_exp(&snp_rate);
+                    diploid_genotype_priors.insert((allele,*gt), one_minus_snp_rate);
+                } else if g1 == g2 && g1 != allele {
+                    // transitions are 4 times as likely as transversions
+                    if g1 == *transition.get(&allele).unwrap() {
+                        diploid_genotype_priors.insert((allele,*gt), het_snp_rate + LogProb::from(Prob(4.0/6.0)));
+                    }else {
+                        diploid_genotype_priors.insert((allele,*gt), het_snp_rate + LogProb::from(Prob(1.0/6.0)));
+                    }
+                } else { // else it's the product of the haploid priors
+                    diploid_genotype_priors.insert((allele,*gt), *haploid_genotype_priors.get(&(allele,g1)).unwrap() +
+                        *(haploid_genotype_priors.get(&(allele,g2))).unwrap());
+                }
+            }
         }
 
-        for gt in &genotypes {
-            let (g1, g2) = *gt;
-            // probability of homozygous reference is the probability of neither het or hom SNP
-            if g1 == g2 && g1 == allele {
-                let snp_rate = LogProb::ln_add_exp(het_snp_rate, hom_snp_rate);
-                let one_minus_snp_rate = LogProb::ln_one_minus_exp(&snp_rate);
-                diploid_genotype_priors.insert((allele,*gt), one_minus_snp_rate);
-            } else if g1 == g2 && g1 != allele {
-                // transitions are 4 times as likely as transversions
-                if g1 == *transition.get(&allele).unwrap() {
-                    diploid_genotype_priors.insert((allele,*gt), het_snp_rate + LogProb::from(Prob(4.0/6.0)));
-                }else {
-                    diploid_genotype_priors.insert((allele,*gt), het_snp_rate + LogProb::from(Prob(1.0/6.0)));
-                }
-            } else { // else it's the product of the haploid priors
-                diploid_genotype_priors.insert((allele,*gt), *haploid_genotype_priors.get(&(allele,g1)).unwrap() +
-                                                     *(haploid_genotype_priors.get(&(allele,g2))).unwrap());
-            }
+        diploid_genotype_priors
+    }
+
+    fn new(&self) -> GenotypePriors {
+        GenotypePriors {
+            snv_priors: self.estimate_SNV_genotype_priors(),
+            indel_prior: LogProb::from(Prob(0.0001 / 3.0))
         }
     }
 
-    diploid_genotype_priors
-}
+    pub fn get(alleles: &Vec<String>, genotype: &[u8; 2]) {
 
-// input: the "alleles" vector for a variant (a vector of strings representing each allele),
-// and the "phased genotype" as a 2-element vector of allele indices
-// output: the prior probability of that phased genotype (tuned for humans)
-pub fn genotype_priors(alleles: Vec<String>, genotype: [u8; 2]) -> LogProb {
-    for g in 0..4 {
-        if ref_allele.len() == 1 && var_allele.len() == 1 {
+        let r = alleles[0];
+        let g1 = alleles[genotype[0]];
+        let g2 = alleles[genotype[1]];
 
-            let ra = ref_allele.chars().nth(0).unwrap();
-            let g1 = if g == 0 || g == 1 { ref_allele.chars().nth(0).unwrap() } else { var_allele.chars().nth(0).unwrap() };
-            let g2 = if g == 0 || g == 2 { ref_allele.chars().nth(0).unwrap() } else { var_allele.chars().nth(0).unwrap() };
+        if r.len() == 1 && a1.len() == 1 && a2.len() == 1 {
 
-            match genotype_priors.get(&(ra, (g1, g2))) {
+            let r_char = r.chars().nth(0).unwrap();
+            let g1_char = g1.chars().nth(0).unwrap();
+            let g2_char = g2.chars().nth(0).unwrap();
+
+            match genotype_priors.get(&(ra_char, (g1_char, g2_char))) {
                 Some(p) => {
-                    priors[g] = if g == 1 || g == 2 {ln_half+*p} else {*p};
+                    if g1_char != g2_char {ln_half+*p} else {*p}
                 },
                 None => {
-                    match genotype_priors.get(&(ra, (g2, g1))) {
+                    match genotype_priors.get(&(ra_char, (g2_char, g1_char))) {
                         Some(p) => {
-                            priors[g] = if g == 1 || g == 2 {ln_half+*p} else {*p};
+                            if g1_char != g2_char {ln_half+*p} else {*p}
                         },
-                        None => { println!("{} ({},{})",ra,g2,g1); panic!("Genotype not in genotype priors."); }
+                        None => { println!("{} ({},{})",r_char,g2_char,g1_char); panic!("Genotype not in genotype priors."); }
                     };
                 }
             }
         } else {
             // we just assume that the rate of indels is 1e-4
-            priors[0] = LogProb::from(Prob(0.9999));
-            priors[1] = LogProb::from(Prob(0.0001 / 3.0));
-            priors[2] = LogProb::from(Prob(0.0001 / 3.0));
-            priors[3] = LogProb::from(Prob(0.0001 / 3.0));
+
+            self.indel_prior
         }
     }
 }
