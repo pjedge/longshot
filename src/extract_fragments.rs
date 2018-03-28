@@ -481,6 +481,38 @@ pub fn find_anchors(bam_record: &Record,
     }))
 }
 
+// input: a reference to a vector of variants length n, and a number k
+// output: a vector of all possible haplotypes from the k-th variant onward,
+// where each haplotype is a vector of u8s representing sequence of alleles
+fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
+
+    if k >= var_cluster.len() {
+        return vec![];
+    }
+
+    let hap_suffixes = generate_haps_k_onward(var_cluster, k + 1);
+    let c = (hap_suffixes.len() * var_cluster[k].alleles.len()) as usize;
+    let mut hap_list = Vec::with_capacity(c);
+
+    for a in 0..var_cluster[k].alleles.len() {
+        for hap_suffix in hap_suffixes {
+            let mut hap = Vec::with_capacity(var_cluster.len() - k);
+            hap.push(a as usize);
+            hap.append(hap_suffix.clone());
+            hap_list.push(hap);
+        }
+    }
+
+    hap_list
+}
+
+// input: a reference to a vector of variants length n
+// output: a vector of all possible haplotypes
+// where each haplotype is a vector of u8s length n representing sequence of alleles for the variants
+fn generate_haps(var_cluster: &Vec<Var>) -> Vec<Vec<u8>> {
+    generate_haps_k_onward(var_cluster, 0)
+}
+
 fn extract_var_cluster(read_seq: &Vec<char>,
                        ref_seq: &Vec<char>,
                        var_cluster: Vec<Var>,
@@ -501,34 +533,40 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         .to_vec();
 
     let mut max_score: LogProb = LogProb::ln_zero();
-    let mut max_hap: usize = 0;
+    let mut max_hap: Vec<u8>;
     let n_vars: usize = var_cluster.len() as usize; // number of variants in cluster
     let n_haps: usize = 2usize.pow(n_vars as u32); // number of possible haplotypes for cluster
     assert!(n_vars <= extract_params.short_hap_max_snvs);
 
-    let in_hap = |var: usize, hap: usize| (hap & 2usize.pow(var as u32)) > 0;
+    let in_hap = |var: usize, allele: usize, hap: Vec<usize>| (hap[var] == allele);
 
-    // allele_scores0[i] contains the Log sum of the probabilities of all short haplotypes
-    // that had a '0' at the ith variant of the cluster.
-    // similarly for allele_scores1, for '1' variants.
-    let mut allele_scores0: Vec<LogProb> = vec![LogProb::ln_zero(); n_vars];
-    let mut allele_scores1: Vec<LogProb> = vec![LogProb::ln_zero(); n_vars];
+    // allele_scores[i][j] contains the Log sum of the probabilities of all short haplotypes
+    // that had the jth allele at the ith variant of the cluster.
+    let mut allele_scores: Vec<Vec<LogProb>> = Vec::with_capacity(n_vars);
+    for v in 0..n_vars {
+        let n_alleles = var_cluster[v].alleles.len();
+        allele_scores.push(vec![LogProb::ln_zero(); n_alleles]);
+    }
+
     let mut score_total: LogProb = LogProb::ln_zero();
 
     if VERBOSE {
         for var in var_cluster.clone() {
-            println!("{} {} {} {}",
+            print!("{} {}",
                      var.chrom,
-                     var.pos0,
-                     var.ref_allele,
-                     var.var_allele);
+                     var.pos0);
+            for allele in var.alleles {
+                print!(" {}", allele);
+            }
+            println!("");
         }
         let read_seq_str: String = read_window.clone().into_iter().collect();
         println!("read: {}", read_seq_str);
     }
 
+    let haps = generate_haps(&var_cluster);
 
-    for hap in 0..n_haps {
+    for &hap in &haps {
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
         for var in 0..n_vars {
@@ -536,15 +574,11 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 hap_window.push(ref_seq[i]);
                 i += 1;
             }
-            if in_hap(var, hap) {
-                for c in var_cluster[var].var_allele.chars() {
-                    hap_window.push(c);
-                }
-            } else {
-                for c in var_cluster[var].ref_allele.chars() {
-                    hap_window.push(c);
-                }
+
+            for c in var_cluster[var].alleles[hap[var]].chars() {
+                hap_window.push(c);
             }
+
             i += var_cluster[var].ref_allele.len();
         }
 
@@ -576,11 +610,9 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         };
 
         for var in 0..n_vars {
-            if in_hap(var, hap) {
-                allele_scores1[var] = LogProb::ln_add_exp(allele_scores1[var], score);
-            } else {
-                allele_scores0[var] = LogProb::ln_add_exp(allele_scores0[var], score);
-            }
+
+            allele_scores[var][hap[var]] = LogProb::ln_add_exp(allele_scores[var][hap[var]], score);
+
         }
         if VERBOSE {
             let hap_seq_str: String = hap_window.into_iter().collect();
@@ -591,45 +623,34 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
         if score > max_score {
             max_score = score;
-            max_hap = hap;
+            max_hap = hap.clone();
         }
     }
 
 
     for v in 0..n_vars {
-        if in_hap(v, max_hap) {
-            // the best haplotype has a '1' variant allele at this position
 
-            // quality score is the probability call is wrong, in other words the ratio of the
-            // sum of haplotype scores that had a '0' here over the total sum of scores
-            let qual = allele_scores0[v] - score_total;
-            if VERBOSE {
-                println!("adding call: {} {} {} {}; allele = 1; qual = {};", var_cluster[v].chrom, var_cluster[v].pos0, var_cluster[v].ref_allele, var_cluster[v].var_allele, *Prob::from(qual));
-            }
-            calls.push(FragCall {
-                frag_ix: None,
-                var_ix: var_cluster[v].ix,
-                allele: '1',
-                qual: qual,
-                one_minus_qual: LogProb::ln_one_minus_exp(&qual)
-            });
-        } else {
-            // the best haplotype has a '0' ref allele at this position
+        let best_allele = max_hap[v];
+        let qual = LogProb::ln_one_minus_exp(allele_scores[v][best_allele] - score_total);
 
-            // quality score is the probability call is wrong, in other words the ratio of the
-            // sum of haplotype scores that had a '1' here over the total sum of scores
-            let qual = allele_scores1[v] - score_total;
-            if VERBOSE {
-                println!("adding call: {} {} {} {}; allele = 0; qual = {};", var_cluster[v].chrom, var_cluster[v].pos0, var_cluster[v].ref_allele, var_cluster[v].var_allele, *Prob::from(qual));
+        if VERBOSE {
+            print!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
+            for allele in var_cluster[v].alleles {
+                print!(" {}", allele);
             }
-            calls.push(FragCall {
-                frag_ix: None,
-                var_ix: var_cluster[v].ix,
-                allele: '0',
-                qual: qual,
-                one_minus_qual: LogProb::ln_one_minus_exp(&qual)
-            });
+
+            print!("; allele = {};", best_allele);
+            println!(" qual = {};", *Prob::from(qual));
+
         }
+
+        calls.push(FragCall {
+            frag_ix: None,
+            var_ix: var_cluster[v].ix,
+            allele: best_allele.to_string(),
+            qual: qual,
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+        });
     }
 
     if VERBOSE {

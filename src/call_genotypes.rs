@@ -107,6 +107,40 @@ pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
     diploid_genotype_priors
 }
 
+// input: the "alleles" vector for a variant (a vector of strings representing each allele),
+// and the "phased genotype" as a 2-element vector of allele indices
+// output: the prior probability of that phased genotype (tuned for humans)
+pub fn genotype_priors(alleles: Vec<String>, genotype: [u8; 2]) -> LogProb {
+    for g in 0..4 {
+        if ref_allele.len() == 1 && var_allele.len() == 1 {
+
+            let ra = ref_allele.chars().nth(0).unwrap();
+            let g1 = if g == 0 || g == 1 { ref_allele.chars().nth(0).unwrap() } else { var_allele.chars().nth(0).unwrap() };
+            let g2 = if g == 0 || g == 2 { ref_allele.chars().nth(0).unwrap() } else { var_allele.chars().nth(0).unwrap() };
+
+            match genotype_priors.get(&(ra, (g1, g2))) {
+                Some(p) => {
+                    priors[g] = if g == 1 || g == 2 {ln_half+*p} else {*p};
+                },
+                None => {
+                    match genotype_priors.get(&(ra, (g2, g1))) {
+                        Some(p) => {
+                            priors[g] = if g == 1 || g == 2 {ln_half+*p} else {*p};
+                        },
+                        None => { println!("{} ({},{})",ra,g2,g1); panic!("Genotype not in genotype priors."); }
+                    };
+                }
+            }
+        } else {
+            // we just assume that the rate of indels is 1e-4
+            priors[0] = LogProb::from(Prob(0.9999));
+            priors[1] = LogProb::from(Prob(0.0001 / 3.0));
+            priors[2] = LogProb::from(Prob(0.0001 / 3.0));
+            priors[3] = LogProb::from(Prob(0.0001 / 3.0));
+        }
+    }
+}
+
 fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize, usize) {
     // compute probabilities of data given each genotype
     let mut count0 = 0;
@@ -771,7 +805,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
 
             break;
         }
-        
+
         prev_num_phased = num_phased;
         //prev_total_likelihood = total_likelihood;
 
