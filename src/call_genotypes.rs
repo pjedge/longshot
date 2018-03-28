@@ -1,5 +1,5 @@
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{VarList, Fragment, FragCall, GenomicInterval};
+use util::{SPACER, VarList, Fragment, FragCall, GenomicInterval};
 use haplotype_assembly::{generate_flist_buffer, call_hapcut2};
 use std::collections::HashMap;
 use std::error::Error;
@@ -48,6 +48,8 @@ pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
     // "prior probability of each genotype"
     let het_snp_rate = LogProb::from(Prob(0.0005));
     let hom_snp_rate = LogProb::from(Prob(0.001));
+    //let het_indel_rate = LogProb::from(Prob(0.00005))
+    let hom_indel_rate = LogProb::from(Prob(0.0001));
 
     // key of diploid_genotype_priors is (char,(char,char)) (ref_allele, G=(allele1,allele2))
     // key of haploid priors is (char, char) which is (ref_allele, allele1)
@@ -71,7 +73,7 @@ pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
     for aref in &alleles {
         let allele = *aref;
         // priors on haploid alleles
-        haploid_genotype_priors.insert((allele,allele), LogProb::ln_one_minus_exp(&hom_snp_rate));
+        haploid_genotype_priors.insert((allele,allele), LogProb::ln_one_minus_exp(&hom_snp_rate + &homozygous_indel_rate));
         haploid_genotype_priors.insert((allele,*transition.get(&allele).unwrap()), hom_snp_rate + LogProb::from(Prob(4.0/6.0)));
 
         for tref in &alleles{
@@ -80,8 +82,12 @@ pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
                 continue;
             }
             haploid_genotype_priors.insert((allele,transversion), hom_snp_rate + LogProb::from(Prob(1.0/6.0)));
-
         }
+
+        // assume indel has a 0.5 chance of being insertion, 0.5 chance of deletion
+        // scale the prior by 1/3 since the SNP events are divided into 3 types... (transition to each base)
+        haploid_genotype_priors.insert((allele,'D'), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0/3.0)));
+        haploid_genotype_priors.insert((allele,'I'), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0/3.0)));
 
         for gt in &genotypes {
             let (g1, g2) = *gt;
@@ -102,6 +108,11 @@ pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
                                                      *(haploid_genotype_priors.get(&(allele,g2))).unwrap());
             }
         }
+    }
+
+    println!("{} GENOTYPE PRIORS:", SPACER);
+    for (&(ref ra, (ref g1, ref g2)), &p) in &diploid_genotype_priors {
+        println!("{} {} {}/{}", SPACER, ra, g1, g2);
     }
 
     diploid_genotype_priors
