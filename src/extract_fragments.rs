@@ -492,13 +492,13 @@ fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
 
     let hap_suffixes = generate_haps_k_onward(var_cluster, k + 1);
     let c = (hap_suffixes.len() * var_cluster[k].alleles.len()) as usize;
-    let mut hap_list = Vec::with_capacity(c);
+    let mut hap_list: Vec<Vec<u8>> = Vec::with_capacity(c);
 
     for a in 0..var_cluster[k].alleles.len() {
-        for hap_suffix in hap_suffixes {
+        for &hap_suffix in &hap_suffixes {
             let mut hap = Vec::with_capacity(var_cluster.len() - k);
-            hap.push(a as usize);
-            hap.append(hap_suffix.clone());
+            hap.push(a as u8);
+            hap.append(&mut hap_suffix.clone());
             hap_list.push(hap);
         }
     }
@@ -535,10 +535,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: Vec<u8>;
     let n_vars: usize = var_cluster.len() as usize; // number of variants in cluster
-    let n_haps: usize = 2usize.pow(n_vars as u32); // number of possible haplotypes for cluster
     assert!(n_vars <= extract_params.short_hap_max_snvs);
-
-    let in_hap = |var: usize, allele: usize, hap: Vec<usize>| (hap[var] == allele);
 
     // allele_scores[i][j] contains the Log sum of the probabilities of all short haplotypes
     // that had the jth allele at the ith variant of the cluster.
@@ -566,7 +563,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
     let haps = generate_haps(&var_cluster);
 
-    for &hap in &haps {
+    for ref hap in &haps {
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
         for var in 0..n_vars {
@@ -575,11 +572,11 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 i += 1;
             }
 
-            for c in var_cluster[var].alleles[hap[var]].chars() {
+            for c in var_cluster[var].alleles[hap[var] as usize].chars() {
                 hap_window.push(c);
             }
 
-            i += var_cluster[var].ref_allele.len();
+            i += var_cluster[var].alleles[0].len();
         }
 
         while i <= anchors.right_anchor_ref as usize {
@@ -611,12 +608,12 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
         for var in 0..n_vars {
 
-            allele_scores[var][hap[var]] = LogProb::ln_add_exp(allele_scores[var][hap[var]], score);
+            allele_scores[var][hap[var] as usize] = LogProb::ln_add_exp(allele_scores[var][hap[var] as usize], score);
 
         }
         if VERBOSE {
             let hap_seq_str: String = hap_window.into_iter().collect();
-            println!("hap:{} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
+            println!("hap:{:?} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
         }
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
@@ -631,7 +628,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     for v in 0..n_vars {
 
         let best_allele = max_hap[v];
-        let qual = LogProb::ln_one_minus_exp(allele_scores[v][best_allele] - score_total);
+        let qual = LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
 
         if VERBOSE {
             print!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
@@ -647,7 +644,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         calls.push(FragCall {
             frag_ix: None,
             var_ix: var_cluster[v].ix,
-            allele: best_allele.to_string(),
+            allele: best_allele,
             qual: qual,
             one_minus_qual: LogProb::ln_one_minus_exp(&qual)
         });
