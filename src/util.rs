@@ -31,10 +31,10 @@ impl GenotypePriors {
     // these represent short insertions and short deletions.
     pub fn new() -> GenotypePriors {
 
-        let het_snp_rate = LogProb::from(Prob(0.0005));
-        let hom_snp_rate = LogProb::from(Prob(0.001));
-        //let het_indel_rate = LogProb::from(Prob(0.00005))
-        let hom_indel_rate = LogProb::from(Prob(0.0001));
+        let hom_snp_rate = LogProb::from(Prob(0.0005));
+        let het_snp_rate = LogProb::from(Prob(0.001));
+        let hom_indel_rate = LogProb::from(Prob(0.00005));
+        let het_indel_rate = LogProb::from(Prob(0.0001));
 
         // key of diploid_genotype_priors is (char,(char,char)) (ref_allele, G=(allele1,allele2))
         // key of haploid priors is (char, char) which is (ref_allele, allele1)
@@ -49,44 +49,57 @@ impl GenotypePriors {
         transition.insert('C', 'T');
 
         let alleles: Vec<char> = vec!['A', 'C', 'G', 'T'];
-        let genotypes: Vec<(char, char)> = vec![('A', 'A'), ('A', 'C'), ('A', 'G'), ('A', 'T'),
-                                                ('C', 'C'), ('C', 'G'), ('C', 'T'),
-                                                ('G', 'G'), ('G', 'T'),
-                                                ('T', 'T')];
+        let genotypes: Vec<(char, char)> = vec![ // all combinations of DNA bases
+                                                ('A','A'),('A','C'),('A','G'),('A','T'),
+                                                ('C', 'C'),('C', 'G'),('C', 'T'),
+                                                ('G', 'G'),('G', 'T'),
+                                                ('T', 'T'),
+                                                 // all combinations of a DNA base and an Insertion or Deletion
+                                                ('A','D'),('A','I'),
+                                                ('C','D'),('C','I'),
+                                                ('G','D'),('G','I'),
+                                                ('T','D'),('T','I'),
+                                                 // all combinations of multiple Insertion or Deletion
+                                                ('D','D'),('I','I'),('D','I')];
 
 
         for aref in &alleles {
             let allele = *aref;
             // priors on haploid alleles
-            haploid_genotype_priors.insert((allele, allele), LogProb::ln_one_minus_exp(&(hom_snp_rate + hom_indel_rate)));
-            haploid_genotype_priors.insert((allele, *transition.get(&allele).unwrap()), hom_snp_rate + LogProb::from(Prob(4.0 / 6.0)));
+            haploid_genotype_priors.insert((allele, allele), LogProb::ln_one_minus_exp(&(het_snp_rate + het_indel_rate)));
+            haploid_genotype_priors.insert((allele, *transition.get(&allele).unwrap()), het_snp_rate + LogProb::from(Prob(4.0 / 6.0)));
 
             for tref in &alleles {
                 let transversion = *tref;
                 if haploid_genotype_priors.contains_key(&(allele, transversion)) {
                     continue;
                 }
-                haploid_genotype_priors.insert((allele, transversion), hom_snp_rate + LogProb::from(Prob(1.0 / 6.0)));
+                haploid_genotype_priors.insert((allele, transversion), het_snp_rate + LogProb::from(Prob(1.0 / 6.0)));
             }
 
             // assume indel has a 0.5 chance of being insertion, 0.5 chance of deletion
             // scale the prior by 1/3 since the SNP events are divided into 3 types... (transition to each base)
-            haploid_genotype_priors.insert((allele, 'D'), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 3.0)));
-            haploid_genotype_priors.insert((allele, 'I'), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 3.0)));
+            haploid_genotype_priors.insert((allele, 'D'), het_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
+            haploid_genotype_priors.insert((allele, 'I'), het_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
 
             for gt in &genotypes {
                 let (g1, g2) = *gt;
                 // probability of homozygous reference is the probability of neither het or hom SNP
                 if g1 == g2 && g1 == allele {
-                    let snp_rate = LogProb::ln_add_exp(het_snp_rate, hom_snp_rate);
-                    let one_minus_snp_rate = LogProb::ln_one_minus_exp(&snp_rate);
+                    // g1 and g2 are the reference bases
+                    let var_rate = LogProb::ln_sum_exp(&[hom_snp_rate, het_snp_rate, hom_indel_rate, het_indel_rate]);
+                    let one_minus_snp_rate = LogProb::ln_one_minus_exp(&var_rate);
                     diploid_genotype_priors.insert((allele, *gt), one_minus_snp_rate);
                 } else if g1 == g2 && g1 != allele {
-                    // transitions are 4 times as likely as transversions
-                    if g1 == *transition.get(&allele).unwrap() {
-                        diploid_genotype_priors.insert((allele, *gt), het_snp_rate + LogProb::from(Prob(4.0 / 6.0)));
+                    // this could be multiple indels, must handle indel case first
+                    if g2 == 'D' || g2 == 'I' {
+                        diploid_genotype_priors.insert((allele, *gt), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
+                    } else if g1 == *transition.get(&allele).unwrap() { // otherwise it is a homozygous SNV
+                        // transitions are 4 times as likely as transversions
+                        diploid_genotype_priors.insert((allele, *gt), hom_snp_rate + LogProb::from(Prob(4.0 / 6.0)));
                     } else {
-                        diploid_genotype_priors.insert((allele, *gt), het_snp_rate + LogProb::from(Prob(1.0 / 6.0)));
+                        // transversion
+                        diploid_genotype_priors.insert((allele, *gt), hom_snp_rate + LogProb::from(Prob(1.0 / 6.0)));
                     }
                 } else { // else it's the product of the haploid priors
                     diploid_genotype_priors.insert((allele, *gt), *haploid_genotype_priors.get(&(allele, g1)).unwrap() +
@@ -97,9 +110,13 @@ impl GenotypePriors {
 
         eprintln!("{} GENOTYPE PRIORS:", SPACER);
         eprintln!("{} REF G1/G2 PROB", SPACER);
+        //let mut priors_vec: Vec<_> = diploid_genotype_priors.iter()
+        //    .map(|(&(ra,(g1,g2)),&p)| (&(ra,(g1,g2)),&*Prob::from(p)))
+        //    .collect::<Vec<_>>();
+        //priors_vec.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
         for (&(ref ra, (ref g1, ref g2)), &p) in &diploid_genotype_priors {
-            eprintln!("{} {} {}/{} : {}", SPACER, ra, g1, g2, *Prob::from(p));
+            eprintln!("{} {} {}/{} {}", SPACER, ra, g1, g2, *Prob::from(p));
         }
 
         GenotypePriors{priors_dict: diploid_genotype_priors}
@@ -114,9 +131,9 @@ impl GenotypePriors {
     // not ideal, but should suffice for the time being
     pub fn get(&self, alleles: &Vec<String>, genotype: [u8; 2]) -> LogProb {
 
-        let ra = alleles[0].chars().nth(0).unwrap();
+        let mut ra = alleles[0].chars().nth(0).unwrap();
 
-        let g1 = if alleles[genotype[0] as usize].len() == alleles[0].len() {
+        let mut g1 = if alleles[genotype[0] as usize].len() == alleles[0].len() {
             alleles[genotype[0] as usize].chars().nth(0).unwrap()
         } else if alleles[genotype[0] as usize].len() > alleles[0].len() {
             'I'
@@ -124,7 +141,15 @@ impl GenotypePriors {
             'D'
         };
 
-        assert!(ra != g1);
+        if ra == g1 {
+            for i in 0..alleles[genotype[0] as usize].len() {
+                ra = alleles[0].chars().nth(i).unwrap();
+                g1 = alleles[genotype[0] as usize].chars().nth(i).unwrap();
+                if ra != g1 {
+                    break;
+                }
+            }
+        }
 
         let g2 = if alleles[genotype[1] as usize].len() == alleles[0].len() {
             alleles[genotype[1] as usize].chars().nth(0).unwrap()
@@ -133,6 +158,16 @@ impl GenotypePriors {
         } else {
             'D'
         };
+
+        if ra == g2 {
+            for i in 0..alleles[genotype[1] as usize].len() {
+                ra = alleles[0].chars().nth(i).unwrap();
+                g1 = alleles[genotype[1] as usize].chars().nth(i).unwrap();
+                if ra != g2 {
+                    break;
+                }
+            }
+        }
 
         let ln_half = LogProb::from(Prob(0.5));
 
@@ -545,12 +580,12 @@ impl VarList {
 
         let mut new_vlst: Vec<Var> = vec![];
         // any variants that start at or after area_start, but before area_end, are added to the group
-        let mut var_group = vec![];
+        let mut var_group: Vec<Var> = vec![];
         let mut area_tid = other.lst[0].tid;
         let mut area_start = other.lst[0].pos0;
         let mut area_end = other.lst[0].pos0 + other.lst[0].alleles[0].len();
 
-        for var in other.lst {
+        for var in &other.lst {
             if var.tid == area_tid && var.pos0 >= area_start && var.pos0 < area_end {
                 var_group.push(var.clone());
                 // the new var might overlap, but also extend the variant area
@@ -576,7 +611,7 @@ impl VarList {
                 // 1. find the earliest variant position in the variant list.
                 let mut min_pos0 = var_group[0].pos0;
                 let mut min_pos0_refseq = var_group[0].alleles[0].clone();
-                for v in var_group.iter() {
+                for v in &var_group {
                     if v.pos0 < min_pos0
                         || (v.pos0 == min_pos0 && v.alleles[0].len() > min_pos0_refseq.len()) {
                         min_pos0 = v.pos0;
@@ -588,14 +623,14 @@ impl VarList {
                 //        at the beginning with enough ref chars to match this position, and
                 //        update their position so all the positions are the same.
 
-                for &mut v in &mut var_group {
+                for mut v in &mut var_group {
                     if v.pos0 > min_pos0 {
                         let diff = v.pos0 - min_pos0;
                         // we need to steal the first diff bases from min_pos0_refseq
                         let prefix_seq: String = min_pos0_refseq.chars().take(diff).collect();
                         let mut new_alleles = vec![];
 
-                        for allele in v.alleles {
+                        for ref allele in &v.alleles {
                             let mut a = prefix_seq.clone();
                             a.push_str(&allele);
                             new_alleles.push(a);
@@ -606,7 +641,7 @@ impl VarList {
                     }
                 }
 
-                for v in var_group {
+                for v in &var_group {
                     assert!(v.pos0 == min_pos0);
                 }
 
@@ -621,15 +656,15 @@ impl VarList {
                 // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
                 //        until the ref allele is the same length as (step 3)
 
-                for &mut v in &mut var_group {
+                for ref mut v in &mut var_group {
                     if v.alleles[0].len() < longest_ref.len() {
                         let diff = longest_ref.len() - v.alleles[0].len();
                         // we need to steal the last diff bases from longest_ref
                         let suffix_seq: String = longest_ref.chars().skip(v.alleles[0].len()).take(diff).collect();
                         let mut new_alleles = vec![];
 
-                        for allele in v.alleles {
-                            let mut a = allele.clone();
+                        for ref allele in &v.alleles {
+                            let mut a = (*allele).clone();
                             a.push_str(&suffix_seq.clone());
                             new_alleles.push(a);
                         }
@@ -638,7 +673,7 @@ impl VarList {
                     }
                 }
 
-                for v in var_group {
+                for v in &var_group {
                     assert!(v.alleles[0] == longest_ref);
                 }
 
@@ -648,7 +683,7 @@ impl VarList {
                 // 6. combine the remaining alleles from every variant (non-ref)
                 //        into a single vector, sort, and remove duplicates. (vec.dedup())
                 let mut var_alleles: Vec<String> = vec![];
-                for v in var_group {
+                for v in &var_group {
                     for a in v.alleles[1..].iter() {
                         var_alleles.push(a.clone());
                     }

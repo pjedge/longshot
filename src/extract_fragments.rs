@@ -487,7 +487,7 @@ pub fn find_anchors(bam_record: &Record,
 fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
 
     if k >= var_cluster.len() {
-        return vec![];
+        return vec![vec![]];
     }
 
     let hap_suffixes = generate_haps_k_onward(var_cluster, k + 1);
@@ -495,10 +495,10 @@ fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
     let mut hap_list: Vec<Vec<u8>> = Vec::with_capacity(c);
 
     for a in 0..var_cluster[k].alleles.len() {
-        for &hap_suffix in &hap_suffixes {
+        for mut hap_suffix in hap_suffixes.clone() {
             let mut hap = Vec::with_capacity(var_cluster.len() - k);
             hap.push(a as u8);
-            hap.append(&mut hap_suffix.clone());
+            hap.append(&mut hap_suffix);
             hap_list.push(hap);
         }
     }
@@ -533,7 +533,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         .to_vec();
 
     let mut max_score: LogProb = LogProb::ln_zero();
-    let mut max_hap: Vec<u8>;
+    let mut max_hap: Vec<u8> = vec![0u8; var_cluster.len()];
     let n_vars: usize = var_cluster.len() as usize; // number of variants in cluster
     assert!(n_vars <= extract_params.short_hap_max_snvs);
 
@@ -563,7 +563,9 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
     let haps = generate_haps(&var_cluster);
 
-    for ref hap in &haps {
+    for ref hap in haps {
+
+        assert!(hap.len() > 0);
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
         for var in 0..n_vars {
@@ -628,11 +630,17 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     for v in 0..n_vars {
 
         let best_allele = max_hap[v];
-        let qual = LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
+
+        let qual = if allele_scores[v][best_allele as usize] == LogProb::ln_zero()
+                      || score_total == LogProb::ln_zero() {
+            LogProb::ln_one()
+        } else {
+            LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total))
+        };
 
         if VERBOSE {
             print!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
-            for allele in var_cluster[v].alleles {
+            for allele in &var_cluster[v].alleles {
                 print!(" {}", allele);
             }
 

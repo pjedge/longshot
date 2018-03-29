@@ -1,5 +1,5 @@
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
+use util::{SPACER, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
 use haplotype_assembly::{generate_flist_buffer, call_hapcut2};
 use std::error::Error;
 use std::io::prelude::*;
@@ -93,8 +93,8 @@ pub fn calculate_genotypes_without_haplotypes(pileup: &Vec<FragCall>,
 
     // sum of data probabilities
     let mut posts = vec![vec![LogProb::ln_zero(); alleles.len()]; alleles.len()];
-    let total = LogProb::ln_zero();
-    for &row in &probs {
+    let mut total = LogProb::ln_zero();
+    for ref row in &probs {
         total = LogProb::ln_add_exp(total, LogProb::ln_sum_exp(&row));
     }
 
@@ -120,8 +120,8 @@ pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &m
                                                                               &genotype_priors,
                                                                               &var.alleles);
 
-        let max_post = posts[0][0];
-        let max_genotype = [0u8, 0u8];
+        let mut max_post = posts[0][0];
+        let mut max_genotype = [0u8, 0u8];
 
         for g1 in 0..var.alleles.len() {
             for g2 in 0..var.alleles.len() {
@@ -132,12 +132,22 @@ pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &m
             }
         }
 
+        if max_post > LogProb::ln_one() {
+            eprintln!("{} WARNING: max post = {} > 1.0", SPACER, *Prob::from(max_post));
+            max_post = LogProb::ln_one();
+        }
         let genotype_qual:f64 = if max_genotype[0] == max_genotype[1] {
             *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post))
         } else {
             // we want the unphased genotype accuracy, so multipy by 2
             // for heterozygous SNV we computed the probability of both phased genotypes separately
-            *PHREDProb::from(LogProb::ln_one_minus_exp(&(max_post + LogProb::from(Prob(2.0)))))
+            let mut unphased_post = max_post + LogProb::from(Prob(2.0));
+            if unphased_post > LogProb::ln_one() {
+                eprintln!("{} WARNING: unphased max post = {} > 1.0", SPACER, *Prob::from(unphased_post));
+                unphased_post = LogProb::ln_one();
+            }
+
+            *PHREDProb::from(LogProb::ln_one_minus_exp(&(unphased_post)))
         };
 
         //let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
@@ -408,13 +418,13 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                     }
                 }
 
-                let total = LogProb::ln_zero();
-                for &row in &p_reads {
+                let mut total = LogProb::ln_zero();
+                for ref row in &p_reads {
                     total = LogProb::ln_add_exp(total, LogProb::ln_sum_exp(&row));
                 }
 
-                let max_genotype = [0u8, 0u8];
-                let max_post: LogProb = LogProb::ln_zero();
+                let mut max_genotype = [0u8, 0u8];
+                let mut max_post: LogProb = LogProb::ln_zero();
 
                 let mut posts = vec![vec![LogProb::ln_zero(); var.alleles.len()]; var.alleles.len()];
                 for g1 in 0..var.alleles.len() {
@@ -713,7 +723,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
             if !indels {
                 let mut found_indel = false;
 
-                for allele in var.alleles {
+                for ref allele in &var.alleles {
                     if allele.len() > 1 {
                         found_indel = true;
                         break;
@@ -731,7 +741,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
         };
 
         let allele_counts_str = var.alleles.clone().iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",");
-        let post_vec = vec![];
+        let mut post_vec = vec![];
         for g1 in 0..var.alleles.len() {
             for g2 in 0..var.alleles.len(){
                 post_vec.push(format!("{:.2}", *PHREDProb::from(var.genotype_post[g1][g2])));
@@ -739,7 +749,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
         }
         let post_str = post_vec.join(",");
 
-        let var_alleles = vec![];
+        let mut var_alleles = vec![];
         for allele in var.alleles[1..].iter() {
             var_alleles.push(allele.clone());
         }
