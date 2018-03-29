@@ -345,6 +345,12 @@ fn main() {
     let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval);
 
     /***********************************************************************************************/
+    // GET HUMAN GENOTYPE PRIORS
+    /***********************************************************************************************/
+
+    let genotype_priors = GenotypePriors::new();
+
+    /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
     /***********************************************************************************************/
 
@@ -353,6 +359,7 @@ fn main() {
     let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
                                                            &fasta_file,
                                                            &interval,
+                                                               &genotype_priors,
                                                                max_cov,
                                                                min_mapq,
                                                            alignment_parameters.ln());
@@ -386,7 +393,7 @@ fn main() {
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
     match assemble_haps {
         true => {
-            call_realigned_genotypes_no_haplotypes(&flist, &mut varlist);
+            call_realigned_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors);
         },
         false => {panic!("Calling genotypes without haplotypes not currently supported.")},
     };
@@ -399,7 +406,7 @@ fn main() {
     /***********************************************************************************************/
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes(&mut flist, &mut varlist, &interval,  &variant_debug_directory, 3);
+    call_genotypes(&mut flist, &mut varlist, &interval,  &genotype_priors, &variant_debug_directory, 3);
 
 
     /***********************************************************************************************/
@@ -421,70 +428,12 @@ fn main() {
 
     eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
 
-    varlist_poa.append(&mut varlist.lst.clone());
-    varlist_poa.sort();
 
-    let mut new_vlst: Vec<Var> = vec![];
-    // any variants that start at or after area_start, but before area_end, are added to the group
-    let mut var_group = vec![];
-    let mut area_tid = varlist_poa[0].tid;
-    let mut area_start = varlist_poa[0].pos0;
-    let mut area_end = varlist_poa[0].pos0 + varlist_poa[0].ref_allele.len();
+    varlist.combine(&mut varlist_poa);
+    
+    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf");
 
-    for var in varlist_poa {
-        if var.tid == area_tid && var.pos0 >= area_start && var.pos0 < area_end {
-            var_group.push(var.clone());
-            // the new var might overlap, but also extend the variant area
-            if var.pos0 + var.ref_allele.len() > area_end {
-                area_end = var.pos0 + var.ref_allele.len();
-            }
-        } else {
-            // choose the "largest" variant from the current group
-            // add it to the finalized variant list
-            let mut max_var_ix = 0;
-            let mut max_var_size = 0;
-            let mut called_var_ix = 0;
-
-            for (i, v) in var_group.iter().enumerate() {
-                if v.ref_allele.len() + v.var_allele.len() > max_var_size {
-                    max_var_size = v.ref_allele.len() + v.var_allele.len();
-                    max_var_ix = i;
-                }
-                if v.called {
-                    // this is a variant object we've already called
-                    called_var_ix = i;
-                }
-            }
-
-            // if the 'best' (currently, largest) variant is equivalent (same position, alleles)
-            // to one we've already called, then use the one we've already called
-            // otherwise, use the 'new' variant object
-            // this lets us re-use genotype qualities we already computed
-            if var_group[called_var_ix].pos0 == var_group[max_var_ix].pos0
-                && var_group[called_var_ix].tid == var_group[max_var_ix].tid
-                && var_group[called_var_ix].ref_allele == var_group[max_var_ix].ref_allele
-                && var_group[called_var_ix].var_allele == var_group[max_var_ix].var_allele {
-
-                new_vlst.push(var_group[called_var_ix].clone());
-            } else {
-                new_vlst.push(var_group[max_var_ix].clone());
-            }
-
-            // clear out the variant group and add the current variant
-            var_group.clear();
-            var_group.push(var.clone());
-            // set the new "variant area" within which new variants will be said to overlap with this one
-            area_tid = var.tid;
-            area_start = var.pos0;
-            area_end = var.pos0 + var.ref_allele.len();
-        }
-    }
-
-    let mut varlist2 = VarList::new(new_vlst);
-
-    print_variant_debug(&varlist2, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf");
-
-    eprintln!("{} {} potential variants after POA.", print_time(),varlist2.lst.len());
+    eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
     /***********************************************************************************************/
     // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
@@ -493,29 +442,29 @@ fn main() {
     eprintln!("{} Producing condensed read data for POA variants...",print_time());
     let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
                                                          &fasta_file,
-                                                         &varlist2,
+                                                         &varlist,
                                                          &interval,
                                                          extract_fragment_parameters,
                                                          alignment_parameters,
                                                           None);  // Some(flist)
 
 
-    call_realigned_genotypes_no_haplotypes(&flist2, &mut varlist2); // temporary
-    print_variant_debug(&varlist2, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf");
+    call_realigned_genotypes_no_haplotypes(&flist2, &mut varlist,  &genotype_priors); // temporary
+    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf");
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
-    call_genotypes(&mut flist2, &mut varlist2, &interval,  &variant_debug_directory, 7);
+    call_genotypes(&mut flist2, &mut varlist, &interval,  &genotype_priors,  &variant_debug_directory, 7);
 
     /***********************************************************************************************/
     // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
     /***********************************************************************************************/
 
-    calculate_mec(&flist2, &mut varlist2);
+    //calculate_mec(&flist2, &mut varlist);
 
     eprintln!("{} Adding filter flags based on depth and variant density...",print_time());
-    var_filter(&mut varlist2, 50.0, 500, 10, max_cov, max_mec_frac);
+    var_filter(&mut varlist, 50.0, 500, 10, max_cov, max_mec_frac);
 
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&varlist2, &interval,&variant_debug_directory, &"8.0.final_genotypes.vcf");
-    print_vcf(&varlist2, &interval, indels, &output_vcf_file, false);
+    print_variant_debug(&varlist, &interval,&variant_debug_directory, &"8.0.final_genotypes.vcf");
+    print_vcf(&varlist, &interval, indels, &output_vcf_file, false);
 }
