@@ -4,6 +4,7 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
+use realignment::*;
 use bio::io::fasta;
 use extract_fragments::{CigarPos, create_augmented_cigarlist};
 

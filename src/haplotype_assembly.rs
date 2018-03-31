@@ -1,9 +1,9 @@
 // calls HapCUT2 as a static library
-use util::Fragment;
+use variants_and_fragments::Fragment;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use std::collections::HashSet;
-
-static MAX_QUAL_F64: f64 = 0.2;
+use std::char::from_digit;
+use util::MAX_P_MISCALL_F64;
 
 pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
 
@@ -34,7 +34,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         let mut n_calls = 0;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)) {
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
                 n_calls += 1;
                 if prev_call > phase_variant.len() || c.var_ix - prev_call != 1 {
                     blocks += 1;
@@ -60,16 +60,16 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)){
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)){
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
-                    line.push(c.allele as u8)
+                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
                 } else {
                     line.push(' ' as u8);
                     for u in (c.var_ix + 1).to_string().into_bytes() {
                         line.push(u as u8);
                     }
                     line.push(' ' as u8);
-                    line.push(c.allele as u8)
+                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
                 }
                 let mut qint = *PHREDProb::from(c.qual) as u32 + 33;
                 if qint > 126 {
@@ -89,7 +89,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
             charline.push(u as char)
         }
 
-        //print!("{}", charline.iter().collect::<String>());
+        //println!("{}", charline.iter().collect::<String>());
 
         buffer.push(line);
     }
