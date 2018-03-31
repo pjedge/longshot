@@ -2,7 +2,97 @@
 // modified: Peter Edge, September 2017
 
 use bio::stats::{LogProb, Prob};
-use util::{AlignmentParameters, LnAlignmentParameters};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AlignmentType {
+    FastAllAlignment,
+    NumericallyStableAllAlignment,
+    MaxAlignment
+}
+
+// these parameters describe state transition probabilities for a pair HMM
+// there are two kinds: "eq" transition probs and "neq" transition_probs
+// the correct kind to use depends on sequence context.
+// the "eq" probabilities are for the case where accepting a match results in equal bases
+// the "neq" probabilities are for the case where accepting a match results in different bases
+
+#[derive(Clone, Copy)]
+pub struct TransitionProbs {
+    pub match_from_match: f64,
+    pub insertion_from_match: f64,
+    pub deletion_from_match: f64,
+    pub insertion_from_insertion: f64,
+    pub match_from_insertion: f64,
+    pub deletion_from_deletion: f64,
+    pub match_from_deletion: f64,
+}
+
+#[derive(Clone, Copy)]
+pub struct LnTransitionProbs {
+    pub match_from_match: LogProb,
+    pub insertion_from_match: LogProb,
+    pub deletion_from_match: LogProb,
+    pub insertion_from_insertion: LogProb,
+    pub match_from_insertion: LogProb,
+    pub deletion_from_deletion: LogProb,
+    pub match_from_deletion: LogProb,
+}
+
+impl TransitionProbs {
+    pub fn ln(&self) -> LnTransitionProbs {
+        LnTransitionProbs {
+            match_from_match: LogProb::from(Prob(self.match_from_match)),
+            insertion_from_match: LogProb::from(Prob(self.insertion_from_match)),
+            deletion_from_match: LogProb::from(Prob(self.deletion_from_match)),
+            insertion_from_insertion: LogProb::from(Prob(self.insertion_from_insertion)),
+            match_from_insertion: LogProb::from(Prob(self.match_from_insertion)),
+            deletion_from_deletion: LogProb::from(Prob(self.deletion_from_deletion)),
+            match_from_deletion: LogProb::from(Prob(self.match_from_deletion)),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct EmissionProbs {
+    pub equal: f64,
+    pub not_equal: f64
+}
+
+#[derive(Clone, Copy)]
+pub struct LnEmissionProbs {
+    pub equal: LogProb,
+    pub not_equal: LogProb
+}
+
+impl EmissionProbs {
+    pub fn ln(&self) -> LnEmissionProbs {
+        LnEmissionProbs {
+            equal: LogProb::from(Prob(self.equal)),
+            not_equal: LogProb::from(Prob(self.not_equal))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct AlignmentParameters {
+    pub transition_probs: TransitionProbs,
+    pub emission_probs: EmissionProbs
+}
+
+#[derive(Clone, Copy)]
+pub struct LnAlignmentParameters {
+    pub transition_probs: LnTransitionProbs,
+    pub emission_probs: LnEmissionProbs
+}
+
+impl AlignmentParameters {
+    pub fn ln(&self) -> LnAlignmentParameters {
+        LnAlignmentParameters {
+            transition_probs: self.transition_probs.ln(),
+            emission_probs: self.emission_probs.ln()
+        }
+    }
+}
 
 pub fn sum_all_alignments(v: &Vec<char>,
                           w: &Vec<char>,

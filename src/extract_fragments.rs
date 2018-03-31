@@ -5,13 +5,24 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
+use variants_and_fragments::*;
 use std::collections::HashMap;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
-use realignment;
+use realignment::*;
 
 static VERBOSE: bool = false;
+
+#[derive(Clone, Copy)]
+pub struct ExtractFragmentParameters {
+    pub min_mapq: u8,
+    pub alignment_type: AlignmentType,
+    pub band_width: usize,
+    pub anchor_length: usize,
+    pub short_hap_max_snvs: usize,
+    pub max_window_padding: usize,
+}
 
 // an extension of the rust-htslib cigar representation
 // has the cigar operation as well as the position on the reference of the operation start,
@@ -589,19 +600,19 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         // we now want to score hap_window
         let score: LogProb = match extract_params.alignment_type{
             AlignmentType::NumericallyStableAllAlignment => {
-                realignment::sum_all_alignments_numerically_stable(&read_window,
+                sum_all_alignments_numerically_stable(&read_window,
                                                                    &hap_window,
                                                                    align_params.ln(),
                                                                    extract_params.band_width)
             }
             AlignmentType::FastAllAlignment => {
-                realignment::sum_all_alignments(&read_window,
+                sum_all_alignments(&read_window,
                                                 &hap_window,
                                                 align_params,
                                                 extract_params.band_width)
             }
             AlignmentType::MaxAlignment => {
-                realignment::max_alignment(&read_window,
+                max_alignment(&read_window,
                                            &hap_window,
                                            align_params.ln(),
                                            extract_params.band_width)
@@ -631,7 +642,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
         let best_allele = max_hap[v];
 
-        let qual = if allele_scores[v][best_allele as usize] == LogProb::ln_zero()
+        let mut qual = if allele_scores[v][best_allele as usize] == LogProb::ln_zero()
                       || score_total == LogProb::ln_zero() {
             LogProb::ln_one()
         } else {

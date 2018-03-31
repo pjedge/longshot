@@ -1,0 +1,910 @@
+
+use bio::stats::{LogProb};
+use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
+use std::collections::HashMap;
+use std::cmp::Ordering;
+
+
+
+#[derive(Clone, Copy)]
+pub struct FragCall {
+    pub frag_ix: Option<usize>, // index into fragment list
+    pub var_ix: usize, // index into variant list
+    pub allele: u8, // allele call
+    pub qual: LogProb, // LogProb probability the call is an error
+    pub one_minus_qual: LogProb, // LogProb probability the call is correct
+}
+
+#[derive(Clone)]
+pub struct Fragment {
+    pub id: String,
+    pub calls: Vec<FragCall>,
+    pub p_read_hap: [LogProb; 2]
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Var {
+    pub ix: usize,
+    pub old_ix: Option<usize>,
+    // index of this variant in the global var list
+    pub tid: usize,
+    pub chrom: String,
+    pub pos0: usize,
+    pub alleles: Vec<String>, // ref allele is alleles[0] and each that follows is a variant allele
+    pub dp: usize,
+    // depth of coverage
+    pub allele_counts: Vec<usize>, // indices match up with those of Var.alleles
+    pub ambiguous_count: usize,
+    pub qual: f64,
+    pub filter: String,
+    pub genotype: [u8; 2],
+    pub gq: f64,
+    pub genotype_post: LogProbTable,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
+    // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
+    pub phase_set: Option<usize>,
+    pub mec: usize,
+    pub mec_frac: f64,
+    pub called: bool
+    //pub pileup: Option(Vec<PileupElement>),
+}
+
+impl Var {
+    fn longest_allele_len(&self) -> usize {
+        self.alleles.iter().map(|x| x.len()).max().unwrap()
+    }
+}
+impl Ord for Var {
+    fn cmp(&self, other: &Var) -> Ordering {
+        if self.tid == other.tid {
+            self.pos0.cmp(&other.pos0)
+        } else {
+            self.tid.cmp(&other.tid)
+        }
+    }
+}
+
+impl PartialOrd for Var {
+    fn partial_cmp(&self, other: &Var) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Var {
+    fn eq(&self, other: &Var) -> bool {
+        self.tid == other.tid && self.pos0 == other.pos0
+    }
+}
+
+impl Eq for Var {}
+
+#[derive(Debug, Clone)]
+pub struct VarList {
+    pub lst: Vec<Var>,
+    ix: HashMap<String, Vec<usize>>,
+}
+
+impl VarList {
+    pub fn new(lst: Vec<Var>) -> VarList {
+        let mut v = VarList {
+            lst: lst,
+            ix: HashMap::new(),
+        };
+        for i in 0..v.lst.len() {
+            v.lst[i].ix = i;
+        }
+        v.index_lst();
+        v
+    }
+    pub fn index_lst(&mut self) {
+        // need to throw error if list isn't sorted
+
+        // for every chromosome, get the position of the last variant
+        // and the varlist index of the first variant on that chromosome
+        let mut max_positions: HashMap<String, usize> = HashMap::new();
+        let mut first_ix: HashMap<String, usize> = HashMap::new();
+        for (i, var) in self.lst.iter().enumerate() {
+            let mpos: usize = *(max_positions.entry(var.chrom.clone()).or_insert(0));
+            if var.pos0 > mpos {
+                max_positions.insert(var.chrom.clone(), var.pos0);
+            }
+            if !first_ix.contains_key(&var.chrom) {
+                first_ix.insert(var.chrom.clone(), i); // insert varlist index of first variant on chrom
+            }
+        }
+
+        // for every chrom, iterate up to its last potential variant and create an index that
+        // returns the lst index of the next SNV for some position mod 1000
+        for (chrom, max_pos) in &max_positions {
+            let mut v: Vec<usize> = vec![];
+            // the first variant after position 0 is the first variant on the chromosome
+            let e = match first_ix.get(chrom) {
+                Some(x) => *x,
+                None => {
+                    panic!("This dictionary is missing a chromosome!");
+                }
+            };
+            v.push(e);
+            // for every subsequent position (1000,2000,3000...) we start at the last position
+            // and step forward until we get the first variant at or after that position
+            for i in 1..(max_pos / INDEX_FREQ + 1) {
+                let index_pos = INDEX_FREQ * i;
+                let start = v[i - 1];
+
+                let mut found_var = false;
+                for j in start..self.lst.len() {
+                    if self.lst[j].pos0 >= index_pos {
+                        v.push(j);
+                        found_var = true;
+                        break;
+                    }
+                }
+                if !found_var {
+                    break;
+                }
+            }
+            self.ix.insert(chrom.clone(), v); // insert the index vector into the ix dictionary
+        }
+    }
+
+    pub fn get_variants_range(&self, interval: GenomicInterval) -> (Vec<Var>) {
+        // vector of variants to fill and return
+        let mut vlst: Vec<Var> = vec![];
+        // get the varlist index of a nearby position on the left
+
+        let index_pos = (interval.start_pos as usize) / INDEX_FREQ;
+
+        if index_pos >=
+            self.ix
+                .get(&interval.chrom)
+                .unwrap()
+                .len() {
+            return vlst;
+        }
+
+        let mut i = self.ix.get(&interval.chrom).unwrap()[index_pos];
+
+        while i < self.lst.len() &&
+            self.lst[i].pos0 + self.lst[i].longest_allele_len() <= interval.end_pos as usize {
+            if self.lst[i].pos0 >= interval.start_pos as usize {
+                vlst.push(self.lst[i].clone());
+            }
+            i += 1;
+        }
+        vlst
+    }
+
+    pub fn backup_indices(&mut self) {
+        for ref mut var in &mut self.lst {
+            var.old_ix = Some(var.ix);
+        }
+    }
+
+    pub fn combine (&mut self, other: &mut VarList) {
+        other.lst.append(&mut self.lst);
+        other.lst.sort();
+
+        let mut new_vlst: Vec<Var> = vec![];
+        // any variants that start at or after area_start, but before area_end, are added to the group
+        let mut var_group: Vec<Var> = vec![];
+        let mut area_tid = other.lst[0].tid;
+        let mut area_start = other.lst[0].pos0;
+        let mut area_end = other.lst[0].pos0 + other.lst[0].alleles[0].len();
+
+        for var in &other.lst {
+            if var.tid == area_tid && var.pos0 >= area_start && var.pos0 < area_end {
+                var_group.push(var.clone());
+                // the new var might overlap, but also extend the variant area
+                if var.pos0 + var.alleles[0].len() > area_end {
+                    area_end = var.pos0 + var.alleles[0].len();
+                }
+            } else {
+
+                ///////////////////////////////////////////////////////////////////////////////////
+                // PROCEDURE TO MERGE MULTIPLE VCF VARIANTS, EACH WITH MULTIPLE ALLELES
+                // 1. find the earliest variant position in the variant list.
+                // 2. for every variant with a later position, pad the variant's alleles
+                //        at the beginning with enough ref chars to match this position, and
+                //        update their position so all the positions are the same.
+                // 3. find the longest ref allele out of all the vars. This will be the new ref allele.
+                // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
+                //        until the ref allele is the same length as (step 3)
+                // 5. add the unified ref_allele as 0-th allele of new allele list
+                // 6. combine the remaining alleles from every variant (non-ref)
+                //        into a single vector, sort, and remove duplicates. (vec.dedup())
+                // 7. append these unique variant alleles to the new allele list.
+
+                // 1. find the earliest variant position in the variant list.
+                let mut min_pos0 = var_group[0].pos0;
+                let mut min_pos0_refseq = var_group[0].alleles[0].clone();
+                for v in &var_group {
+                    if v.pos0 < min_pos0
+                        || (v.pos0 == min_pos0 && v.alleles[0].len() > min_pos0_refseq.len()) {
+                        min_pos0 = v.pos0;
+                        min_pos0_refseq = v.alleles[0].clone();
+                    }
+                }
+
+                // 2. for every variant with a later position, pad the variant's alleles
+                //        at the beginning with enough ref chars to match this position, and
+                //        update their position so all the positions are the same.
+
+                for mut v in &mut var_group {
+                    if v.pos0 > min_pos0 {
+                        let diff = v.pos0 - min_pos0;
+                        // we need to steal the first diff bases from min_pos0_refseq
+                        let prefix_seq: String = min_pos0_refseq.chars().take(diff).collect();
+                        let mut new_alleles = vec![];
+
+                        for ref allele in &v.alleles {
+                            let mut a = prefix_seq.clone();
+                            a.push_str(&allele);
+                            new_alleles.push(a);
+                        }
+
+                        v.alleles = new_alleles;
+                        v.pos0 = min_pos0
+                    }
+                }
+
+                for v in &var_group {
+                    assert!(v.pos0 == min_pos0);
+                }
+
+                // 3. find the longest ref allele out of all the vars
+                let mut longest_ref = var_group[0].alleles[0].clone();
+                for  v in var_group.iter() {
+                    if v.alleles[0].len() > longest_ref.len() {
+                        longest_ref = v.alleles[0].clone();
+                    }
+                }
+
+                // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
+                //        until the ref allele is the same length as (step 3)
+
+                for ref mut v in &mut var_group {
+                    if v.alleles[0].len() < longest_ref.len() {
+                        let diff = longest_ref.len() - v.alleles[0].len();
+                        // we need to steal the last diff bases from longest_ref
+                        let suffix_seq: String = longest_ref.chars().skip(v.alleles[0].len()).take(diff).collect();
+                        let mut new_alleles = vec![];
+
+                        for ref allele in &v.alleles {
+                            let mut a = (*allele).clone();
+                            a.push_str(&suffix_seq.clone());
+                            new_alleles.push(a);
+                        }
+
+                        v.alleles = new_alleles;
+                    }
+                }
+
+                for v in &var_group {
+                    assert!(v.alleles[0] == longest_ref);
+                }
+
+                // 5. add the unified ref_allele as 0-th allele of new allele list
+                let mut new_allele_lst = vec![var_group[0].alleles[0].clone()];
+
+                // 6. combine the remaining alleles from every variant (non-ref)
+                //        into a single vector, sort, and remove duplicates. (vec.dedup())
+                let mut var_alleles: Vec<String> = vec![];
+                for v in &var_group {
+                    for a in v.alleles[1..].iter() {
+                        var_alleles.push(a.clone());
+                    }
+                }
+                var_alleles.sort();
+                var_alleles.dedup();
+
+                // 7. append these unique variant alleles to the new allele list.
+
+                new_allele_lst.append(&mut var_alleles);
+                ///////////////////////////////////////////////////////////////////////////////////
+
+                assert!(new_allele_lst.len() >= 2);
+
+                let mut new_v = var_group[0].clone();
+                new_v.allele_counts = vec![0; new_allele_lst.len()];
+                new_v.alleles = new_allele_lst.clone();
+                new_v.genotype = [0u8,0u8];
+                new_v.gq = 0.0;
+                new_v.genotype_post = LogProbTable::uniform(new_v.alleles.len());
+                new_v.phase_set = None;
+
+                new_vlst.push(new_v);
+                // clear out the variant group and add the current variant
+                var_group.clear();
+                var_group.push(var.clone());
+                // set the new "variant area" within which new variants will be said to overlap with this one
+                area_tid = var.tid;
+                area_start = var.pos0;
+                area_end = var.pos0 + var.alleles[0].len();
+            }
+        }
+
+        // set the list to the new merged list and re-index it
+        self.lst = new_vlst;
+        for i in 0..self.lst.len() {
+            self.lst[i].ix = i;
+        }
+        self.ix = HashMap::new();
+        self.index_lst();
+
+        // clear out the other VarList since we've mutated it beyond saving
+        other.lst.clear();
+        other.ix.clear();
+    }
+}
+
+pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, max_mec_frac: Option<f64>) {
+
+    for i in 0..varlist.lst.len() {
+        if varlist.lst[i].qual < density_qual { continue; }
+
+        let mut count = 0;
+        for j in i + 1..varlist.lst.len() {
+            if varlist.lst[j].pos0 - varlist.lst[i].pos0 > density_dist {
+                break;
+            }
+            if varlist.lst[j].qual < density_qual { continue; }
+            count += 1;
+            if count > density_count {
+                for k in i..j + 1 {
+                    varlist.lst[k].filter = "dn".to_string();
+                }
+            }
+        }
+    }
+    match max_depth {
+        Some(dp) => {
+            for i in 0..varlist.lst.len() {
+                if varlist.lst[i].dp > dp as usize {
+                    if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
+                        varlist.lst[i].filter = "dp".to_string();
+                    } else {
+                        varlist.lst[i].filter.push_str(";dp");
+                    }
+                }
+            }
+        }
+        None => {}
+    }
+    match max_mec_frac {
+        Some(frac) => {
+            for i in 0..varlist.lst.len() {
+                if varlist.lst[i].mec_frac >= frac {
+                    if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
+                        varlist.lst[i].filter = "psmf".to_string();
+                    } else {
+                        varlist.lst[i].filter.push_str(";psmf");
+                    }
+                }
+            }
+        },
+        None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos_alleles_eq(vlst1: Vec<Var>, vlst2: Vec<Var>) -> bool {
+        for (v1, v2) in vlst1.iter().zip(vlst2.iter()){
+            if v1.ix != v2.ix || v1.chrom != v2.chrom || v1.pos0 != v2.pos0 ||
+                v1.ref_allele != v2.ref_allele || v1.var_allele != v2.var_allele {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn generate_test_lst1() -> VarList {
+        let mut lst: Vec<Var> = vec![];
+        lst.push(Var {
+            ix: 0,
+            chrom: "chr1".to_string(),
+            pos0: 5,
+            ref_allele: "A".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 1,
+            chrom: "chr1".to_string(),
+            pos0: 1000,
+            ref_allele: "T".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 2,
+            chrom: "chr1".to_string(),
+            pos0: 2005,
+            ref_allele: "T".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 3,
+            chrom: "chr1".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 4,
+            chrom: "chr1".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 5,
+            chrom: "chr1".to_string(),
+            pos0: 10000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 6,
+            chrom: "chr2".to_string(),
+            pos0: 5,
+            ref_allele: "A".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 7,
+            chrom: "chr2".to_string(),
+            pos0: 1000,
+            ref_allele: "T".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 8,
+            chrom: "chr2".to_string(),
+            pos0: 2005,
+            ref_allele: "T".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 9,
+            chrom: "chr2".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 10,
+            chrom: "chr2".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 11,
+            chrom: "chr2".to_string(),
+            pos0: 10000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 12,
+            chrom: "chr3".to_string(),
+            pos0: 20200,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 13,
+            chrom: "chr3".to_string(),
+            pos0: 25100,
+            ref_allele: "A".to_string(),
+            var_allele: "C".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        lst.push(Var {
+            ix: 14,
+            chrom: "chr3".to_string(),
+            pos0: 30400,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        VarList::new(lst)
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range1() {
+        let vlst = generate_test_lst1();
+        let c = "chr1".to_string();
+        let p1 = 2500;
+        let p2 = 8000;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let mut exp: Vec<Var> = vec![];
+        exp.push(Var {
+            ix: 3,
+            chrom: "chr1".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        exp.push(Var {
+            ix: 4,
+            chrom: "chr1".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+
+        assert!(pos_alleles_eq(vars, exp));
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range2() {
+        let vlst = generate_test_lst1();
+        let c = "chr2".to_string();
+        let p1 = 0;
+        let p2 = 3000;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let mut exp: Vec<Var> = vec![];
+        exp.push(Var {
+            ix: 6,
+            chrom: "chr2".to_string(),
+            pos0: 5,
+            ref_allele: "A".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        exp.push(Var {
+            ix: 7,
+            chrom: "chr2".to_string(),
+            pos0: 1000,
+            ref_allele: "T".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        exp.push(Var {
+            ix: 8,
+            chrom: "chr2".to_string(),
+            pos0: 2005,
+            ref_allele: "T".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        exp.push(Var {
+            ix: 9,
+            chrom: "chr2".to_string(),
+            pos0: 2900,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+
+        assert!(pos_alleles_eq(vars, exp));
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range3() {
+        let vlst = generate_test_lst1();
+        let c = "chr2".to_string();
+        let p1 = 6000;
+        let p2 = 10000;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let mut exp: Vec<Var> = vec![];
+        exp.push(Var {
+            ix: 10,
+            chrom: "chr2".to_string(),
+            pos0: 6000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        exp.push(Var {
+            ix: 11,
+            chrom: "chr2".to_string(),
+            pos0: 10000,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+
+        assert!(pos_alleles_eq(vars, exp));
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range4() {
+        let vlst = generate_test_lst1();
+        let c = "chr3".to_string();
+        let p1 = 20100;
+        let p2 = 20200;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let mut exp: Vec<Var> = vec![];
+        exp.push(Var {
+            ix: 12,
+            chrom: "chr3".to_string(),
+            pos0: 20200,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+
+        assert!(pos_alleles_eq(vars, exp));
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range5() {
+        let vlst = generate_test_lst1();
+        let c = "chr3".to_string();
+        let p1 = 20200;
+        let p2 = 20200;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let mut exp: Vec<Var> = vec![];
+        exp.push(Var {
+            ix: 12,
+            chrom: "chr3".to_string(),
+            pos0: 20200,
+            ref_allele: "C".to_string(),
+            var_allele: "G".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+
+        assert!(pos_alleles_eq(vars, exp));
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range6() {
+        let vlst = generate_test_lst1();
+        let c = "chr3".to_string();
+        let p1 = 25000;
+        let p2 = 30500;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let mut exp: Vec<Var> = vec![];
+        exp.push(Var {
+            ix: 13,
+            chrom: "chr3".to_string(),
+            pos0: 25100,
+            ref_allele: "A".to_string(),
+            var_allele: "C".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+        exp.push(Var {
+            ix: 14,
+            chrom: "chr3".to_string(),
+            pos0: 30400,
+            ref_allele: "C".to_string(),
+            var_allele: "A".to_string(),
+            dp: 40,
+            ra: 0,
+            aa: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: "./.".to_string(),
+            gq: 0.0
+        });
+
+        assert!(pos_alleles_eq(vars, exp));
+    }
+
+    #[test]
+    fn test_varlist_get_variants_range7() {
+        let vlst = generate_test_lst1();
+        let c = "chr3".to_string();
+        let p1 = 100000;
+        let p2 = 200000;
+        let interval = GenomicInterval {
+            chrom: c,
+            start_pos: p1,
+            end_pos: p2,
+        };
+        let vars = vlst.get_variants_range(interval);
+
+        let exp: Vec<Var> = vec![];
+        assert!(pos_alleles_eq(vars, exp));
+    }
+}

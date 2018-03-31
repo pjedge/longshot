@@ -20,6 +20,9 @@ mod estimate_read_coverage;
 mod estimate_alignment_parameters;
 //mod poa;
 mod spoa;
+mod variants_and_fragments;
+mod print_output;
+mod genotype_priors;
 
 use clap::{Arg, App};
 use std::fs::create_dir;
@@ -33,6 +36,11 @@ use estimate_alignment_parameters::estimate_alignment_parameters;
 use bio::stats::{LogProb,Prob};
 //use poa::poa_multiple_sequence_alignment;
 use haplotype_assembly::separate_reads_by_haplotype;
+use print_output::{print_variant_debug, print_vcf};
+use realignment::{AlignmentType};
+use genotype_priors::GenotypePriors;
+use extract_fragments::ExtractFragmentParameters;
+use variants_and_fragments::var_filter;
 
 fn main() {
 
@@ -393,7 +401,7 @@ fn main() {
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
     match assemble_haps {
         true => {
-            call_realigned_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors);
+            call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors);
         },
         false => {panic!("Calling genotypes without haplotypes not currently supported.")},
     };
@@ -406,7 +414,7 @@ fn main() {
     /***********************************************************************************************/
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes(&mut flist, &mut varlist, &interval,  &genotype_priors, &variant_debug_directory, 3);
+    call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 3);
 
 
     /***********************************************************************************************/
@@ -449,11 +457,11 @@ fn main() {
                                                           None);  // Some(flist)
 
 
-    call_realigned_genotypes_no_haplotypes(&flist2, &mut varlist,  &genotype_priors); // temporary
+    call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors); // temporary
     print_variant_debug(&varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf");
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
-    call_genotypes(&mut flist2, &mut varlist, &interval,  &genotype_priors,  &variant_debug_directory, 7);
+    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 7);
 
     /***********************************************************************************************/
     // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF

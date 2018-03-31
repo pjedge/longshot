@@ -4,21 +4,21 @@ use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use bio::io::fasta;
 use std::char;
-use util::{FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
+use util::*; // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
+use variants_and_fragments::*;
 use rust_htslib::bam::pileup::Indel;
 use std::collections::{HashMap,HashSet};
 use bio::stats::{LogProb, Prob};
-use call_genotypes::{calculate_genotypes_without_haplotypes};
+use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
 use spoa::poa_multiple_sequence_alignment;
 use std::ascii::AsciiExt;
+use realignment::{LnAlignmentParameters};
 
 use std::str;
 use bio::alignment::Alignment;
 use bio::alignment::pairwise::banded::*;
 use bio::alignment::AlignmentOperation::*;
-//use bio::alignment::sparse::hash_kmers;
-//use bio::alignment::pairwise::{MIN_SCORE, Scoring};
-//use bio::alignment::AlignmentOperation::*;
+use genotype_priors::GenotypePriors;
 
 static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
@@ -229,8 +229,8 @@ pub fn call_potential_snvs(bam_file: &String,
         // use a basic genotype likelihood calculation to call SNVs
         let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
         let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
-            let snv_post = calculate_genotypes_without_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles);
-            LogProb::ln_one_minus_exp(&snv_post[0][0])
+            let snv_post = calculate_genotype_posteriors_no_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles);
+            LogProb::ln_one_minus_exp(&snv_post.get(0,0))
         } else {
             LogProb::ln_zero()
         };
@@ -261,7 +261,7 @@ pub fn call_potential_snvs(bam_file: &String,
                 filter: ".".to_string(),
                 genotype: [0u8,0u8],
                 gq: 0.0,
-                genotype_post: vec![vec![LogProb::from(Prob(0.25)); 2]; 2],
+                genotype_post: LogProbTable::uniform(2),
                 phase_set: None,
                 mec: 0,
                 mec_frac: 0.0,
@@ -321,7 +321,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     filter: ".".to_string(),
                     genotype: [1u8,1u8], // this will be refined later
                     gq: 0.0,
-                    genotype_post: vec![vec![LogProb::from(Prob(0.25)); 2]; 2],
+                    genotype_post: LogProbTable::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac: 0.0,
@@ -358,7 +358,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     filter: ".".to_string(),
                     genotype: [1u8,1u8], // this will be refined later
                     gq: 0.0,
-                    genotype_post: vec![vec![LogProb::from(Prob(0.25)); 2]; 2],
+                    genotype_post: LogProbTable::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac: 0.0,
@@ -395,7 +395,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     filter: ".".to_string(),
                     genotype: [1u8,1u8], // this will be refined later
                     gq: 0.0,
-                    genotype_post: vec![vec![LogProb::from(Prob(0.25)); 2]; 2],
+                    genotype_post: LogProbTable::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac: 0.0,
