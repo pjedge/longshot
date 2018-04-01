@@ -644,10 +644,18 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
         let mut qual = if allele_scores[v][best_allele as usize] == LogProb::ln_zero()
                       || score_total == LogProb::ln_zero() {
-            LogProb::ln_one()
+            LogProb::from(Prob(0.5))
         } else {
             LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total))
         };
+
+        //assert_ne!(qual, LogProb::ln_zero());
+
+        // TODO: BUG: qual should never ever be 0.
+        // need to investigate why this happens
+        if qual == LogProb::ln_zero() {
+            qual = LogProb::from(Prob(0.5));
+        }
 
         if VERBOSE {
             print!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
@@ -1025,9 +1033,10 @@ pub fn extract_fragments(bamfile_name: &String,
 // END OF RUST-HTSLIB BASED CODE *****************************************************************
 //************************************************************************************************
 
-
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
 }
+*/

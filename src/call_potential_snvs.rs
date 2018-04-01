@@ -18,7 +18,7 @@ use std::str;
 use bio::alignment::Alignment;
 use bio::alignment::pairwise::banded::*;
 use bio::alignment::AlignmentOperation::*;
-use genotype_priors::GenotypePriors;
+use genotype_probs::*;
 
 static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
@@ -230,7 +230,7 @@ pub fn call_potential_snvs(bam_file: &String,
         let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
         let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
             let snv_post = calculate_genotype_posteriors_no_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles);
-            LogProb::ln_one_minus_exp(&snv_post.get(0,0))
+            LogProb::ln_one_minus_exp(&snv_post.get(Genotype(0,0)))
         } else {
             LogProb::ln_zero()
         };
@@ -259,9 +259,9 @@ pub fn call_potential_snvs(bam_file: &String,
                 ambiguous_count: 0,
                 qual: 0.0,
                 filter: ".".to_string(),
-                genotype: [0u8,0u8],
+                genotype: Genotype(0,0),
                 gq: 0.0,
-                genotype_post: LogProbTable::uniform(2),
+                genotype_post: GenotypeProbs::uniform(2),
                 phase_set: None,
                 mec: 0,
                 mec_frac: 0.0,
@@ -319,9 +319,9 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
-                    genotype: [1u8,1u8], // this will be refined later
+                    genotype: Genotype(0,0), // this will be refined later
                     gq: 0.0,
-                    genotype_post: LogProbTable::uniform(2),
+                    genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac: 0.0,
@@ -356,9 +356,9 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
-                    genotype: [1u8,1u8], // this will be refined later
+                    genotype: Genotype(0,0), // this will be refined later
                     gq: 0.0,
-                    genotype_post: LogProbTable::uniform(2),
+                    genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac: 0.0,
@@ -393,9 +393,9 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
-                    genotype: [1u8,1u8], // this will be refined later
+                    genotype: Genotype(0,0), // this will be refined later
                     gq: 0.0,
-                    genotype_post: LogProbTable::uniform(2),
+                    genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac: 0.0,
@@ -583,7 +583,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             println!("-------");
         }
 
-        
+
 
         let score = |a: u8, b: u8| if a == b {5i32} else {-4i32};
         let k = 6;  // kmer match length

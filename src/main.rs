@@ -22,7 +22,7 @@ mod estimate_alignment_parameters;
 mod spoa;
 mod variants_and_fragments;
 mod print_output;
-mod genotype_priors;
+mod genotype_probs;
 
 use clap::{Arg, App};
 use std::fs::create_dir;
@@ -38,7 +38,7 @@ use bio::stats::{LogProb,Prob};
 use haplotype_assembly::separate_reads_by_haplotype;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType};
-use genotype_priors::GenotypePriors;
+use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
 use variants_and_fragments::var_filter;
 

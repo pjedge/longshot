@@ -4,6 +4,166 @@ use bio::stats::*;
 
 use util::*;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Genotype (pub u8, pub u8);
+
+#[derive(Debug, Clone)]
+pub struct GenotypeProbs {
+    pub tab: Vec<Vec<LogProb>>
+}
+
+impl GenotypeProbs {
+    pub fn zeros(n_alleles: usize) -> GenotypeProbs {
+        GenotypeProbs { tab: vec![vec![LogProb::ln_zero(); n_alleles]; n_alleles] }
+    }
+
+    pub fn ones(n_alleles: usize) -> GenotypeProbs {
+        GenotypeProbs { tab: vec![vec![LogProb::ln_one(); n_alleles]; n_alleles] }
+    }
+
+    pub fn uniform(n_alleles: usize) -> GenotypeProbs {
+        GenotypeProbs { tab: vec![vec![LogProb::from(Prob(1.0 / ((n_alleles*n_alleles) as f64))); n_alleles]; n_alleles] }
+    }
+
+    pub fn n_alleles(&self) -> usize {
+        self.tab.len()
+    }
+
+    pub fn max_genotype(&self, phased: bool) -> (Genotype, LogProb) {
+        let mut max_post: LogProb = LogProb::ln_zero();
+        let mut max_i = 0;
+        let mut max_j = 0;
+
+        for i in 0..self.n_alleles() {
+            for j in 0..self.n_alleles() {
+                let post: LogProb = if i == j || phased {
+                    self.tab[i][j]
+                } else {
+                    LogProb::ln_add_exp(self.tab[i][j], self.tab[j][i])
+                };
+
+                if post > max_post {
+                    max_post = post;
+                    max_i = i;
+                    max_j = j;
+                }
+            }
+        }
+
+        if max_post > LogProb::ln_one() {
+            let err: LogProb = LogProb::ln_sub_exp(max_post, LogProb::ln_one());
+            assert!(err < LogProb::from(Prob(0.00001)));
+            max_post = LogProb::ln_one();
+        }
+
+        assert!(max_post <= LogProb::ln_one());
+        assert!(max_post > LogProb::ln_zero());
+
+        (Genotype(max_i as u8, max_j as u8), max_post)
+    }
+
+    pub fn sum(&self) -> LogProb {
+        let mut total: LogProb = LogProb::ln_zero();
+        //for row in table {
+        //    total = LogProb::ln_add_exp(total, LogProb::ln_sum_exp(row));
+        //}
+        for i in 0..self.n_alleles() {
+            for j in 0..self.n_alleles() {
+                total = LogProb::ln_add_exp(total, self.tab[i][j]);
+            }
+        }
+
+        total
+    }
+
+    pub fn normalize(&mut self) -> GenotypeProbs {
+
+        let total: LogProb = self.sum();
+        let mut norm: GenotypeProbs = GenotypeProbs::zeros(self.n_alleles());
+
+        for i in 0..self.n_alleles() {
+            for j in 0..self.n_alleles() {
+
+                norm.tab[i][j] = self.tab[i][j] - total;
+                assert!(norm.tab[i][j] <= LogProb::ln_one());
+                assert!(norm.tab[i][j] >= LogProb::ln_zero());
+
+                if norm.tab[i][j].is_nan() {
+                   return GenotypeProbs::uniform(self.n_alleles());
+                }
+            }
+        }
+
+        //self.print_phred();
+
+        norm.assert_approx_normalized();
+        norm
+    }
+
+    pub fn assert_approx_normalized(&self) {
+
+        let total: LogProb = self.sum();
+        let err: LogProb = if total > LogProb::ln_one() {
+            LogProb::ln_sub_exp(total, LogProb::ln_one())
+        } else {
+            LogProb::ln_sub_exp(LogProb::ln_one(), total)
+        };
+
+        let margin = 0.00001;
+        if err > LogProb::from(Prob(margin)) {
+            println!("ERROR");
+            println!("{:?}", self.tab);
+            println!("{}",*Prob::from(total))
+        }
+        assert!(err < LogProb::from(Prob(margin)));
+    }
+
+    pub fn ln_times_equals(&mut self, g:Genotype, p: LogProb) {
+        let g0 = g.0 as usize;
+        let g1 = g.1 as usize;
+        self.tab[g0][g1] = self.tab[g0][g1] + p;
+    }
+
+    pub fn set(&mut self, g: Genotype, p: LogProb) {
+        self.tab[g.0 as usize][g.1 as usize] = p;
+    }
+
+    pub fn get(&self, g: Genotype) -> LogProb {
+        self.tab[g.0 as usize][g.1 as usize]
+    }
+
+    pub fn print_phred(&self) {
+        for i in 0..self.n_alleles() {
+            for j in 0..self.n_alleles() {
+                print!("{} ", *PHREDProb::from(self.tab[i][j]));
+            }
+            println!("");
+        }
+        println!("------------------------");
+    }
+
+    pub fn print_prob(&self) {
+        for i in 0..self.n_alleles() {
+            for j in 0..self.n_alleles() {
+                print!("{} ", *Prob::from(self.tab[i][j]));
+            }
+            println!("");
+        }
+        println!("------------------------");
+    }
+}
+
+pub fn possible_genotypes(alleles: &Vec<String>) -> Vec<Genotype> {
+    let n_alleles = alleles.len();
+    let mut genotypes = Vec::with_capacity(n_alleles*n_alleles);
+    for i in 0..n_alleles {
+        for j in 0..n_alleles {
+            genotypes.push(Genotype(i as u8,j as u8));
+        }
+    }
+    return genotypes
+}
+
 #[derive(Clone)]
 pub struct GenotypePriors {
     priors_dict: HashMap<(char, (char, char)), LogProb>, // (ref_allele, (allele1, allele2)) -> P(G)
@@ -117,41 +277,41 @@ impl GenotypePriors {
 
     // TODO: currently MNPs are going to be assigned the prior of the first SNV in the MNP
     // not ideal, but should suffice for the time being
-    pub fn get(&self, alleles: &Vec<String>, genotype: [u8; 2]) -> LogProb {
+    pub fn get_prior(&self, alleles: &Vec<String>, genotype: Genotype) -> LogProb {
 
         let mut ra = alleles[0].chars().nth(0).unwrap();
 
-        let mut g1 = if alleles[genotype[0] as usize].len() == alleles[0].len() {
-            alleles[genotype[0] as usize].chars().nth(0).unwrap()
-        } else if alleles[genotype[0] as usize].len() > alleles[0].len() {
+        let mut g0 = if alleles[genotype.0 as usize].len() == alleles[0].len() {
+            alleles[genotype.0 as usize].chars().nth(0).unwrap()
+        } else if alleles[genotype.0 as usize].len() > alleles[0].len() {
+            'I'
+        } else {
+            'D'
+        };
+
+        if ra == g0 {
+            for i in 0..alleles[genotype.0 as usize].len() {
+                ra = alleles[0].chars().nth(i).unwrap();
+                g0 = alleles[genotype.0 as usize].chars().nth(i).unwrap();
+                if ra != g0 {
+                    break;
+                }
+            }
+        }
+
+        let mut g1 = if alleles[genotype.1 as usize].len() == alleles[0].len() {
+            alleles[genotype.1 as usize].chars().nth(0).unwrap()
+        } else if alleles[genotype.1 as usize].len() > alleles[0].len() {
             'I'
         } else {
             'D'
         };
 
         if ra == g1 {
-            for i in 0..alleles[genotype[0] as usize].len() {
+            for i in 0..alleles[genotype.1 as usize].len() {
                 ra = alleles[0].chars().nth(i).unwrap();
-                g1 = alleles[genotype[0] as usize].chars().nth(i).unwrap();
+                g1 = alleles[genotype.1 as usize].chars().nth(i).unwrap();
                 if ra != g1 {
-                    break;
-                }
-            }
-        }
-
-        let mut g2 = if alleles[genotype[1] as usize].len() == alleles[0].len() {
-            alleles[genotype[1] as usize].chars().nth(0).unwrap()
-        } else if alleles[genotype[1] as usize].len() > alleles[0].len() {
-            'I'
-        } else {
-            'D'
-        };
-
-        if ra == g2 {
-            for i in 0..alleles[genotype[1] as usize].len() {
-                ra = alleles[0].chars().nth(i).unwrap();
-                g2 = alleles[genotype[1] as usize].chars().nth(i).unwrap();
-                if ra != g2 {
                     break;
                 }
             }
@@ -159,18 +319,57 @@ impl GenotypePriors {
 
         let ln_half = LogProb::from(Prob(0.5));
 
-        match self.priors_dict.get(&(ra, (g1, g2))) {
+        match self.priors_dict.get(&(ra, (g0, g1))) {
             Some(p) => {
-                if g1 != g2 {return ln_half+*p;} else {return *p;}
+                if g0 != g1 {return ln_half+*p;} else {return *p;}
             },
             None => {
-                match self.priors_dict.get(&(ra, (g2, g1))) {
+                match self.priors_dict.get(&(ra, (g1, g0))) {
                     Some(p) => {
-                        if g1 != g2 {return ln_half+*p;} else {return *p;}
+                        if g0 != g1 {return ln_half+*p;} else {return *p;}
                     },
-                    None => { println!("{} ({},{})",ra,g2,g1); panic!("Genotype not in genotype priors."); }
+                    None => { println!("{} ({},{})",ra,g1,g0); panic!("Genotype not in genotype priors."); }
                 };
             }
         }
     }
+
+    pub fn get_all_priors(&self, alleles: &Vec<String>) -> GenotypeProbs {
+
+        let mut priors = GenotypeProbs::zeros(alleles.len());
+
+        for g0 in 0..alleles.len() {
+            for g1 in 0..alleles.len() {
+                priors.tab[g0][g1] = self.get_prior(alleles, Genotype(g0 as u8, g1 as u8));
+            }
+        }
+
+        priors
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /**********************************************************************************************/
+    // TEST GENOTYPE TABLE
+    /**********************************************************************************************/
+    fn lp(x: f64) -> LogProb {
+        LogProb::from(Prob(x))
+    }
+
+    fn generate_genotype_probs1() -> GenotypeProbs{
+        GenotypeProbs { tab: vec![
+            vec![lp(0.001), lp(0.997)],
+            vec![lp(0.001), lp(0.001)]]
+        }
+    }
+
+    //#[test]
+    //fn test_max_prob (){
+    //
+    //}
+
 }

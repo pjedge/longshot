@@ -1,10 +1,9 @@
 
 use bio::stats::{LogProb};
-use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
+use util::*;
 use std::collections::HashMap;
 use std::cmp::Ordering;
-
-
+use genotype_probs::*;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
@@ -38,9 +37,9 @@ pub struct Var {
     pub ambiguous_count: usize,
     pub qual: f64,
     pub filter: String,
-    pub genotype: [u8; 2],
+    pub genotype: Genotype,
     pub gq: f64,
-    pub genotype_post: LogProbTable,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
+    pub genotype_post: GenotypeProbs,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
     pub mec: usize,
@@ -53,7 +52,12 @@ impl Var {
     fn longest_allele_len(&self) -> usize {
         self.alleles.iter().map(|x| x.len()).max().unwrap()
     }
+
+    pub fn possible_genotypes(&self) -> Vec<Genotype> {
+        possible_genotypes(&self.alleles)
+    }
 }
+
 impl Ord for Var {
     fn cmp(&self, other: &Var) -> Ordering {
         if self.tid == other.tid {
@@ -90,15 +94,35 @@ impl VarList {
             lst: lst,
             ix: HashMap::new(),
         };
-        for i in 0..v.lst.len() {
-            v.lst[i].ix = i;
-        }
-        v.index_lst();
+        v.sort();
         v
     }
-    pub fn index_lst(&mut self) {
-        // need to throw error if list isn't sorted
 
+    pub fn sort(&mut self) {
+        self.lst.sort();
+        self.add_ix();
+        self.ix.clear();
+        self.index_lst();
+    }
+
+    pub fn assert_sorted(&self) {
+        for i in 0..self.lst.len()-1{
+            assert!((self.lst[i].tid < self.lst[i+1].tid) ||
+                    (self.lst[i].tid == self.lst[i+1].tid && self.lst[i].pos0 <= self.lst[i+1].pos0));
+            assert_eq!(self.lst[i].ix, i);
+            assert_eq!(self.lst[i+1].ix, i+1);
+        }
+    }
+
+    fn add_ix(&mut self) {
+        for i in 0..self.lst.len() {
+            self.lst[i].ix = i;
+        }
+    }
+
+    fn index_lst(&mut self) {
+        // need to throw error if list isn't sorted
+        self.assert_sorted();
         // for every chromosome, get the position of the last variant
         // and the varlist index of the first variant on that chromosome
         let mut max_positions: HashMap<String, usize> = HashMap::new();
@@ -148,6 +172,7 @@ impl VarList {
     }
 
     pub fn get_variants_range(&self, interval: GenomicInterval) -> (Vec<Var>) {
+
         // vector of variants to fill and return
         let mut vlst: Vec<Var> = vec![];
         // get the varlist index of a nearby position on the left
@@ -307,9 +332,9 @@ impl VarList {
                 let mut new_v = var_group[0].clone();
                 new_v.allele_counts = vec![0; new_allele_lst.len()];
                 new_v.alleles = new_allele_lst.clone();
-                new_v.genotype = [0u8,0u8];
+                new_v.genotype = Genotype(0,0);
                 new_v.gq = 0.0;
-                new_v.genotype_post = LogProbTable::uniform(new_v.alleles.len());
+                new_v.genotype_post = GenotypeProbs::uniform(new_v.alleles.len());
                 new_v.phase_set = None;
 
                 new_vlst.push(new_v);
@@ -325,11 +350,9 @@ impl VarList {
 
         // set the list to the new merged list and re-index it
         self.lst = new_vlst;
-        for i in 0..self.lst.len() {
-            self.lst[i].ix = i;
-        }
-        self.ix = HashMap::new();
-        self.index_lst();
+
+        self.sort();
+        self.assert_sorted();
 
         // clear out the other VarList since we've mutated it beyond saving
         other.lst.clear();
@@ -390,228 +413,65 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
 mod tests {
     use super::*;
 
+    /**********************************************************************************************/
+    // TEST VARIANT RANGE LOOKUP
+    /**********************************************************************************************/
+
     fn pos_alleles_eq(vlst1: Vec<Var>, vlst2: Vec<Var>) -> bool {
         for (v1, v2) in vlst1.iter().zip(vlst2.iter()){
-            if v1.ix != v2.ix || v1.chrom != v2.chrom || v1.pos0 != v2.pos0 ||
-                v1.ref_allele != v2.ref_allele || v1.var_allele != v2.var_allele {
+            if v1 != v2 || v1.chrom != v2.chrom || v1.alleles != v2.alleles || v1.ix != v2.ix  {
                 return false;
             }
         }
         true
     }
 
+    fn varlist_pos_alleles_eq(vlst1: VarList, vlst2: VarList) -> bool {
+        pos_alleles_eq(vlst1.lst, vlst2.lst)
+    }
+
+    fn generate_var1(ix: usize, tid: usize, chrom: String, pos0: usize, ra: String, aa: String) -> Var {
+        Var {
+            ix: ix,
+            old_ix: None,
+            tid: tid,
+            chrom: chrom,
+            pos0: pos0,
+            alleles: vec![ra,aa],
+            dp: 40,
+            allele_counts: vec![20,20],
+            ambiguous_count: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: Genotype(0,1),
+            gq: 0.0,
+            genotype_post: GenotypeProbs::uniform(2),
+            phase_set: None,
+            mec: 0,
+            mec_frac: 0.0,
+            called: true
+        }
+    }
+
     fn generate_test_lst1() -> VarList {
         let mut lst: Vec<Var> = vec![];
-        lst.push(Var {
-            ix: 0,
-            chrom: "chr1".to_string(),
-            pos0: 5,
-            ref_allele: "A".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 1,
-            chrom: "chr1".to_string(),
-            pos0: 1000,
-            ref_allele: "T".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 2,
-            chrom: "chr1".to_string(),
-            pos0: 2005,
-            ref_allele: "T".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 3,
-            chrom: "chr1".to_string(),
-            pos0: 2900,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 4,
-            chrom: "chr1".to_string(),
-            pos0: 6000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 5,
-            chrom: "chr1".to_string(),
-            pos0: 10000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 6,
-            chrom: "chr2".to_string(),
-            pos0: 5,
-            ref_allele: "A".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 7,
-            chrom: "chr2".to_string(),
-            pos0: 1000,
-            ref_allele: "T".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 8,
-            chrom: "chr2".to_string(),
-            pos0: 2005,
-            ref_allele: "T".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 9,
-            chrom: "chr2".to_string(),
-            pos0: 2900,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 10,
-            chrom: "chr2".to_string(),
-            pos0: 6000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 11,
-            chrom: "chr2".to_string(),
-            pos0: 10000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 12,
-            chrom: "chr3".to_string(),
-            pos0: 20200,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 13,
-            chrom: "chr3".to_string(),
-            pos0: 25100,
-            ref_allele: "A".to_string(),
-            var_allele: "C".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        lst.push(Var {
-            ix: 14,
-            chrom: "chr3".to_string(),
-            pos0: 30400,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+
+        lst.push( generate_var1(0, 0, "chr1".to_string(), 5, "A".to_string(), "G".to_string()));
+        lst.push( generate_var1(1, 0, "chr1".to_string(), 1000, "T".to_string(), "A".to_string()));
+        lst.push( generate_var1(2, 0, "chr1".to_string(), 2005, "T".to_string(), "G".to_string()));
+        lst.push( generate_var1(3, 0, "chr1".to_string(), 2900, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(4, 0, "chr1".to_string(), 6000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(5, 0, "chr1".to_string(), 10000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(6, 1, "chr2".to_string(), 5, "A".to_string(), "G".to_string()));
+        lst.push( generate_var1(7, 1, "chr2".to_string(), 1000, "T".to_string(), "A".to_string()));
+        lst.push( generate_var1(8, 1, "chr2".to_string(), 2005, "T".to_string(), "G".to_string()));
+        lst.push( generate_var1(9, 1, "chr2".to_string(), 2900, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(10, 1, "chr2".to_string(), 6000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(11, 1, "chr2".to_string(), 10000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(13, 2, "chr3".to_string(), 25100, "A".to_string(), "C".to_string()));
+        lst.push( generate_var1(14, 2, "chr3".to_string(), 30400, "C".to_string(), "A".to_string()));
+
         VarList::new(lst)
     }
 
@@ -629,34 +489,8 @@ mod tests {
         let vars = vlst.get_variants_range(interval);
 
         let mut exp: Vec<Var> = vec![];
-        exp.push(Var {
-            ix: 3,
-            chrom: "chr1".to_string(),
-            pos0: 2900,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        exp.push(Var {
-            ix: 4,
-            chrom: "chr1".to_string(),
-            pos0: 6000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+        exp.push( generate_var1(3, 0, "chr1".to_string(), 2900, "C".to_string(), "G".to_string()));
+        exp.push( generate_var1(4, 0, "chr1".to_string(), 6000, "C".to_string(), "A".to_string()));
 
         assert!(pos_alleles_eq(vars, exp));
     }
@@ -675,62 +509,10 @@ mod tests {
         let vars = vlst.get_variants_range(interval);
 
         let mut exp: Vec<Var> = vec![];
-        exp.push(Var {
-            ix: 6,
-            chrom: "chr2".to_string(),
-            pos0: 5,
-            ref_allele: "A".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        exp.push(Var {
-            ix: 7,
-            chrom: "chr2".to_string(),
-            pos0: 1000,
-            ref_allele: "T".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        exp.push(Var {
-            ix: 8,
-            chrom: "chr2".to_string(),
-            pos0: 2005,
-            ref_allele: "T".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        exp.push(Var {
-            ix: 9,
-            chrom: "chr2".to_string(),
-            pos0: 2900,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+        exp.push( generate_var1(6, 1, "chr2".to_string(), 5, "A".to_string(), "G".to_string()));
+        exp.push( generate_var1(7, 1, "chr2".to_string(), 1000, "T".to_string(), "A".to_string()));
+        exp.push( generate_var1(8, 1, "chr2".to_string(), 2005, "T".to_string(), "G".to_string()));
+        exp.push( generate_var1(9, 1, "chr2".to_string(), 2900, "C".to_string(), "G".to_string()));
 
         assert!(pos_alleles_eq(vars, exp));
     }
@@ -749,34 +531,8 @@ mod tests {
         let vars = vlst.get_variants_range(interval);
 
         let mut exp: Vec<Var> = vec![];
-        exp.push(Var {
-            ix: 10,
-            chrom: "chr2".to_string(),
-            pos0: 6000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        exp.push(Var {
-            ix: 11,
-            chrom: "chr2".to_string(),
-            pos0: 10000,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+        exp.push( generate_var1(10, 1, "chr2".to_string(), 6000, "C".to_string(), "A".to_string()));
+        exp.push( generate_var1(11, 1, "chr2".to_string(), 10000, "C".to_string(), "A".to_string()));
 
         assert!(pos_alleles_eq(vars, exp));
     }
@@ -795,20 +551,7 @@ mod tests {
         let vars = vlst.get_variants_range(interval);
 
         let mut exp: Vec<Var> = vec![];
-        exp.push(Var {
-            ix: 12,
-            chrom: "chr3".to_string(),
-            pos0: 20200,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+        exp.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
 
         assert!(pos_alleles_eq(vars, exp));
     }
@@ -827,20 +570,8 @@ mod tests {
         let vars = vlst.get_variants_range(interval);
 
         let mut exp: Vec<Var> = vec![];
-        exp.push(Var {
-            ix: 12,
-            chrom: "chr3".to_string(),
-            pos0: 20200,
-            ref_allele: "C".to_string(),
-            var_allele: "G".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+        exp.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
+
 
         assert!(pos_alleles_eq(vars, exp));
     }
@@ -859,34 +590,9 @@ mod tests {
         let vars = vlst.get_variants_range(interval);
 
         let mut exp: Vec<Var> = vec![];
-        exp.push(Var {
-            ix: 13,
-            chrom: "chr3".to_string(),
-            pos0: 25100,
-            ref_allele: "A".to_string(),
-            var_allele: "C".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
-        exp.push(Var {
-            ix: 14,
-            chrom: "chr3".to_string(),
-            pos0: 30400,
-            ref_allele: "C".to_string(),
-            var_allele: "A".to_string(),
-            dp: 40,
-            ra: 0,
-            aa: 0,
-            qual: 0.0,
-            filter: ".".to_string(),
-            genotype: "./.".to_string(),
-            gq: 0.0
-        });
+
+        exp.push( generate_var1(13, 2, "chr3".to_string(), 25100, "A".to_string(), "C".to_string()));
+        exp.push( generate_var1(14, 2, "chr3".to_string(), 30400, "C".to_string(), "A".to_string()));
 
         assert!(pos_alleles_eq(vars, exp));
     }
@@ -906,5 +612,336 @@ mod tests {
 
         let exp: Vec<Var> = vec![];
         assert!(pos_alleles_eq(vars, exp));
+    }
+
+    /**********************************************************************************************/
+    // TEST VARIANT SORTING
+    /**********************************************************************************************/
+
+    // generate an unsorted version of test_lst1, with meaningless indices. for testing sorting.
+    fn generate_test_lst1_unsorted1() -> VarList {
+        let mut lst: Vec<Var> = vec![];
+
+        lst.push( generate_var1(0, 1, "chr2".to_string(), 2005, "T".to_string(), "G".to_string()));
+        lst.push( generate_var1(1000, 1, "chr2".to_string(), 1000, "T".to_string(), "A".to_string()));
+        lst.push( generate_var1(0, 0, "chr1".to_string(), 2900, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(100, 0, "chr1".to_string(), 5, "A".to_string(), "G".to_string()));
+        lst.push( generate_var1(4, 0, "chr1".to_string(), 6000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(14, 2, "chr3".to_string(), 30400, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(13, 2, "chr3".to_string(), 25100, "A".to_string(), "C".to_string()));
+        lst.push( generate_var1(10, 0, "chr1".to_string(), 10000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(1, 1, "chr2".to_string(), 5, "A".to_string(), "G".to_string()));
+        lst.push( generate_var1(2, 0, "chr1".to_string(), 2005, "T".to_string(), "G".to_string()));
+        lst.push( generate_var1(10, 1, "chr2".to_string(), 6000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(10, 1, "chr2".to_string(), 2900, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(11, 1, "chr2".to_string(), 10000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(2, 0, "chr1".to_string(), 1000, "T".to_string(), "A".to_string()));
+        lst.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
+
+        VarList::new(lst)
+    }
+
+    // generate another unsorted version of test_lst1, with meaningless indices. for testing sorting.
+    fn generate_test_lst1_unsorted2() -> VarList {
+        let mut lst: Vec<Var> = vec![];
+
+        lst.push( generate_var1(10, 1, "chr2".to_string(), 5, "A".to_string(), "G".to_string()));
+        lst.push( generate_var1(1, 0, "chr1".to_string(), 6000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(0, 1, "chr2".to_string(), 2005, "T".to_string(), "G".to_string()));
+        lst.push( generate_var1(0, 0, "chr1".to_string(), 5, "A".to_string(), "G".to_string()));
+        lst.push( generate_var1(1000, 0, "chr1".to_string(), 1000, "T".to_string(), "A".to_string()));
+        lst.push( generate_var1(0, 1, "chr2".to_string(), 1000, "T".to_string(), "A".to_string()));
+        lst.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(2, 2, "chr3".to_string(), 25100, "A".to_string(), "C".to_string()));
+        lst.push( generate_var1(100, 0, "chr1".to_string(), 2900, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(9, 0, "chr1".to_string(), 2005, "T".to_string(), "G".to_string()));
+        lst.push( generate_var1(5, 0, "chr1".to_string(), 10000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(3, 1, "chr2".to_string(), 2900, "C".to_string(), "G".to_string()));
+        lst.push( generate_var1(10, 1, "chr2".to_string(), 6000, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(50, 2, "chr3".to_string(), 30400, "C".to_string(), "A".to_string()));
+        lst.push( generate_var1(3, 1, "chr2".to_string(), 10000, "C".to_string(), "A".to_string()));
+
+        VarList::new(lst)
+    }
+
+    #[test]
+    fn test_varlist_sort1() {
+        let mut vlst_unsorted = generate_test_lst1_unsorted1();
+
+        vlst_unsorted.sort();
+        vlst_unsorted.assert_sorted();
+    }
+
+    #[test]
+    fn test_varlist_sort2() {
+        let mut vlst_unsorted = generate_test_lst1_unsorted2();
+
+        vlst_unsorted.sort();
+        vlst_unsorted.assert_sorted();
+    }
+
+    /**********************************************************************************************/
+    // TEST COMBINING VARLISTS
+    /**********************************************************************************************/
+
+    fn generate_var2(ix: usize, tid: usize, chrom: String, pos0: usize, alleles: Vec<String>) -> Var {
+        Var {
+            ix: ix,
+            old_ix: None,
+            tid: tid,
+            chrom: chrom,
+            pos0: pos0,
+            alleles: alleles,
+            dp: 40,
+            allele_counts: vec![20,20],
+            ambiguous_count: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: Genotype(0,1),
+            gq: 0.0,
+            genotype_post: GenotypeProbs::uniform(2),
+            phase_set: None,
+            mec: 0,
+            mec_frac: 0.0,
+            called: true
+        }
+    }
+
+    // combining two identical lists should result in the same list
+    #[test]
+    fn test_varlist_combine_same_lists() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let vlst1_bak = vlst1.clone();
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        vlst1.combine(&mut vlst2);
+        assert!(varlist_pos_alleles_eq(vlst1, vlst1_bak));
+    }
+
+    // combine varlists with different variants into essentially the union of the variant set
+    #[test]
+    fn test_varlist_combine_not_same() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    // combine a variant where a SNVs overlaps a deletion
+    #[test]
+    fn test_varlist_combine_deletion() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 101, vec!["T".to_string(), "C".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string(), "TCT".to_string(),]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    // combine a variant where a SNVs overlaps an insertion
+    #[test]
+    fn test_varlist_combine_insertion() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "C".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "TAAAA".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "C".to_string(), "TAAAA".to_string(),]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    // make sure that if the insertion is only adjacent, it is left separate from SNV.
+    #[test]
+    fn test_varlist_combine_nearby_insertion() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 101, vec!["T".to_string(), "C".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "TAAAA".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "TAAAA".to_string(),]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 101, vec!["T".to_string(), "C".to_string()]));
+        lst3.push( generate_var2(3, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert_eq!(vlst1.lst[2].alleles, exp.lst[2].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    // combine a variant where multiple SNVs overlap the same deletion
+    #[test]
+    fn test_varlist_combine_deletion_multiple_snp() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "C".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 102, vec!["T".to_string(), "C".to_string()]));
+        lst2.push( generate_var2(3, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "CTT".to_string(), "T".to_string(), "TTC".to_string()]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    // combine a variant where multiple SNVs overlap the same deletion
+    #[test]
+    fn test_varlist_combine_overlapping_deletions() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 102, vec!["TCC".to_string(), "T".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTTCC".to_string(), "TCC".to_string(),"TTT".to_string()]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    // combine a variant where multiple SNVs overlap the same deletion
+    #[test]
+    fn test_varlist_combine_overlapping_insertion_deletion() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 101, vec!["T".to_string(), "TCCC".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string(), "TTCCCT".to_string()]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    #[test]
+    fn test_varlist_combine_overlapping_insertion_deletion_snv() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
+        lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "G".to_string(), "C".to_string()]));
+        lst2.push( generate_var2(2, 0, "chr1".to_string(), 101, vec!["T".to_string(), "TCCC".to_string()]));
+        lst2.push( generate_var2(3, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
+        lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "CTT".to_string(), "GTT".to_string(), "T".to_string(), "TTCCCT".to_string()]));
+        lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
 }
