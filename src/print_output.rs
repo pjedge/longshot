@@ -2,6 +2,7 @@
 use bio::stats::{PHREDProb};
 use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
 use variants_and_fragments::VarList;
+use genotype_probs::Genotype;
 use std::error::Error;
 use std::io::prelude::*;
 use std::fs::File;
@@ -19,9 +20,9 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
     let headerstr = "##fileformat=VCFv4.2
 ##source=ReaperV0.1
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">
-##INFO=<ID=AC,Number=1,Type=Integer,Description=\"Number of Observations of Each Allele\">
-##INFO=<ID=NA,Number=1,Type=Integer,Description=\"Number of Ambiguous Alleles\">
-##INFO=<ID=PH,Number=1,Type=Integer,Description=\"Phred-scaled Probabilities of Phased Genotypes\">
+##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
+##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
+##INFO=<ID=PH,Number=G,Type=Integer,Description=\"Phred-scaled Probabilities of Phased Genotypes\">
 ##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
 ##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
 ##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">
@@ -39,9 +40,8 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
     for var in &varlist.lst {
 
         assert!(var.alleles.len() >= 2);
-        assert!(var.genotype.len() >= 2);
         assert!(var.allele_counts.len() == var.alleles.len());
-        assert!(var.genotype_post.size() == var.alleles.len());
+        assert!(var.genotype_post.n_alleles() == var.alleles.len());
 
         match interval {
             &Some(ref iv) => {
@@ -55,7 +55,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
         }
 
         if !print_whole_varlist {
-            if var.genotype == [0u8, 0u8] {
+            if var.genotype == Genotype(0,0) {
                 continue;
             }
 
@@ -82,11 +82,10 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
 
         let allele_counts_str = var.allele_counts.clone().iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",");
         let mut post_vec: Vec<String> = vec![];
-        for g1 in 0..var.alleles.len() {
-            for g2 in 0..var.alleles.len(){
-                post_vec.push(format!("{:.2}", *PHREDProb::from(var.genotype_post.get(g1,g2))));
-            }
+        for g in var.possible_genotypes() {
+            post_vec.push(format!("{:.2}", *PHREDProb::from(var.genotype_post.get(g))));
         }
+
         let post_str = post_vec.join(",");
 
         let mut var_alleles: Vec<String> = vec![];
@@ -101,10 +100,10 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
             None => "/"
         };
 
-        let genotype_str = vec![var.genotype[0].to_string(), var.genotype[1].to_string()].join(sep);
+        let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};NA={};PH={:.2};MEC={};MF={};PSMF={:.5}\tGT:PS:GQ\t{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};NA={};PH={};MEC={};MF={};PSMF={:.5}\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
