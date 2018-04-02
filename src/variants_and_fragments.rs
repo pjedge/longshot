@@ -234,6 +234,35 @@ impl VarList {
             }
         }
 
+        // find the last variant end position
+        let mut max_end = var_group[0].pos0;
+        for v in var_group.iter() {
+            if v.pos0 + v.alleles[0].len() > max_end {
+            max_end = v.pos0 + v.alleles[0].len();
+            }
+
+        }
+
+        // we are going to combine the ref alleles from each variant to infer the longer
+        // representation of the reference sequence for the variant region.
+        let mut ref_seq = vec!['N'; max_end - min_pos0];
+        for v in var_group.iter() {
+            let ref_allele_vec: Vec<char> = v.alleles[0].chars().collect::<Vec<char>>();
+            let vs: usize = v.pos0 - min_pos0; // variant position in ref_seq vector
+            let ve: usize = vs + ref_allele_vec.len();
+            for (a,r) in (vs..ve).enumerate() {
+                if ref_seq[r] == 'N' {
+                    ref_seq[r] = ref_allele_vec[a];
+                } else {
+                    assert_eq!(ref_seq[r], ref_allele_vec[a]);
+                }
+            }
+        }
+
+        for c in &ref_seq {
+            assert_ne!(c, &'N');
+        }
+
         // 2. for every variant with a later position, pad the variant's alleles
         //        at the beginning with enough ref chars to match this position, and
         //        update their position so all the positions are the same.
@@ -241,8 +270,8 @@ impl VarList {
         for mut v in var_group.iter_mut() {
             if v.pos0 > min_pos0 {
                 let diff = v.pos0 - min_pos0;
-                // we need to steal the first diff bases from min_pos0_refseq
-                let prefix_seq: String = min_pos0_refseq.chars().take(diff).collect();
+                // we need to steal the first diff bases from refseq
+                let prefix_seq: String = ref_seq[0..diff].iter().collect();
                 let mut new_alleles = vec![];
 
                 for allele in v.alleles.iter_mut() {
@@ -271,20 +300,19 @@ impl VarList {
         // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
         //        until the ref allele is the same length as (step 3)
 
-        for ref mut v in var_group.iter() {
+        for v in var_group.iter_mut() {
             if v.alleles[0].len() < longest_ref.len() {
                 let diff = longest_ref.len() - v.alleles[0].len();
                 // we need to steal the last diff bases from longest_ref
                 let suffix_seq: String = longest_ref.chars().skip(v.alleles[0].len()).take(diff).collect();
-                let mut new_alleles = vec![];
+                //let mut new_alleles = vec![];
 
-                for ref allele in &v.alleles {
-                    let mut a = (*allele).clone();
-                    a.push_str(&suffix_seq.clone());
-                    new_alleles.push(a);
+                for mut allele in v.alleles.iter_mut() {
+                    allele.push_str(&suffix_seq.clone());
+                    //new_alleles.push(allele);
                 }
 
-                v.alleles = new_alleles;
+                //v.alleles = new_alleles;
             }
         }
 
@@ -975,10 +1003,12 @@ mod tests {
         let mut vlst2 = VarList::new(lst2);
 
         let mut lst3: Vec<Var> = vec![];
-        lst3.push( generate_var2(0, 19, "chr20".to_string(), 5898747, vec!["GAACT".to_string(), "GAA".to_string(), "GAACA".to_string(), "GCACA".to_string(), "GCT".to_string()]));
+        lst3.push( generate_var2(0, 19, "chr20".to_string(), 5898747, vec!["GAACT".to_string(), "GAA".to_string(), "GAACA".to_string(), "GCACT".to_string(), "GCT".to_string()]));
         let exp = VarList::new(lst3);
 
         vlst1.combine(&mut vlst2);
+
+
         assert_ne!(vlst1.lst.len(), 0);
         assert_eq!(vlst1.lst[0].alleles, exp.lst[0].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
