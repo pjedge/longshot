@@ -106,6 +106,9 @@ impl VarList {
     }
 
     pub fn assert_sorted(&self) {
+        if self.lst.len() == 0 {
+            return;
+        }
         for i in 0..self.lst.len()-1{
             assert!((self.lst[i].tid < self.lst[i+1].tid) ||
                     (self.lst[i].tid == self.lst[i+1].tid && self.lst[i].pos0 <= self.lst[i+1].pos0));
@@ -205,6 +208,122 @@ impl VarList {
         }
     }
 
+    fn combine_variant_group(var_group: &mut Vec<Var>) -> Var {
+        ///////////////////////////////////////////////////////////////////////////////////
+        // PROCEDURE TO MERGE MULTIPLE VCF VARIANTS, EACH WITH MULTIPLE ALLELES
+        // 1. find the earliest variant position in the variant list.
+        // 2. for every variant with a later position, pad the variant's alleles
+        //        at the beginning with enough ref chars to match this position, and
+        //        update their position so all the positions are the same.
+        // 3. find the longest ref allele out of all the vars. This will be the new ref allele.
+        // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
+        //        until the ref allele is the same length as (step 3)
+        // 5. add the unified ref_allele as 0-th allele of new allele list
+        // 6. combine the remaining alleles from every variant (non-ref)
+        //        into a single vector, sort, and remove duplicates. (vec.dedup())
+        // 7. append these unique variant alleles to the new allele list.
+
+        // 1. find the earliest variant position in the variant list.
+        let mut min_pos0 = var_group[0].pos0;
+        let mut min_pos0_refseq = var_group[0].alleles[0].clone();
+        for v in var_group.iter() {
+            if v.pos0 < min_pos0
+                || (v.pos0 == min_pos0 && v.alleles[0].len() > min_pos0_refseq.len()) {
+                min_pos0 = v.pos0;
+                min_pos0_refseq = v.alleles[0].clone();
+            }
+        }
+
+        // 2. for every variant with a later position, pad the variant's alleles
+        //        at the beginning with enough ref chars to match this position, and
+        //        update their position so all the positions are the same.
+
+        for mut v in var_group.iter_mut() {
+            if v.pos0 > min_pos0 {
+                let diff = v.pos0 - min_pos0;
+                // we need to steal the first diff bases from min_pos0_refseq
+                let prefix_seq: String = min_pos0_refseq.chars().take(diff).collect();
+                let mut new_alleles = vec![];
+
+                for allele in v.alleles.iter_mut() {
+                    let mut a = prefix_seq.clone();
+                    a.push_str(allele);
+                    new_alleles.push(a);
+                }
+
+                v.alleles = new_alleles;
+                v.pos0 = min_pos0
+            }
+        }
+
+        for v in var_group.iter() {
+            assert!(v.pos0 == min_pos0);
+        }
+
+        // 3. find the longest ref allele out of all the vars
+        let mut longest_ref = var_group[0].alleles[0].clone();
+        for  v in var_group.iter() {
+            if v.alleles[0].len() > longest_ref.len() {
+                longest_ref = v.alleles[0].clone();
+            }
+        }
+
+        // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
+        //        until the ref allele is the same length as (step 3)
+
+        for ref mut v in var_group.iter() {
+            if v.alleles[0].len() < longest_ref.len() {
+                let diff = longest_ref.len() - v.alleles[0].len();
+                // we need to steal the last diff bases from longest_ref
+                let suffix_seq: String = longest_ref.chars().skip(v.alleles[0].len()).take(diff).collect();
+                let mut new_alleles = vec![];
+
+                for ref allele in &v.alleles {
+                    let mut a = (*allele).clone();
+                    a.push_str(&suffix_seq.clone());
+                    new_alleles.push(a);
+                }
+
+                v.alleles = new_alleles;
+            }
+        }
+
+        for v in var_group.iter() {
+            assert!(v.alleles[0] == longest_ref);
+        }
+
+        // 5. add the unified ref_allele as 0-th allele of new allele list
+        let mut new_allele_lst = vec![var_group[0].alleles[0].clone()];
+
+        // 6. combine the remaining alleles from every variant (non-ref)
+        //        into a single vector, sort, and remove duplicates. (vec.dedup())
+        let mut var_alleles: Vec<String> = vec![];
+        for v in var_group.iter() {
+            for a in v.alleles[1..].iter() {
+                var_alleles.push(a.clone());
+            }
+        }
+        var_alleles.sort();
+        var_alleles.dedup();
+
+        // 7. append these unique variant alleles to the new allele list.
+
+        new_allele_lst.append(&mut var_alleles);
+        ///////////////////////////////////////////////////////////////////////////////////
+
+        assert!(new_allele_lst.len() >= 2);
+
+        let mut new_v = var_group[0].clone();
+        new_v.allele_counts = vec![0; new_allele_lst.len()];
+        new_v.alleles = new_allele_lst.clone();
+        new_v.genotype = Genotype(0,0);
+        new_v.gq = 0.0;
+        new_v.genotype_post = GenotypeProbs::uniform(new_v.alleles.len());
+        new_v.phase_set = None;
+
+        new_v
+    }
+
     pub fn combine (&mut self, other: &mut VarList) {
         other.lst.append(&mut self.lst);
         other.lst.sort();
@@ -225,117 +344,7 @@ impl VarList {
                 }
             } else {
 
-                ///////////////////////////////////////////////////////////////////////////////////
-                // PROCEDURE TO MERGE MULTIPLE VCF VARIANTS, EACH WITH MULTIPLE ALLELES
-                // 1. find the earliest variant position in the variant list.
-                // 2. for every variant with a later position, pad the variant's alleles
-                //        at the beginning with enough ref chars to match this position, and
-                //        update their position so all the positions are the same.
-                // 3. find the longest ref allele out of all the vars. This will be the new ref allele.
-                // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
-                //        until the ref allele is the same length as (step 3)
-                // 5. add the unified ref_allele as 0-th allele of new allele list
-                // 6. combine the remaining alleles from every variant (non-ref)
-                //        into a single vector, sort, and remove duplicates. (vec.dedup())
-                // 7. append these unique variant alleles to the new allele list.
-
-                // 1. find the earliest variant position in the variant list.
-                let mut min_pos0 = var_group[0].pos0;
-                let mut min_pos0_refseq = var_group[0].alleles[0].clone();
-                for v in &var_group {
-                    if v.pos0 < min_pos0
-                        || (v.pos0 == min_pos0 && v.alleles[0].len() > min_pos0_refseq.len()) {
-                        min_pos0 = v.pos0;
-                        min_pos0_refseq = v.alleles[0].clone();
-                    }
-                }
-
-                // 2. for every variant with a later position, pad the variant's alleles
-                //        at the beginning with enough ref chars to match this position, and
-                //        update their position so all the positions are the same.
-
-                for mut v in &mut var_group {
-                    if v.pos0 > min_pos0 {
-                        let diff = v.pos0 - min_pos0;
-                        // we need to steal the first diff bases from min_pos0_refseq
-                        let prefix_seq: String = min_pos0_refseq.chars().take(diff).collect();
-                        let mut new_alleles = vec![];
-
-                        for ref allele in &v.alleles {
-                            let mut a = prefix_seq.clone();
-                            a.push_str(&allele);
-                            new_alleles.push(a);
-                        }
-
-                        v.alleles = new_alleles;
-                        v.pos0 = min_pos0
-                    }
-                }
-
-                for v in &var_group {
-                    assert!(v.pos0 == min_pos0);
-                }
-
-                // 3. find the longest ref allele out of all the vars
-                let mut longest_ref = var_group[0].alleles[0].clone();
-                for  v in var_group.iter() {
-                    if v.alleles[0].len() > longest_ref.len() {
-                        longest_ref = v.alleles[0].clone();
-                    }
-                }
-
-                // 4. for every other variant (not longest ref), pad EACH allele at the end with ref chars
-                //        until the ref allele is the same length as (step 3)
-
-                for ref mut v in &mut var_group {
-                    if v.alleles[0].len() < longest_ref.len() {
-                        let diff = longest_ref.len() - v.alleles[0].len();
-                        // we need to steal the last diff bases from longest_ref
-                        let suffix_seq: String = longest_ref.chars().skip(v.alleles[0].len()).take(diff).collect();
-                        let mut new_alleles = vec![];
-
-                        for ref allele in &v.alleles {
-                            let mut a = (*allele).clone();
-                            a.push_str(&suffix_seq.clone());
-                            new_alleles.push(a);
-                        }
-
-                        v.alleles = new_alleles;
-                    }
-                }
-
-                for v in &var_group {
-                    assert!(v.alleles[0] == longest_ref);
-                }
-
-                // 5. add the unified ref_allele as 0-th allele of new allele list
-                let mut new_allele_lst = vec![var_group[0].alleles[0].clone()];
-
-                // 6. combine the remaining alleles from every variant (non-ref)
-                //        into a single vector, sort, and remove duplicates. (vec.dedup())
-                let mut var_alleles: Vec<String> = vec![];
-                for v in &var_group {
-                    for a in v.alleles[1..].iter() {
-                        var_alleles.push(a.clone());
-                    }
-                }
-                var_alleles.sort();
-                var_alleles.dedup();
-
-                // 7. append these unique variant alleles to the new allele list.
-
-                new_allele_lst.append(&mut var_alleles);
-                ///////////////////////////////////////////////////////////////////////////////////
-
-                assert!(new_allele_lst.len() >= 2);
-
-                let mut new_v = var_group[0].clone();
-                new_v.allele_counts = vec![0; new_allele_lst.len()];
-                new_v.alleles = new_allele_lst.clone();
-                new_v.genotype = Genotype(0,0);
-                new_v.gq = 0.0;
-                new_v.genotype_post = GenotypeProbs::uniform(new_v.alleles.len());
-                new_v.phase_set = None;
+                let new_v = VarList::combine_variant_group(&mut var_group);
 
                 new_vlst.push(new_v);
                 // clear out the variant group and add the current variant
@@ -346,6 +355,12 @@ impl VarList {
                 area_start = var.pos0;
                 area_end = var.pos0 + var.alleles[0].len();
             }
+        }
+
+        // the var_group might have one last variant left in it
+        if var_group.len() > 0 {
+            let new_v = VarList::combine_variant_group(&mut var_group);
+            new_vlst.push(new_v);
         }
 
         // set the list to the new merged list and re-index it
@@ -942,6 +957,51 @@ mod tests {
 
         vlst1.combine(&mut vlst2);
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    #[test]
+    fn test_varlist_combine_chr20_bug_case1() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 19, "chr20".to_string(), 5898747, vec!["GAA".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 19, "chr20".to_string(), 5898749, vec!["ACT".to_string(), "A".to_string()]));
+        lst1.push( generate_var2(2, 19, "chr20".to_string(), 5898751, vec!["T".to_string(), "A".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut lst2: Vec<Var> = vec![];
+        lst2.push( generate_var2(0, 19, "chr20".to_string(), 5898748, vec!["A".to_string(), "C".to_string()]));
+        lst2.push( generate_var2(1, 19, "chr20".to_string(), 5898751, vec!["T".to_string(), "A".to_string()]));
+        let mut vlst2 = VarList::new(lst2);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 19, "chr20".to_string(), 5898747, vec!["GAACT".to_string(), "GAA".to_string(), "GAACA".to_string(), "GCACA".to_string(), "GCT".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_ne!(vlst1.lst.len(), 0);
+        assert_eq!(vlst1.lst[0].alleles, exp.lst[0].alleles);
+        assert!(varlist_pos_alleles_eq(vlst1, exp));
+    }
+
+    #[test]
+    fn test_varlist_combine_chr20_bug_case2() {
+
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 19, "chr20".to_string(), 42449920, vec!["AAAGCTT".to_string(), "A".to_string()]));
+        lst1.push( generate_var2(1, 19, "chr20".to_string(), 42449926, vec!["T".to_string(), "TAA".to_string()]));
+        lst1.push( generate_var2(2, 19, "chr20".to_string(), 42449926, vec!["T".to_string(), "TAA".to_string()]));
+        let mut vlst1 = VarList::new(lst1);
+
+        let mut vlst2 = VarList::new(vec![]);
+
+        let mut lst3: Vec<Var> = vec![];
+        lst3.push( generate_var2(0, 19, "chr20".to_string(), 42449920, vec!["AAAGCTT".to_string(), "A".to_string(), "AAAGCTTAA".to_string()]));
+        let exp = VarList::new(lst3);
+
+        vlst1.combine(&mut vlst2);
+        assert_ne!(vlst1.lst.len(), 0);
+        assert_eq!(vlst1.lst[0].alleles, exp.lst[0].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
 }
