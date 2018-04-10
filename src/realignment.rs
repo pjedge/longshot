@@ -3,7 +3,7 @@
 
 use bio::stats::{LogProb, Prob};
 
-static ALLOW_END_GAPS: bool = true;
+static ALLOW_END_GAPS: bool = false;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AlignmentType {

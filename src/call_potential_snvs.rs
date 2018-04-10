@@ -519,7 +519,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
                 record.is_quality_check_failed() ||
-                record.is_duplicate() {
+                record.is_duplicate() || record.is_supplementary() {
                 continue;
             }
 
@@ -598,7 +598,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
             let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&h1_read_seqs, ref_window_nullterm.clone(),
-                                            (h1_seq_count/2) as i32,&mut consensus_h1, alignment_type,
+                                            1i32,&mut consensus_h1, alignment_type, //  (h1_seq_count/2) as i32
                                             match_score, mismatch_score, gap_score);
             let h1_alignment = aligner.local(&consensus_h1, &ref_window);
             //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
@@ -618,7 +618,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h2_vars: Option<Vec<Var>> = if h2_seq_count >= min_reads {
             let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&h2_read_seqs, ref_window_nullterm.clone(),
-                                            (h1_seq_count/2) as i32,&mut consensus_h2, alignment_type,
+                                            1i32,&mut consensus_h2, alignment_type, // (h1_seq_count/2) as i32
                                             match_score, mismatch_score, gap_score);
             let h2_alignment = aligner.local(&consensus_h2, &ref_window);
             //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
@@ -640,7 +640,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                                              && all_seq_count >= min_reads {
             let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
-                                            (all_seq_count/2) as i32,
+                                            1i32, // (all_seq_count/2) as i32
                                             &mut consensus_all, alignment_type,
                                             match_score, mismatch_score, gap_score);
             let all_alignment = aligner.local(&consensus_all, &ref_window);

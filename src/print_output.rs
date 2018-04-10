@@ -102,6 +102,7 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
 
         let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
 
+
         match writeln!(file,
                        "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};NA={};PH={};MEC={};MF={};PSMF={:.5}\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
