@@ -13,6 +13,10 @@ use bio::pattern_matching::bndm;
 use realignment::*;
 static VERBOSE: bool = false;
 
+
+static IGNORE_INDEL_ONLY_CLUSTERS: bool = true;
+
+
 #[derive(Clone, Copy)]
 pub struct ExtractFragmentParameters {
     pub min_mapq: u8,
@@ -31,6 +35,7 @@ pub struct CigarPos {
     pub ref_pos: u32,
     pub read_pos: u32,
 }
+
 
 //************************************************************************************************
 // BEGINNING OF RUST-HTSLIB BASED CODE *****************************************************************
@@ -705,6 +710,7 @@ pub fn extract_fragment(bam_record: &Record,
 
     if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
         bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
+        || bam_record.is_supplementary()
         {
             return fragment;
         }
@@ -790,6 +796,33 @@ pub fn extract_fragment(bam_record: &Record,
     let mut new_var_ix: HashMap<usize, usize> = HashMap::with_capacity(extract_params.short_hap_max_snvs);
 
     for (anchors, var_cluster) in cluster_lst {
+
+        if IGNORE_INDEL_ONLY_CLUSTERS {
+            let mut seen_snv = false;
+            for var in var_cluster.iter() {
+                if seen_snv {
+                    break;
+                }
+                for allele in var.alleles[1..].iter() {
+                    if allele.len() == var.alleles[0].len() {
+                        let mut diff = 0;
+                        for (c1, c2) in allele.chars().zip(var.alleles[0].chars()) {
+                            if c1 != c2 {
+                                diff += 1;
+                            }
+                        }
+                        if diff == 1 {
+                            seen_snv = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !seen_snv {
+                continue;
+            }
+        }
 
         // some new variants may have been added after performing POA multiple sequence alignment.
         // if these new variants are too close to existing variant cluster, they will all need to be

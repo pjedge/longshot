@@ -37,7 +37,7 @@ use bio::stats::{LogProb,Prob};
 use haplotype_assembly::separate_reads_by_haplotype;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType};
-use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
+//use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
 use variants_and_fragments::var_filter;
@@ -350,19 +350,19 @@ fn main() {
         short_hap_max_snvs: short_hap_max_snvs,
         max_window_padding: max_window_padding,
     };
-//
+
     eprintln!("{} Estimating alignment parameters...",print_time());
     let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval);
     /*
-    alignment_parameters = AlignmentParameters {
+    let alignment_parameters = AlignmentParameters {
         transition_probs: TransitionProbs {
                             match_from_match: 0.9,
-                            insertion_from_match: 0.8,
+                            insertion_from_match: 0.08,
                             deletion_from_match: 0.02,
-                            insertion_from_insertion: 0.5,
-                            match_from_insertion: 0.5,
-                            deletion_from_deletion: 0.5,
-                            match_from_deletion: 0.5,
+                            insertion_from_insertion: 0.25,
+                            match_from_insertion: 0.75,
+                            deletion_from_deletion: 0.1,
+                            match_from_deletion: 0.9,
         },
         emission_probs: EmissionProbs {
                             equal: 0.99,
@@ -370,8 +370,8 @@ fn main() {
                             deletion: 1.0,
                             insertion: 1.0
         }
-    };
-    */
+    };*/
+
 
     /***********************************************************************************************/
     // GET HUMAN GENOTYPE PRIORS
