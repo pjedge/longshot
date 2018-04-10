@@ -22,6 +22,7 @@ use genotype_probs::*;
 
 static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
+static POTENTIAL_SNV_MIN_PROB: f64 = 0.001;
 
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
@@ -32,7 +33,7 @@ pub fn call_potential_snvs(bam_file: &String,
                            ln_align_params: LnAlignmentParameters)
                            -> VarList {
 
-    let potential_snv_qual = LogProb::from(Prob(0.5));
+    let potential_snv_qual = LogProb::from(Prob(POTENTIAL_SNV_MIN_PROB));
     let target_names = parse_target_names(&bam_file);
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
@@ -213,6 +214,7 @@ pub fn call_potential_snvs(bam_file: &String,
             } else {
                 0u8
             };
+
             let qual = ln_align_params.emission_probs.not_equal;
 
             let call =  FragCall {
@@ -506,9 +508,9 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h1_read_seqs: Vec<Vec<u8>> = vec![];
         let mut h2_read_seqs: Vec<Vec<u8>> = vec![];
 
-        let mut all_seq_count = 0;
-        let mut h1_seq_count = 0;
-        let mut h2_seq_count = 0;
+        let mut all_seq_count: usize = 0;
+        let mut h1_seq_count: usize = 0;
+        let mut h2_seq_count: usize= 0;
 
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
@@ -596,7 +598,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
             let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&h1_read_seqs, ref_window_nullterm.clone(),
-                                            h1_seq_count as i32 / 2,&mut consensus_h1, alignment_type,
+                                            (h1_seq_count/2) as i32,&mut consensus_h1, alignment_type,
                                             match_score, mismatch_score, gap_score);
             let h1_alignment = aligner.local(&consensus_h1, &ref_window);
             //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
@@ -616,7 +618,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h2_vars: Option<Vec<Var>> = if h2_seq_count >= min_reads {
             let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&h2_read_seqs, ref_window_nullterm.clone(),
-                                            h2_seq_count as i32 / 2,&mut consensus_h2, alignment_type,
+                                            (h1_seq_count/2) as i32,&mut consensus_h2, alignment_type,
                                             match_score, mismatch_score, gap_score);
             let h2_alignment = aligner.local(&consensus_h2, &ref_window);
             //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
@@ -638,7 +640,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                                              && all_seq_count >= min_reads {
             let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
-                                            all_seq_count as i32 / 2,
+                                            (all_seq_count/2) as i32,
                                             &mut consensus_all, alignment_type,
                                             match_score, mismatch_score, gap_score);
             let all_alignment = aligner.local(&consensus_all, &ref_window);
@@ -655,6 +657,127 @@ pub fn call_potential_variants_poa(bam_file: &String,
         } else {
             None
         };
+        /*
+        h1_read_seqs.reverse();
+        let mut h1_vars_rev: Option<Vec<Var>> = if h1_seq_count >= min_reads {
+            let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&h1_read_seqs, ref_window_nullterm.clone(),
+                                            0 ,&mut consensus_h1, alignment_type,
+                                            match_score, mismatch_score, gap_score);
+            let h1_alignment = aligner.local(&consensus_h1, &ref_window);
+            //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
+            Some(extract_variants_from_alignment(&h1_alignment,
+                                                 &consensus_h1,
+                                                 &ref_window,
+                                                 l_ref,
+                                                 tid,
+                                                 target_names[tid].clone(),
+                                                 all_seq_count,
+                                                 25))
+
+        } else {
+            None
+        };
+
+        h2_read_seqs.reverse();
+        let mut h2_vars_rev: Option<Vec<Var>> = if h2_seq_count >= min_reads {
+            let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&h2_read_seqs, ref_window_nullterm.clone(),
+                                            0 ,&mut consensus_h2, alignment_type,
+                                            match_score, mismatch_score, gap_score);
+            let h2_alignment = aligner.local(&consensus_h2, &ref_window);
+            //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
+            Some(extract_variants_from_alignment(&h2_alignment,
+                                                 &consensus_h2,
+                                                 &ref_window,
+                                                 l_ref,
+                                                 tid,
+                                                 target_names[tid].clone(),
+                                                 all_seq_count,
+                                                 25))
+
+        } else {
+            None
+        };
+
+        all_read_seqs.reverse();
+        let mut all_vars_rev: Option<Vec<Var>> = if h1_vars == None
+            && h2_vars == None
+            && all_seq_count >= min_reads {
+            let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
+            poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
+                                            1,
+                                            &mut consensus_all, alignment_type,
+                                            match_score, mismatch_score, gap_score);
+            let all_alignment = aligner.local(&consensus_all, &ref_window);
+            //println!("{}\n", all_alignment.pretty(&consensus_all, &ref_window));
+            Some(extract_variants_from_alignment(&all_alignment,
+                                                 &consensus_all,
+                                                 &ref_window,
+                                                 l_ref,
+                                                 tid,
+                                                 target_names[tid].clone(),
+                                                 all_seq_count,
+                                                 25))
+
+        } else {
+            None
+        };
+
+        match h1_vars {
+            Some(h1) => {
+                match h1_vars_rev {
+                    Some(h1_rev) => {
+                        let mut h1_filtered = vec![];
+                        for var in &h1 {
+                            if h1_rev.contains(var){
+                                h1_filtered.push(var.clone());
+                            }
+                        }
+                        h1_vars = Some(h1_filtered);
+                    }
+                    None => {h1_vars = None;}
+                }
+            }
+            None => {}
+        }
+
+        match h2_vars {
+            Some(h2) => {
+                match h2_vars_rev {
+                    Some(h2_rev) => {
+                        let mut h2_filtered = vec![];
+                        for var in &h2 {
+                            if h2_rev.contains(var){
+                                h2_filtered.push(var.clone());
+                            }
+                        }
+                        h2_vars = Some(h2_filtered);
+                    }
+                    None => {h2_vars = None;}
+                }
+            }
+            None => {}
+        }
+
+        match all_vars {
+            Some(all) => {
+                match all_vars_rev {
+                    Some(all_rev) => {
+                        let mut all_filtered = vec![];
+                        for var in &all {
+                            if all_rev.contains(var){
+                                all_filtered.push(var.clone());
+                            }
+                        }
+                        all_vars = Some(all_filtered);
+                    }
+                    None => {all_vars = None;}
+                }
+            }
+            None => {}
+        }
+        */
 
         if VERBOSE {
 

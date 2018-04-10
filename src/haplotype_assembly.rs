@@ -11,9 +11,9 @@ pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) ->
     let mut h2 = HashSet::new();
 
     for ref f in flist {
-        let total = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
-        let p_read_hap0 = f.p_read_hap[0] - total;
-        let p_read_hap1 = f.p_read_hap[1] - total;
+        let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
+        let p_read_hap0: LogProb = f.p_read_hap[0] - total;
+        let p_read_hap1: LogProb = f.p_read_hap[1] - total;
 
         if p_read_hap0 > threshold {
             h1.insert(f.id.clone());

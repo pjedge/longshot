@@ -6,6 +6,7 @@ use chrono::prelude::*;
 pub static INDEX_FREQ: usize = 1000;
 pub static MAX_VCF_QUAL: f64 = 500.0;
 // THESE SHOULD BE COMMAND LINE PARAMS
+//pub static MAX_P_MISCALL_F64: f64 = 0.2;
 pub static MAX_P_MISCALL_F64: f64 = 0.2;
 pub static MIN_GQ_FOR_PHASING: f64 = 50.0;
 

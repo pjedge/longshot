@@ -3,6 +3,8 @@
 
 use bio::stats::{LogProb, Prob};
 
+static ALLOW_END_GAPS: bool = true;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AlignmentType {
     FastAllAlignment,
@@ -55,20 +57,26 @@ impl TransitionProbs {
 #[derive(Clone, Copy)]
 pub struct EmissionProbs {
     pub equal: f64,
-    pub not_equal: f64
+    pub not_equal: f64,
+    pub insertion: f64,
+    pub deletion: f64
 }
 
 #[derive(Clone, Copy)]
 pub struct LnEmissionProbs {
     pub equal: LogProb,
-    pub not_equal: LogProb
+    pub not_equal: LogProb,
+    pub insertion: LogProb,
+    pub deletion: LogProb
 }
 
 impl EmissionProbs {
     pub fn ln(&self) -> LnEmissionProbs {
         LnEmissionProbs {
             equal: LogProb::from(Prob(self.equal)),
-            not_equal: LogProb::from(Prob(self.not_equal))
+            not_equal: LogProb::from(Prob(self.not_equal)),
+            insertion: LogProb::from(Prob(self.insertion)),
+            deletion: LogProb::from(Prob(self.deletion))
         }
     }
 }
@@ -111,15 +119,14 @@ pub fn sum_all_alignments(v: &Vec<char>,
     let mut upper_curr: Vec<f64> = vec![0.0; w.len() + 1];
 
     middle_prev[0] = 1.0;
-    //upper_prev[1] = params.transition_probs.deletion_from_match;
 
-    /*
-    for j in 2..(w.len() + 1) {
-        upper_prev[j] = upper_prev[j - 1] * params.transition_probs.deletion_from_deletion;
-        middle_prev[j] = 0.0;
-        //lower_prev[j] = 0.0;
+    if ALLOW_END_GAPS {
+        upper_prev[1] = params.transition_probs.deletion_from_match;
+        for j in 2..(w.len() + 1) {
+            upper_prev[j] = upper_prev[j - 1] * params.transition_probs.deletion_from_deletion;
+            middle_prev[j] = 0.0;
+        }
     }
-    */
 
     let t = params.transition_probs;
     let e = params.emission_probs;
@@ -137,48 +144,34 @@ pub fn sum_all_alignments(v: &Vec<char>,
         } else {
             w.len()
         };
-        /*
-        if band_start == 1 {
-            upper_curr[0] = 0.0;
-            middle_curr[0] = 0.0;
-            if i == 1 {
-                lower_curr[0] = params.transition_probs.insertion_from_match
-            } else {
-                lower_curr[0] = lower_prev[0] * params.transition_probs.insertion_from_insertion;
+
+        if ALLOW_END_GAPS {
+            if band_start == 1 {
+                upper_curr[0] = 0.0;
+                middle_curr[0] = 0.0;
+                if i == 1 {
+                    lower_curr[0] = params.transition_probs.insertion_from_match
+                } else {
+                    lower_curr[0] = lower_prev[0] * params.transition_probs.insertion_from_insertion;
+                }
             }
         }
-        */
 
         for j in band_start..(band_end + 1) {
 
-            let emission: f64 = match v.get(i - 1) {
-                Some(v_i) => {
-                    match w.get(j - 1) {
-                        Some(w_j) => {
-                            if v_i == w_j {
-                                e.equal
-                            } else {
-                                e.not_equal
-                            }
-                        }
-                        None => panic!("w_j shouldn't be empty"),
-                    }
-                }
-                None => panic!("v_i shouldn't be empty"),
-            };
-
             let lower_continue = lower_prev[j] * t.insertion_from_insertion;
             let lower_from_middle = middle_prev[j] * t.insertion_from_match;
-            lower_curr[j] = emission * (lower_continue + lower_from_middle);
+            lower_curr[j] = e.insertion * (lower_continue + lower_from_middle);
 
             let upper_continue = upper_curr[j - 1] * t.deletion_from_deletion;
             let upper_from_middle = middle_curr[j - 1] * t.deletion_from_match;
-            upper_curr[j] = emission * (upper_continue + upper_from_middle);
+            upper_curr[j] = e.deletion * (upper_continue + upper_from_middle);
 
             let middle_from_lower = lower_prev[j - 1] * t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] * t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] * t.match_from_deletion;
-            middle_curr[j] = emission * (middle_from_lower + middle_continue + middle_from_upper);
+            let match_emission: f64 = if v[i - 1] == w[j - 1] { e.equal } else { e.not_equal };
+            middle_curr[j] = match_emission * (middle_from_lower + middle_continue + middle_from_upper);
         }
 
         for j in band_start..(band_end + 1) {
@@ -220,13 +213,13 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
     let t = params.transition_probs;
     let e = params.emission_probs;
 
-    /*upper_prev[1] = params.transition_probs.deletion_from_match;
+    if ALLOW_END_GAPS {
 
-    for j in 2..(w.len() + 1) {
-        upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
-        //middle_prev[j] = LogProb::ln_zero();
-        //lower_prev[j] = lower_prev[j - 1] + gap_extend_penalty;
-    }*/
+        upper_prev[1] = params.transition_probs.deletion_from_match;
+        for j in 2..(w.len() + 1) {
+            upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
+        }
+    }
 
     for i in 1..(v.len() + 1) {
 
@@ -241,48 +234,35 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
         } else {
             w.len()
         };
-        /*
-        if band_start == 1 {
-            //upper_curr[0] = upper_prev[0] + gap_extend_penalty;
-            middle_curr[0] = LogProb::ln_zero();
-            if i == 1 {
-                lower_curr[0] = params.transition_probs.insertion_from_match
-            } else {
-                lower_curr[0] = lower_prev[0] + params.transition_probs.insertion_from_insertion;
+
+        if ALLOW_END_GAPS {
+
+            if band_start == 1 {
+                middle_curr[0] = LogProb::ln_zero();
+                if i == 1 {
+                    lower_curr[0] = params.transition_probs.insertion_from_match
+                } else {
+                    lower_curr[0] = lower_prev[0] + params.transition_probs.insertion_from_insertion;
+                }
             }
-        }*/
+        }
 
         for j in band_start..(band_end + 1) {
-            //for j in 1..(w.len() + 1) {
-            let emission: LogProb = match v.get(i - 1) {
-                Some(v_i) => {
-                    match w.get(j - 1) {
-                        Some(w_j) => {
-                            if v_i == w_j {
-                                e.equal
-                            } else {
-                                e.not_equal
-                            }
-                        }
-                        None => panic!("w_j shouldn't be empty"),
-                    }
-                }
-                None => panic!("v_i shouldn't be empty"),
-            };
 
             let lower_continue = lower_prev[j] + t.insertion_from_insertion;
             let lower_from_middle = middle_prev[j] + t.insertion_from_match;
-            lower_curr[j] = emission + LogProb::ln_add_exp(lower_continue, lower_from_middle);
+            lower_curr[j] = e.insertion + LogProb::ln_add_exp(lower_continue, lower_from_middle);
 
             let upper_continue = upper_curr[j - 1] + t.deletion_from_deletion;
             let upper_from_middle = middle_curr[j - 1] + t.deletion_from_match;
-            upper_curr[j] = emission + LogProb::ln_add_exp(upper_continue, upper_from_middle);
+            upper_curr[j] = e.deletion + LogProb::ln_add_exp(upper_continue, upper_from_middle);
 
             let middle_from_lower = lower_prev[j - 1] + t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] + t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] + t.match_from_deletion;
             let options3 = [middle_from_lower, middle_continue, middle_from_upper];
-            middle_curr[j] = emission + LogProb::ln_sum_exp(&options3);
+            let match_emission: LogProb = if v[i - 1] == w[j - 1] { e.equal } else { e.not_equal };
+            middle_curr[j] = match_emission + LogProb::ln_sum_exp(&options3);
         }
 
         for j in band_start..(band_end + 1) {
@@ -319,14 +299,13 @@ pub fn max_alignment(v: &Vec<char>,
     let t = params.transition_probs;
     let e = params.emission_probs;
 
-    //upper_prev[1] = params.transition_probs.deletion_from_match;
 
-    /*
-    for j in 2..(w.len() + 1) {
-        upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
-        //middle_prev[j] = LogProb::ln_zero();
-        //lower_prev[j] = lower_prev[j - 1] + gap_extend_penalty;
-    }*/
+    if ALLOW_END_GAPS {
+        upper_prev[1] = params.transition_probs.deletion_from_match;
+        for j in 2..(w.len() + 1) {
+            upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
+        }
+    }
 
     for i in 1..(v.len() + 1) {
 
@@ -341,43 +320,27 @@ pub fn max_alignment(v: &Vec<char>,
         } else {
             w.len()
         };
-        /*
-        if band_start == 1 {
-            //upper_curr[0] = upper_prev[0] + gap_extend_penalty;
-            middle_curr[0] = LogProb::ln_zero();
-            if i == 1 {
-                lower_curr[0] = params.transition_probs.insertion_from_match
-            } else {
-                lower_curr[0] = lower_prev[0] + params.transition_probs.insertion_from_insertion;
+
+        if ALLOW_END_GAPS {
+            if band_start == 1 {
+                middle_curr[0] = LogProb::ln_zero();
+                if i == 1 {
+                    lower_curr[0] = params.transition_probs.insertion_from_match
+                } else {
+                    lower_curr[0] = lower_prev[0] + params.transition_probs.insertion_from_insertion;
+                }
             }
-        }*/
+        }
 
         for j in band_start..(band_end + 1) {
-            //for j in 1..(w.len() + 1) {
-            let emission: LogProb = match v.get(i - 1) {
-                Some(v_i) => {
-                    match w.get(j - 1) {
-                        Some(w_j) => {
-                            if v_i == w_j {
-                                e.equal
-                            } else {
-                                e.not_equal
-                            }
-                        }
-                        None => panic!("w_j shouldn't be empty"),
-                    }
-                }
-                None => panic!("v_i shouldn't be empty"),
-            };
-
 
             let lower_continue = lower_prev[j] + t.insertion_from_insertion;
             let lower_from_middle = middle_prev[j] + t.insertion_from_match;
-            lower_curr[j] = if lower_continue > lower_from_middle {lower_continue} else {lower_from_middle};
+            lower_curr[j] = if lower_continue > lower_from_middle {e.insertion+lower_continue} else {e.insertion+lower_from_middle};
 
             let upper_continue = upper_curr[j - 1] + t.deletion_from_deletion;
             let upper_from_middle = middle_curr[j - 1] + t.deletion_from_match;
-            upper_curr[j] = if upper_continue > upper_from_middle {upper_continue} else {upper_from_middle};
+            upper_curr[j] = if upper_continue > upper_from_middle {e.deletion+upper_continue} else {e.deletion+upper_from_middle};
 
             let middle_from_lower = lower_prev[j - 1] + t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] + t.match_from_match;
@@ -389,7 +352,8 @@ pub fn max_alignment(v: &Vec<char>,
                     max_option = option;
                 }
             }
-            middle_curr[j] = emission + max_option;
+            let match_emission: LogProb = if v[i - 1] == w[j - 1] { e.equal } else { e.not_equal };
+            middle_curr[j] = match_emission + max_option;
         }
 
         for j in band_start..(band_end + 1) {
