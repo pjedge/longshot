@@ -81,6 +81,8 @@ impl EmissionCounts {
         EmissionProbs {
             equal: self.equal as f64 / total,
             not_equal: self.not_equal as f64 / total / 3.0, // 3 possible bases to mismatch to
+            insertion: 1.0,
+            deletion: 1.0
         }
     }
 
@@ -369,6 +371,8 @@ pub fn estimate_alignment_parameters(bamfile_name: &String,
     eprintln!("{} Emission Probabilities:", SPACER);
     eprintln!("{} match (equal):           {:.3}", SPACER, params.emission_probs.equal);
     eprintln!("{} match (not equal):       {:.3}", SPACER, params.emission_probs.not_equal);
+    eprintln!("{} insertion:               {:.3}", SPACER, params.emission_probs.insertion);
+    eprintln!("{} deletion:                {:.3}", SPACER, params.emission_probs.deletion);
     eprintln!("");
 
     params

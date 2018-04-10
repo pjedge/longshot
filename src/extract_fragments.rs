@@ -11,7 +11,6 @@ use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use realignment::*;
-
 static VERBOSE: bool = false;
 
 #[derive(Clone, Copy)]
@@ -619,6 +618,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             }
         };
 
+        assert!(score > LogProb::ln_zero());
+
         for var in 0..n_vars {
 
             allele_scores[var][hap[var] as usize] = LogProb::ln_add_exp(allele_scores[var][hap[var] as usize], score);
@@ -641,20 +642,16 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     for v in 0..n_vars {
 
         let best_allele = max_hap[v];
-
-        let mut qual = if allele_scores[v][best_allele as usize] == LogProb::ln_zero()
-                      || score_total == LogProb::ln_zero() {
-            LogProb::from(Prob(0.5))
-        } else {
-            LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total))
-        };
+        assert_ne!(allele_scores[v][best_allele as usize], LogProb::ln_zero());
+        let mut qual = LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
 
         //assert_ne!(qual, LogProb::ln_zero());
 
         // TODO: BUG: qual should never ever be 0.
         // need to investigate why this happens
         if qual == LogProb::ln_zero() {
-            qual = LogProb::from(Prob(0.5));
+            //eprintln!("WARNING: Qual being set to ln(0.00001) due to zero-probability value.");
+            qual = LogProb::from(Prob(0.00001));
         }
 
         if VERBOSE {
@@ -1033,10 +1030,121 @@ pub fn extract_fragments(bamfile_name: &String,
 // END OF RUST-HTSLIB BASED CODE *****************************************************************
 //************************************************************************************************
 
-/*
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use genotype_probs::*;
 
+    fn generate_var2(ix: usize, tid: usize, chrom: String, pos0: usize, alleles: Vec<String>) -> Var {
+        Var {
+            ix: ix,
+            old_ix: None,
+            tid: tid,
+            chrom: chrom,
+            pos0: pos0,
+            alleles: alleles,
+            dp: 40,
+            allele_counts: vec![20,20],
+            ambiguous_count: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: Genotype(0,1),
+            gq: 0.0,
+            genotype_post: GenotypeProbs::uniform(2),
+            phase_set: None,
+            mec: 0,
+            mec_frac: 0.0,
+            called: true
+        }
+    }
+
+    #[test]
+    fn test_generate_haplotypes_basic() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8],
+                           vec![1u8]];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
+
+    #[test]
+    fn test_generate_haplotypes_multivariant() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8,0u8,0u8],
+                       vec![0u8,0u8,1u8],
+                       vec![0u8,1u8,0u8],
+                       vec![1u8,0u8,0u8],
+                       vec![1u8,1u8,0u8],
+                       vec![0u8,1u8,1u8],
+                       vec![1u8,0u8,1u8],
+                       vec![1u8,1u8,1u8]];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
+
+    #[test]
+    fn test_generate_haplotypes_multiallelic() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8,0u8],
+                           vec![0u8,1u8],
+                           vec![1u8,0u8],
+                           vec![1u8,1u8],
+                           vec![0u8,2u8],
+                           vec![1u8,2u8]];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
+
+    #[test]
+    fn test_generate_haplotypes_multiallelic2() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 200, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8,0u8,0u8],
+                           vec![0u8,0u8,1u8],
+                           vec![0u8,0u8,2u8],
+                           vec![0u8,1u8,0u8],
+                           vec![0u8,1u8,1u8],
+                           vec![0u8,1u8,2u8],
+                           vec![0u8,2u8,0u8],
+                           vec![0u8,2u8,1u8],
+                           vec![0u8,2u8,2u8],
+                           vec![1u8,0u8,0u8],
+                           vec![1u8,0u8,1u8],
+                           vec![1u8,0u8,2u8],
+                           vec![1u8,1u8,0u8],
+                           vec![1u8,1u8,1u8],
+                           vec![1u8,1u8,2u8],
+                           vec![1u8,2u8,0u8],
+                           vec![1u8,2u8,1u8],
+                           vec![1u8,2u8,2u8],];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
 }
-*/
+

@@ -64,15 +64,20 @@ impl GenotypeProbs {
 
     pub fn sum(&self) -> LogProb {
         let mut total: LogProb = LogProb::ln_zero();
-        //for row in table {
-        //    total = LogProb::ln_add_exp(total, LogProb::ln_sum_exp(row));
-        //}
+        for row in &self.tab {
+            total = LogProb::ln_add_exp(total, LogProb::ln_sum_exp(row));
+        }
+        //let mut flattened = vec![];
+        /*
         for i in 0..self.n_alleles() {
             for j in 0..self.n_alleles() {
+                //flattened.push(self.tab[i][j]);
                 total = LogProb::ln_add_exp(total, self.tab[i][j]);
             }
         }
+        */
 
+        //LogProb::ln_sum_exp(&flattened)
         total
     }
 
@@ -88,13 +93,8 @@ impl GenotypeProbs {
                 assert!(norm.tab[i][j] <= LogProb::ln_one());
                 assert!(norm.tab[i][j] >= LogProb::ln_zero());
 
-                if norm.tab[i][j].is_nan() {
-                   return GenotypeProbs::uniform(self.n_alleles());
-                }
             }
         }
-
-        //self.print_phred();
 
         norm.assert_approx_normalized();
         norm

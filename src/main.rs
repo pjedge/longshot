@@ -18,7 +18,6 @@ mod realignment;
 mod util;
 mod estimate_read_coverage;
 mod estimate_alignment_parameters;
-//mod poa;
 mod spoa;
 mod variants_and_fragments;
 mod print_output;
@@ -38,9 +37,12 @@ use bio::stats::{LogProb,Prob};
 use haplotype_assembly::separate_reads_by_haplotype;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType};
+use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
 use variants_and_fragments::var_filter;
+
+static USE_POA: bool = true;
 
 fn main() {
 
@@ -348,9 +350,28 @@ fn main() {
         short_hap_max_snvs: short_hap_max_snvs,
         max_window_padding: max_window_padding,
     };
-
+//
     eprintln!("{} Estimating alignment parameters...",print_time());
     let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval);
+    /*
+    alignment_parameters = AlignmentParameters {
+        transition_probs: TransitionProbs {
+                            match_from_match: 0.9,
+                            insertion_from_match: 0.8,
+                            deletion_from_match: 0.02,
+                            insertion_from_insertion: 0.5,
+                            match_from_insertion: 0.5,
+                            deletion_from_deletion: 0.5,
+                            match_from_deletion: 0.5,
+        },
+        emission_probs: EmissionProbs {
+                            equal: 0.99,
+                            not_equal: 0.01 / 3.0,
+                            deletion: 1.0,
+                            insertion: 1.0
+        }
+    };
+    */
 
     /***********************************************************************************************/
     // GET HUMAN GENOTYPE PRIORS
@@ -381,6 +402,9 @@ fn main() {
 
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
+    if varlist.lst.len() == 0 {
+        return;
+    }
     /***********************************************************************************************/
     // EXTRACT FRAGMENT INFORMATION FROM READS
     /***********************************************************************************************/
@@ -416,7 +440,7 @@ fn main() {
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 3);
 
-
+    if USE_POA {
     /***********************************************************************************************/
     // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
     /***********************************************************************************************/
@@ -468,7 +492,7 @@ fn main() {
     /***********************************************************************************************/
 
     //calculate_mec(&flist2, &mut varlist);
-
+    }
     eprintln!("{} Adding filter flags based on depth and variant density...",print_time());
     var_filter(&mut varlist, 50.0, 500, 10, max_cov, max_mec_frac);
 
