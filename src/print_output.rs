@@ -1,14 +1,19 @@
 
 use bio::stats::{PHREDProb};
 use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
-use variants_and_fragments::VarList;
+use variants_and_fragments::{VarList, var_filter};
 use genotype_probs::Genotype;
 use std::error::Error;
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
 
-pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool) {
+
+pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool, max_cov: Option<u32>) {
+
+    // first, add filter flags for variant density
+    var_filter(varlist, 50.0, 500, 10, max_cov);
+
     let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
     // Open a file in write-only mode, returns `io::Result<File>`
@@ -127,14 +132,14 @@ pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: 
     }
 }
 
-pub fn print_variant_debug(varlist: &VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str){
+pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str, max_cov: Option<u32>){
     match variant_debug_directory {
         &Some(ref dir) => {
             let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
                 Some(s) => {s.to_owned()},
                 None => {panic!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(&varlist, &interval, true, &outfile, true);
+            print_vcf(varlist, &interval, true, &outfile, true, max_cov);
         }
         &None => {}
     };

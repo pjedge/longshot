@@ -40,9 +40,8 @@ use realignment::{AlignmentType};
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
-use variants_and_fragments::var_filter;
 
-static USE_POA: bool = true;
+static USE_POA: bool = false;
 
 fn main() {
 
@@ -128,12 +127,12 @@ fn main() {
                 .help("Maximum \"padding\" bases on either side of variant realignment window")
                 .display_order(150)
                 .default_value("50"))
-        .arg(Arg::with_name("Max MEC Fraction")
+        /*.arg(Arg::with_name("Max MEC Fraction")
             .short("M")
             .long("max_MEC_fraction")
             .value_name("float")
             .help("Flag SNVs for which the Phase Group MEC fraction exceeds this amount.")
-            .display_order(155))
+            .display_order(155))*/
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
@@ -246,6 +245,7 @@ fn main() {
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
 
+    /*
     let max_mec_frac = match input_args.occurrences_of("Max MEC Fraction") {
         0 => None,
         1 => {
@@ -263,7 +263,7 @@ fn main() {
         _ => {
             panic!("max_mec_frac specified multiple times");
         }
-    };
+    };*/
 
     let mut alignment_type = AlignmentType::NumericallyStableAllAlignment;
 
@@ -348,7 +348,7 @@ fn main() {
         band_width: band_width,
         anchor_length: anchor_length,
         short_hap_max_snvs: short_hap_max_snvs,
-        max_window_padding: max_window_padding,
+        max_window_padding: max_window_padding
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());
@@ -398,7 +398,7 @@ fn main() {
     // as the variant list expands
     varlist.backup_indices();
 
-    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf");
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov);
 
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
@@ -430,7 +430,7 @@ fn main() {
         false => {panic!("Calling genotypes without haplotypes not currently supported.")},
     };
 
-    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf");
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov);
 
 
     /***********************************************************************************************/
@@ -438,7 +438,7 @@ fn main() {
     /***********************************************************************************************/
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 3);
+    call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 3, max_cov);
 
     if USE_POA {
     /***********************************************************************************************/
@@ -463,7 +463,7 @@ fn main() {
 
     varlist.combine(&mut varlist_poa);
     
-    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf");
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf", max_cov);
 
     eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
@@ -482,10 +482,10 @@ fn main() {
 
 
     call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors); // temporary
-    print_variant_debug(&varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf");
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf", max_cov);
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
-    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 7);
+    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 7, max_cov);
 
     /***********************************************************************************************/
     // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
@@ -493,10 +493,8 @@ fn main() {
 
     //calculate_mec(&flist2, &mut varlist);
     }
-    eprintln!("{} Adding filter flags based on depth and variant density...",print_time());
-    var_filter(&mut varlist, 50.0, 500, 10, max_cov, max_mec_frac);
 
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&varlist, &interval,&variant_debug_directory, &"8.0.final_genotypes.vcf");
-    print_vcf(&varlist, &interval, indels, &output_vcf_file, false);
+    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &"8.0.final_genotypes.vcf", max_cov);
+    print_vcf(&mut varlist, &interval, indels, &output_vcf_file, false, max_cov);
 }
