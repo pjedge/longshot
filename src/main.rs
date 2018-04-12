@@ -32,16 +32,13 @@ use call_genotypes::*;
 use util::*;
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
-use bio::stats::{LogProb,Prob};
-//use poa::poa_multiple_sequence_alignment;
+use bio::stats::{LogProb,Prob, PHREDProb};
 use haplotype_assembly::separate_reads_by_haplotype;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType};
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
-
-static USE_POA: bool = false;
 
 fn main() {
 
@@ -106,6 +103,20 @@ fn main() {
                 .help("Minimum mapping quality to use a read.")
                 .display_order(90)
                 .default_value("30"))
+        .arg(Arg::with_name("Min allele quality")
+            .short("a")
+            .long("min_allele_qual")
+            .value_name("float")
+            .help("Minimum estimated quality (Phred-scaled) of allele observation on read to use for genotyping/haplotyping.")
+            .display_order(90)
+            .default_value("7.0"))
+        .arg(Arg::with_name("Min genotype quality for haplotype scaffold")
+            .short("Q")
+            .long("min_hap_gq")
+            .value_name("float")
+            .help("Minimum genotype quality (Phred-scaled) of a variant to use its haplotype phase to genotype other variants.")
+            .display_order(90)
+            .default_value("50.0"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
@@ -120,6 +131,11 @@ fn main() {
                 .help("Cut off short haplotypes after this many SNVs. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
                 .display_order(130)
                 .default_value("3"))
+        .arg(Arg::with_name("Use POA")
+            .short("p")
+            .long("poa")
+            .help("EXPERIMENTAL: Run the algorithm twice, using Partial-Order-Alignment on phased reads to find new candidate SNVs and Indels the second time.")
+            .display_order(130))
         .arg(Arg::with_name("Max window padding")
                 .short("W")
                 .long("max_window")
@@ -127,16 +143,10 @@ fn main() {
                 .help("Maximum \"padding\" bases on either side of variant realignment window")
                 .display_order(150)
                 .default_value("50"))
-        /*.arg(Arg::with_name("Max MEC Fraction")
-            .short("M")
-            .long("max_MEC_fraction")
-            .value_name("float")
-            .help("Flag SNVs for which the Phase Group MEC fraction exceeds this amount.")
-            .display_order(155))*/
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
-                .help("Use non-numerically stable alignment algorithm. Is significantly faster but may be less accurate or have unexpected behaviour.")
+                .help("Use non-numerically stable pair HMM algorithm. Is significantly faster but may be less accurate or have unexpected behaviour.")
                 .display_order(160))
         .arg(Arg::with_name("Force overwrite")
             .short("F")
@@ -149,20 +159,21 @@ fn main() {
                 .help("Minimum width of alignment band. Band will increase in size if sequences are different lengths.")
                 .display_order(170)
                 .default_value("20"))
-        .arg(Arg::with_name("No haplotypes")
+        .arg(Arg::with_name("Max iters since likelihood improvement")
+            .short("I")
+            .long("max_iters")
+            .help("Maximum rounds of haplotype assembly without likelihood improvement before termination.")
+            .display_order(170)
+            .default_value("5"))
+        /*.arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
                 .help("Don't call HapCUT2 to phase variants.")
-                .display_order(190))
-        .arg(Arg::with_name("No Indels")
-            .short("i")
-            .long("no_indels")
-            .help("Do not report short indels -- called indels are relatively inaccurate but are helpful avoid false SNVs.")
-            .display_order(200))
+                .display_order(190))*/
         .arg(Arg::with_name("Max alignment")
             .short("x")
             .long("max_alignment")
-            .help("Use max alignment algorithm rather than all-alignments algorithm.")
+            .help("Use max scoring alignment algorithm rather than pair HMM forward algorithm.")
             .display_order(165))
         .arg(Arg::with_name("Variant debug directory")
             .short("d")
@@ -233,7 +244,7 @@ fn main() {
     let anchor_length: usize = input_args.value_of("Anchor length")
         .unwrap()
         .parse::<usize>()
-        .expect("Argument anchormust be a positive integer!");
+        .expect("Argument anchor must be a positive integer!");
 
     let short_hap_max_snvs: usize = input_args.value_of("Short haplotype max SNVs")
         .unwrap()
@@ -244,6 +255,26 @@ fn main() {
         .unwrap()
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
+
+    let min_allele_qual: f64 = input_args.value_of("Min allele quality")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument max_mec_frac must be a positive float!");
+
+    if min_allele_qual <= 0.0 {
+        panic!("Min allele quality must be a positive float.");
+    }
+
+    let min_hap_gq: f64 = input_args.value_of("Min genotype quality for haplotype scaffold")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument min_hap_gq must be a positive float!");
+
+    if min_hap_gq <= 0.0 {
+        panic!("min_hap_gq must be a positive float.");
+    }
+
+    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
 
     /*
     let max_mec_frac = match input_args.occurrences_of("Max MEC Fraction") {
@@ -293,19 +324,16 @@ fn main() {
         .parse::<usize>()
         .expect("Argument band_width must be a positive integer!");
 
-    let assemble_haps = match input_args.occurrences_of("No haplotypes") {
-        0 => true,
-        1 => false,
-        _ => {
-            panic!("no_haps specified multiple times");
-        }
-    };
+    let max_iters_since_improvement: usize = input_args.value_of("Max iters since likelihood improvement")
+        .unwrap()
+        .parse::<usize>()
+        .expect("Argument max_iters must be a positive integer!");
 
-    let indels = match input_args.occurrences_of("No Indels") {
-        0 => true,
-        1 => false,
+    let use_poa = match input_args.occurrences_of("Use POA") {
+        0 => false,
+        1 => true,
         _ => {
-            panic!("No Indels specified multiple times");
+            panic!("Use POA specified multiple times");
         }
     };
 
@@ -391,6 +419,7 @@ fn main() {
                                                                &genotype_priors,
                                                                max_cov,
                                                                min_mapq,
+                                                               max_p_miscall,
                                                            alignment_parameters.ln());
 
     // back up the variant indices
@@ -423,12 +452,7 @@ fn main() {
     /***********************************************************************************************/
 
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
-    match assemble_haps {
-        true => {
-            call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors);
-        },
-        false => {panic!("Calling genotypes without haplotypes not currently supported.")},
-    };
+    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall);
 
     print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov);
 
@@ -438,63 +462,67 @@ fn main() {
     /***********************************************************************************************/
 
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
-    call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 3, max_cov);
-
-    if USE_POA {
-    /***********************************************************************************************/
-    // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
-    /***********************************************************************************************/
-
-    let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
-
-    eprintln!("{} Using Partial Order Alignment (POA) to find new variants...", print_time());
-
-    let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
-                                                               &fasta_file,
-                                                               &interval,
-                                                               &h1,
-                                                               &h2,
-                                                               max_cov,
-                                                               min_mapq,
-                                                               alignment_parameters.ln());
-
-    eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
+    call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
+                                   &variant_debug_directory, 3, max_cov, max_p_miscall,
+                                   min_hap_gq, max_iters_since_improvement);
 
 
-    varlist.combine(&mut varlist_poa);
-    
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf", max_cov);
+    if use_poa {
+        /***********************************************************************************************/
+        // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
+        /***********************************************************************************************/
 
-    eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
+        let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
 
-    /***********************************************************************************************/
-    // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
-    /***********************************************************************************************/
+        eprintln!("{} Using Partial Order Alignment (POA) to find new variants...", print_time());
 
-    eprintln!("{} Producing condensed read data for POA variants...",print_time());
-    let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
-                                                         &fasta_file,
-                                                         &varlist,
-                                                         &interval,
-                                                         extract_fragment_parameters,
-                                                         alignment_parameters,
-                                                          None);  // Some(flist)
+        let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
+                                                                   &fasta_file,
+                                                                   &interval,
+                                                                   &h1,
+                                                                   &h2,
+                                                                   max_cov,
+                                                                   min_mapq,
+                                                                   alignment_parameters.ln());
+
+        eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
 
 
-    call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors); // temporary
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf", max_cov);
+        varlist.combine(&mut varlist_poa);
 
-    eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
-    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors, &variant_debug_directory, 7, max_cov);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf", max_cov);
 
-    /***********************************************************************************************/
-    // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
-    /***********************************************************************************************/
+        eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
-    //calculate_mec(&flist2, &mut varlist);
+        /***********************************************************************************************/
+        // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
+        /***********************************************************************************************/
+
+        eprintln!("{} Producing condensed read data for POA variants...",print_time());
+        let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
+                                                             &fasta_file,
+                                                             &varlist,
+                                                             &interval,
+                                                             extract_fragment_parameters,
+                                                             alignment_parameters,
+                                                              None);  // Some(flist)
+
+
+        call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf", max_cov);
+
+        eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
+        call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
+            &variant_debug_directory, 7, max_cov, max_p_miscall, min_hap_gq, max_iters_since_improvement);
+
+        /***********************************************************************************************/
+        // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
+        /***********************************************************************************************/
+
+        //calculate_mec(&flist2, &mut varlist);
     }
 
     eprintln!("{} Printing VCF file...",print_time());
     print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &"8.0.final_genotypes.vcf", max_cov);
-    print_vcf(&mut varlist, &interval, indels, &output_vcf_file, false, max_cov);
+    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov);
 }
