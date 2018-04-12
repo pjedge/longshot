@@ -490,7 +490,7 @@ fn main() {
 
         varlist.combine(&mut varlist_poa);
 
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.new_potential_SNVs_after_POA.vcf", max_cov);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov);
 
         eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
@@ -509,11 +509,11 @@ fn main() {
 
 
         call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"6.0.realigned_genotypes_after_POA.vcf", max_cov);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov);
 
         eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
         call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-            &variant_debug_directory, 7, max_cov, max_p_miscall, min_hap_gq, max_iters_since_improvement);
+            &variant_debug_directory, 6, max_cov, max_p_miscall, min_hap_gq, max_iters_since_improvement);
 
         /***********************************************************************************************/
         // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
@@ -522,7 +522,13 @@ fn main() {
         //calculate_mec(&flist2, &mut varlist);
     }
 
+    let debug_filename = if use_poa {
+        "7.0.final_genotypes.vcf"
+    } else {
+        "4.0.final_genotypes.vcf"
+    };
+
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &"8.0.final_genotypes.vcf", max_cov);
+    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov);
     print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov);
 }
