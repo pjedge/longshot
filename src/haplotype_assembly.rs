@@ -3,7 +3,6 @@ use variants_and_fragments::Fragment;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use std::collections::HashSet;
 use std::char::from_digit;
-use util::MAX_P_MISCALL_F64;
 
 pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
 
@@ -25,7 +24,7 @@ pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) ->
     (h1,h2)
 }
 
-pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -> Vec<Vec<u8>> {
+pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Vec<Vec<u8>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
@@ -34,7 +33,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         let mut n_calls = 0;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
                 n_calls += 1;
                 if prev_call > phase_variant.len() || c.var_ix - prev_call != 1 {
                     blocks += 1;
@@ -60,7 +59,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)){
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)){
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
                     line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
                 } else {

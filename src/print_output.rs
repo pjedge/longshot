@@ -9,7 +9,7 @@ use std::fs::File;
 use std::path::Path;
 
 
-pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool, max_cov: Option<u32>) {
+pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String, print_reference_genotype: bool, max_cov: Option<u32>) {
 
     // first, add filter flags for variant density
     var_filter(varlist, 50.0, 500, 10, max_cov);
@@ -28,14 +28,14 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, inde
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
 ##INFO=<ID=PH,Number=G,Type=Integer,Description=\"Phred-scaled Probabilities of Phased Genotypes\">
-##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
-##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
-##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=GQ,Number=2,Type=Float,Description=\"Genotype Quality\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
         .to_string();
 
+    //"##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
+    //##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
+    //##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">"
     match writeln!(file, "{}", headerstr) {
         Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
         Ok(_) => {}
@@ -59,24 +59,9 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, inde
             &None => {}
         }
 
-        if !print_whole_varlist {
+        if !print_reference_genotype {
             if var.genotype == Genotype(0,0) {
                 continue;
-            }
-
-            if !indels {
-                let mut found_indel = false;
-
-                for ref allele in &var.alleles {
-                    if allele.len() > 1 {
-                        found_indel = true;
-                        break;
-                    }
-                }
-
-                if found_indel {
-                    continue;
-                }
             }
         }
 
@@ -109,7 +94,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, inde
 
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};NA={};PH={};MEC={};MF={};PSMF={:.5}\tGT:PS:GQ\t{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};NA={};PH={};\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
@@ -120,9 +105,6 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, inde
                        allele_counts_str,
                        var.ambiguous_count,
                        post_str,
-                       0,
-                       0,
-                       0,
                        genotype_str,
                        ps,
                        var.gq) {
@@ -139,7 +121,7 @@ pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInter
                 Some(s) => {s.to_owned()},
                 None => {panic!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(varlist, &interval, true, &outfile, true, max_cov);
+            print_vcf(varlist, &interval,&outfile, true, max_cov);
         }
         &None => {}
     };

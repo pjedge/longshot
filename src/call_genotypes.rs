@@ -1,5 +1,5 @@
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{MAX_P_MISCALL_F64, MIN_GQ_FOR_PHASING, MAX_VCF_QUAL, GenomicInterval};
+use util::{MAX_VCF_QUAL, GenomicInterval};
 use variants_and_fragments::*;
 use print_output::*;
 use genotype_probs::*;
@@ -9,8 +9,6 @@ use chrono::prelude::*;
 
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
-
-static MAX_ITERS_SINCE_IMPROVEMENT: usize = 5;
 
 fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
@@ -25,11 +23,11 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
     pileup_lst
 }
 
-fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize) -> (Vec<usize>, usize) {
+fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64) -> (Vec<usize>, usize) {
     // compute probabilities of data given each genotype
     let mut counts: Vec<usize> = vec![0; num_alleles];
     let mut count_amb = 0; // ambiguous
-    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
     for call in pileup {
         if call.qual < ln_max_p_miscall {
@@ -44,9 +42,10 @@ fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize) -> (Vec<usize>, usi
 
 pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
                                                    genotype_priors: &GenotypePriors,
-                                                   alleles: &Vec<String>) -> GenotypeProbs {
+                                                   alleles: &Vec<String>,
+                                                   max_p_miscall: f64) -> GenotypeProbs {
 
-    let ln_max_p_miscall: LogProb = LogProb::from(Prob(MAX_P_MISCALL_F64));
+    let ln_max_p_miscall: LogProb = LogProb::from(Prob(max_p_miscall));
     let ln_half: LogProb = LogProb::from(Prob(0.5));
 
     // this matrix holds P(data | g) * p(g)
@@ -81,7 +80,7 @@ pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
     posts
 }
 
-pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors) {
+pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) {
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
 
     assert_eq!(pileup_lst.len(), varlist.lst.len());
@@ -92,13 +91,12 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
 
         let posts: GenotypeProbs = calculate_genotype_posteriors_no_haplotypes(&pileup,
                                                                                &genotype_priors,
-                                                                               &var.alleles);
+                                                                               &var.alleles,
+                                                                               max_p_miscall);
 
         let (max_g, max_post) = posts.max_genotype(false);
 
         let genotype_qual:f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
-
-        //let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
 
         var.qual = *PHREDProb::from(posts.get(Genotype(0,0)));
         if var.qual > MAX_VCF_QUAL {
@@ -120,7 +118,10 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       genotype_priors: &GenotypePriors,
                                       variant_debug_directory: &Option<String>,
                                       program_step: usize,
-                                      max_cov: Option<u32>) {
+                                      max_cov: Option<u32>,
+                                      max_p_miscall: f64,
+                                      min_hap_gq: f64,
+                                      max_iters_since_improvement: usize) {
 
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -144,7 +145,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
     }
 
-    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
     let mut haps: Vec<Vec<u8>> = vec![vec![0u8; n_var]; 2];
     let mut prev_best_likelihood = LogProb::ln_zero();
     let mut best_varlist_bak = (*varlist).clone();
@@ -164,7 +165,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             let var = &varlist.lst[i];
             if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
                 && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
-                && var.gq > MIN_GQ_FOR_PHASING {
+                && var.gq > min_hap_gq {
                 var_phased[i] = true;
 
                 if var.genotype == Genotype(0,1) {
@@ -202,7 +203,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             vcf_buffer.push(vcf_line);
         }
 
-        let frag_buffer = generate_flist_buffer(&flist, &var_phased);
+        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall);
         let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
 
         call_hapcut2(&frag_buffer,
@@ -430,7 +431,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         for var in varlist.lst.iter() {
             if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
                 && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
-                && var.gq > MIN_GQ_FOR_PHASING {
+                && var.gq > min_hap_gq {
                 num_phased += 1;
             }
         }
@@ -482,7 +483,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             //let p_call_wrong: LogProb = LogProb::ln_one_minus_exp(&max_post);
             let genotype_qual: f64 = *PHREDProb::from(p_call_wrong);
 
-            let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len());
+            let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
 
             var.qual = *PHREDProb::from(var.genotype_post.get(Genotype(0,0)));
             var.allele_counts = allele_counts;
@@ -524,7 +525,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                 varlist.lst[i] = best_varlist_bak.lst[i].clone();
             }
 
-            if iters_since_improvement > MAX_ITERS_SINCE_IMPROVEMENT {
+            if iters_since_improvement > max_iters_since_improvement {
 
                 break;
             }

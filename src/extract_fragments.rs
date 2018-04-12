@@ -13,9 +13,7 @@ use bio::pattern_matching::bndm;
 use realignment::*;
 static VERBOSE: bool = false;
 
-
-static IGNORE_INDEL_ONLY_CLUSTERS: bool = true;
-
+static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 
 #[derive(Clone, Copy)]
 pub struct ExtractFragmentParameters {
