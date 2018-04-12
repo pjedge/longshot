@@ -295,18 +295,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                 let var = &mut varlist.lst[v];
 
                 assert_eq!(v, var.ix);
-                /*
-                match interval {
-                    &Some(ref iv) => {
-                        if var.chrom != iv.chrom ||
-                            var.pos0 < iv.start_pos as usize ||
-                            var.pos0 > iv.end_pos as usize {
-                            continue;
-                        }
-                    }
-                    &None => {}
-                }
-                */
+
                 let mut p_reads: GenotypeProbs = genotype_priors.get_all_priors(&var.alleles);
 
                 // let (g1,g2) be the current genotype being considered to switch to
