@@ -1,9 +1,8 @@
 // calls HapCUT2 as a static library
-use util::Fragment;
+use variants_and_fragments::Fragment;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use std::collections::HashSet;
-
-static MAX_QUAL_F64: f64 = 0.2;
+use std::char::from_digit;
 
 pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
 
@@ -11,9 +10,9 @@ pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) ->
     let mut h2 = HashSet::new();
 
     for ref f in flist {
-        let total = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
-        let p_read_hap0 = f.p_read_hap[0] - total;
-        let p_read_hap1 = f.p_read_hap[1] - total;
+        let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
+        let p_read_hap0: LogProb = f.p_read_hap[0] - total;
+        let p_read_hap1: LogProb = f.p_read_hap[1] - total;
 
         if p_read_hap0 > threshold {
             h1.insert(f.id.clone());
@@ -25,7 +24,7 @@ pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) ->
     (h1,h2)
 }
 
-pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -> Vec<Vec<u8>> {
+pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Vec<Vec<u8>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
@@ -34,7 +33,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         let mut n_calls = 0;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)) {
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
                 n_calls += 1;
                 if prev_call > phase_variant.len() || c.var_ix - prev_call != 1 {
                     blocks += 1;
@@ -60,16 +59,16 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
         let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(MAX_QUAL_F64)){
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)){
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
-                    line.push(c.allele as u8)
+                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
                 } else {
                     line.push(' ' as u8);
                     for u in (c.var_ix + 1).to_string().into_bytes() {
                         line.push(u as u8);
                     }
                     line.push(' ' as u8);
-                    line.push(c.allele as u8)
+                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
                 }
                 let mut qint = *PHREDProb::from(c.qual) as u32 + 33;
                 if qint > 126 {
@@ -89,7 +88,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>) -
             charline.push(u as char)
         }
 
-        //print!("{}", charline.iter().collect::<String>());
+        //println!("{}", charline.iter().collect::<String>());
 
         buffer.push(line);
     }

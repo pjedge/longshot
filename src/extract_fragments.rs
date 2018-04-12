@@ -5,13 +5,25 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
 use std::error::Error;
 use util::*;
+use variants_and_fragments::*;
 use std::collections::HashMap;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
-use realignment;
-
+use realignment::*;
 static VERBOSE: bool = false;
+
+static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
+
+#[derive(Clone, Copy)]
+pub struct ExtractFragmentParameters {
+    pub min_mapq: u8,
+    pub alignment_type: AlignmentType,
+    pub band_width: usize,
+    pub anchor_length: usize,
+    pub short_hap_max_snvs: usize,
+    pub max_window_padding: usize,
+}
 
 // an extension of the rust-htslib cigar representation
 // has the cigar operation as well as the position on the reference of the operation start,
@@ -21,6 +33,7 @@ pub struct CigarPos {
     pub ref_pos: u32,
     pub read_pos: u32,
 }
+
 
 //************************************************************************************************
 // BEGINNING OF RUST-HTSLIB BASED CODE *****************************************************************
@@ -481,6 +494,38 @@ pub fn find_anchors(bam_record: &Record,
     }))
 }
 
+// input: a reference to a vector of variants length n, and a number k
+// output: a vector of all possible haplotypes from the k-th variant onward,
+// where each haplotype is a vector of u8s representing sequence of alleles
+fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
+
+    if k >= var_cluster.len() {
+        return vec![vec![]];
+    }
+
+    let hap_suffixes = generate_haps_k_onward(var_cluster, k + 1);
+    let c = (hap_suffixes.len() * var_cluster[k].alleles.len()) as usize;
+    let mut hap_list: Vec<Vec<u8>> = Vec::with_capacity(c);
+
+    for a in 0..var_cluster[k].alleles.len() {
+        for mut hap_suffix in hap_suffixes.clone() {
+            let mut hap = Vec::with_capacity(var_cluster.len() - k);
+            hap.push(a as u8);
+            hap.append(&mut hap_suffix);
+            hap_list.push(hap);
+        }
+    }
+
+    hap_list
+}
+
+// input: a reference to a vector of variants length n
+// output: a vector of all possible haplotypes
+// where each haplotype is a vector of u8s length n representing sequence of alleles for the variants
+fn generate_haps(var_cluster: &Vec<Var>) -> Vec<Vec<u8>> {
+    generate_haps_k_onward(var_cluster, 0)
+}
+
 fn extract_var_cluster(read_seq: &Vec<char>,
                        ref_seq: &Vec<char>,
                        var_cluster: Vec<Var>,
@@ -501,34 +546,39 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         .to_vec();
 
     let mut max_score: LogProb = LogProb::ln_zero();
-    let mut max_hap: usize = 0;
+    let mut max_hap: Vec<u8> = vec![0u8; var_cluster.len()];
     let n_vars: usize = var_cluster.len() as usize; // number of variants in cluster
-    let n_haps: usize = 2usize.pow(n_vars as u32); // number of possible haplotypes for cluster
     assert!(n_vars <= extract_params.short_hap_max_snvs);
 
-    let in_hap = |var: usize, hap: usize| (hap & 2usize.pow(var as u32)) > 0;
+    // allele_scores[i][j] contains the Log sum of the probabilities of all short haplotypes
+    // that had the jth allele at the ith variant of the cluster.
+    let mut allele_scores: Vec<Vec<LogProb>> = Vec::with_capacity(n_vars);
+    for v in 0..n_vars {
+        let n_alleles = var_cluster[v].alleles.len();
+        allele_scores.push(vec![LogProb::ln_zero(); n_alleles]);
+    }
 
-    // allele_scores0[i] contains the Log sum of the probabilities of all short haplotypes
-    // that had a '0' at the ith variant of the cluster.
-    // similarly for allele_scores1, for '1' variants.
-    let mut allele_scores0: Vec<LogProb> = vec![LogProb::ln_zero(); n_vars];
-    let mut allele_scores1: Vec<LogProb> = vec![LogProb::ln_zero(); n_vars];
     let mut score_total: LogProb = LogProb::ln_zero();
 
     if VERBOSE {
         for var in var_cluster.clone() {
-            println!("{} {} {} {}",
+            print!("{} {}",
                      var.chrom,
-                     var.pos0,
-                     var.ref_allele,
-                     var.var_allele);
+                     var.pos0);
+            for allele in var.alleles {
+                print!(" {}", allele);
+            }
+            println!("");
         }
         let read_seq_str: String = read_window.clone().into_iter().collect();
         println!("read: {}", read_seq_str);
     }
 
+    let haps = generate_haps(&var_cluster);
 
-    for hap in 0..n_haps {
+    for ref hap in haps {
+
+        assert!(hap.len() > 0);
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
         for var in 0..n_vars {
@@ -536,16 +586,12 @@ fn extract_var_cluster(read_seq: &Vec<char>,
                 hap_window.push(ref_seq[i]);
                 i += 1;
             }
-            if in_hap(var, hap) {
-                for c in var_cluster[var].var_allele.chars() {
-                    hap_window.push(c);
-                }
-            } else {
-                for c in var_cluster[var].ref_allele.chars() {
-                    hap_window.push(c);
-                }
+
+            for c in var_cluster[var].alleles[hap[var] as usize].chars() {
+                hap_window.push(c);
             }
-            i += var_cluster[var].ref_allele.len();
+
+            i += var_cluster[var].alleles[0].len();
         }
 
         while i <= anchors.right_anchor_ref as usize {
@@ -556,80 +602,79 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         // we now want to score hap_window
         let score: LogProb = match extract_params.alignment_type{
             AlignmentType::NumericallyStableAllAlignment => {
-                realignment::sum_all_alignments_numerically_stable(&read_window,
+                sum_all_alignments_numerically_stable(&read_window,
                                                                    &hap_window,
                                                                    align_params.ln(),
                                                                    extract_params.band_width)
             }
             AlignmentType::FastAllAlignment => {
-                realignment::sum_all_alignments(&read_window,
+                sum_all_alignments(&read_window,
                                                 &hap_window,
                                                 align_params,
                                                 extract_params.band_width)
             }
             AlignmentType::MaxAlignment => {
-                realignment::max_alignment(&read_window,
+                max_alignment(&read_window,
                                            &hap_window,
                                            align_params.ln(),
                                            extract_params.band_width)
             }
         };
 
+        assert!(score > LogProb::ln_zero());
+
         for var in 0..n_vars {
-            if in_hap(var, hap) {
-                allele_scores1[var] = LogProb::ln_add_exp(allele_scores1[var], score);
-            } else {
-                allele_scores0[var] = LogProb::ln_add_exp(allele_scores0[var], score);
-            }
+
+            allele_scores[var][hap[var] as usize] = LogProb::ln_add_exp(allele_scores[var][hap[var] as usize], score);
+
         }
         if VERBOSE {
             let hap_seq_str: String = hap_window.into_iter().collect();
-            println!("hap:{} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
+            println!("hap:{:?} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
         }
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
 
         if score > max_score {
             max_score = score;
-            max_hap = hap;
+            max_hap = hap.clone();
         }
     }
 
 
     for v in 0..n_vars {
-        if in_hap(v, max_hap) {
-            // the best haplotype has a '1' variant allele at this position
 
-            // quality score is the probability call is wrong, in other words the ratio of the
-            // sum of haplotype scores that had a '0' here over the total sum of scores
-            let qual = allele_scores0[v] - score_total;
-            if VERBOSE {
-                println!("adding call: {} {} {} {}; allele = 1; qual = {};", var_cluster[v].chrom, var_cluster[v].pos0, var_cluster[v].ref_allele, var_cluster[v].var_allele, *Prob::from(qual));
-            }
-            calls.push(FragCall {
-                frag_ix: None,
-                var_ix: var_cluster[v].ix,
-                allele: '1',
-                qual: qual,
-                one_minus_qual: LogProb::ln_one_minus_exp(&qual)
-            });
-        } else {
-            // the best haplotype has a '0' ref allele at this position
+        let best_allele = max_hap[v];
+        assert_ne!(allele_scores[v][best_allele as usize], LogProb::ln_zero());
+        let mut qual = LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
 
-            // quality score is the probability call is wrong, in other words the ratio of the
-            // sum of haplotype scores that had a '1' here over the total sum of scores
-            let qual = allele_scores1[v] - score_total;
-            if VERBOSE {
-                println!("adding call: {} {} {} {}; allele = 0; qual = {};", var_cluster[v].chrom, var_cluster[v].pos0, var_cluster[v].ref_allele, var_cluster[v].var_allele, *Prob::from(qual));
-            }
-            calls.push(FragCall {
-                frag_ix: None,
-                var_ix: var_cluster[v].ix,
-                allele: '0',
-                qual: qual,
-                one_minus_qual: LogProb::ln_one_minus_exp(&qual)
-            });
+        //assert_ne!(qual, LogProb::ln_zero());
+
+        // TODO: BUG: qual should never ever be 0.
+        // need to investigate why this happens
+        if qual == LogProb::ln_zero() {
+            //eprintln!("WARNING: Qual being set to ln(0.00001) due to zero-probability value.");
+            qual = LogProb::from(Prob(0.00001));
         }
+
+        if VERBOSE {
+            print!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
+            for allele in &var_cluster[v].alleles {
+                print!(" {}", allele);
+            }
+
+            print!("; allele = {};", best_allele);
+            println!(" qual = {};", *Prob::from(qual));
+
+        }
+
+        calls.push(FragCall {
+            frag_ix: None,
+            var_ix: var_cluster[v].ix,
+            allele: best_allele,
+            qual: qual,
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+        });
     }
 
     if VERBOSE {
@@ -663,6 +708,7 @@ pub fn extract_fragment(bam_record: &Record,
 
     if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
         bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
+        || bam_record.is_supplementary()
         {
             return fragment;
         }
@@ -748,6 +794,33 @@ pub fn extract_fragment(bam_record: &Record,
     let mut new_var_ix: HashMap<usize, usize> = HashMap::with_capacity(extract_params.short_hap_max_snvs);
 
     for (anchors, var_cluster) in cluster_lst {
+
+        if IGNORE_INDEL_ONLY_CLUSTERS {
+            let mut seen_snv = false;
+            for var in var_cluster.iter() {
+                if seen_snv {
+                    break;
+                }
+                for allele in var.alleles[1..].iter() {
+                    if allele.len() == var.alleles[0].len() {
+                        let mut diff = 0;
+                        for (c1, c2) in allele.chars().zip(var.alleles[0].chars()) {
+                            if c1 != c2 {
+                                diff += 1;
+                            }
+                        }
+                        if diff == 1 {
+                            seen_snv = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !seen_snv {
+                continue;
+            }
+        }
 
         // some new variants may have been added after performing POA multiple sequence alignment.
         // if these new variants are too close to existing variant cluster, they will all need to be
@@ -992,5 +1065,117 @@ pub fn extract_fragments(bamfile_name: &String,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use genotype_probs::*;
 
+    fn generate_var2(ix: usize, tid: usize, chrom: String, pos0: usize, alleles: Vec<String>) -> Var {
+        Var {
+            ix: ix,
+            old_ix: None,
+            tid: tid,
+            chrom: chrom,
+            pos0: pos0,
+            alleles: alleles,
+            dp: 40,
+            allele_counts: vec![20,20],
+            ambiguous_count: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: Genotype(0,1),
+            gq: 0.0,
+            genotype_post: GenotypeProbs::uniform(2),
+            phase_set: None,
+            mec: 0,
+            mec_frac: 0.0,
+            called: true
+        }
+    }
+
+    #[test]
+    fn test_generate_haplotypes_basic() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8],
+                           vec![1u8]];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
+
+    #[test]
+    fn test_generate_haplotypes_multivariant() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string()]));
+        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8,0u8,0u8],
+                       vec![0u8,0u8,1u8],
+                       vec![0u8,1u8,0u8],
+                       vec![1u8,0u8,0u8],
+                       vec![1u8,1u8,0u8],
+                       vec![0u8,1u8,1u8],
+                       vec![1u8,0u8,1u8],
+                       vec![1u8,1u8,1u8]];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
+
+    #[test]
+    fn test_generate_haplotypes_multiallelic() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8,0u8],
+                           vec![0u8,1u8],
+                           vec![1u8,0u8],
+                           vec![1u8,1u8],
+                           vec![0u8,2u8],
+                           vec![1u8,2u8]];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
+
+    #[test]
+    fn test_generate_haplotypes_multiallelic2() {
+        let mut lst1: Vec<Var> = vec![];
+        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+        lst1.push( generate_var2(1, 0, "chr1".to_string(), 200, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+
+        let mut haps = generate_haps(&lst1);
+
+        haps.sort();
+        let mut exp = vec![vec![0u8,0u8,0u8],
+                           vec![0u8,0u8,1u8],
+                           vec![0u8,0u8,2u8],
+                           vec![0u8,1u8,0u8],
+                           vec![0u8,1u8,1u8],
+                           vec![0u8,1u8,2u8],
+                           vec![0u8,2u8,0u8],
+                           vec![0u8,2u8,1u8],
+                           vec![0u8,2u8,2u8],
+                           vec![1u8,0u8,0u8],
+                           vec![1u8,0u8,1u8],
+                           vec![1u8,0u8,2u8],
+                           vec![1u8,1u8,0u8],
+                           vec![1u8,1u8,1u8],
+                           vec![1u8,1u8,2u8],
+                           vec![1u8,2u8,0u8],
+                           vec![1u8,2u8,1u8],
+                           vec![1u8,2u8,2u8],];
+
+        exp.sort();
+        assert_eq!(haps, exp);
+    }
 }
+

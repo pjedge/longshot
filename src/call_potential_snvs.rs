@@ -4,37 +4,39 @@ use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use bio::io::fasta;
 use std::char;
-use util::{LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
+use util::*; // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
+use variants_and_fragments::*;
 use rust_htslib::bam::pileup::Indel;
 use std::collections::{HashMap,HashSet};
 use bio::stats::{LogProb, Prob};
-use call_genotypes::{estimate_genotype_priors, calculate_genotypes_without_haplotypes};
+use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
 use spoa::poa_multiple_sequence_alignment;
 use std::ascii::AsciiExt;
+use realignment::{LnAlignmentParameters};
 
 use std::str;
 use bio::alignment::Alignment;
 use bio::alignment::pairwise::banded::*;
 use bio::alignment::AlignmentOperation::*;
-//use bio::alignment::sparse::hash_kmers;
-//use bio::alignment::pairwise::{MIN_SCORE, Scoring};
-//use bio::alignment::AlignmentOperation::*;
+use genotype_probs::*;
 
 static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
+static POTENTIAL_SNV_MIN_PROB: f64 = 0.001;
 
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
                            interval: &Option<GenomicInterval>,
+                           genotype_priors: &GenotypePriors,
                            max_coverage: Option<u32>,
                            min_mapq: u8,
+                           max_p_miscall: f64,
                            ln_align_params: LnAlignmentParameters)
                            -> VarList {
 
-    let potential_snv_qual = LogProb::from(Prob(0.5));
+    let potential_snv_qual = LogProb::from(Prob(POTENTIAL_SNV_MIN_PROB));
     let target_names = parse_target_names(&bam_file);
 
-    let genotype_priors = estimate_genotype_priors();
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
@@ -203,28 +205,35 @@ pub fn call_potential_snvs(bam_file: &String,
         // vectors contain entries with (call, qual)
         // call is '0' or '1' (or potentially '2'...)
         // qual is a LogProb probability of miscall
-        let mut snv_pileup_calls: Vec<(char, LogProb)> = vec![];
+        let mut snv_pileup_calls: Vec<FragCall> = vec![];
         //let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
 
         for (ref_allele, var_allele) in pileup_alleles {
 
-            if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
-                let qual = ln_align_params.emission_probs.not_equal;
-                snv_pileup_calls.push(('1', qual));
-            }
+            let a = if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
+                1u8
+            } else {
+                0u8
+            };
 
-            if (ref_allele.clone(), var_allele.clone()) == (ref_allele.clone(), ref_allele.clone()){
-                let qual = ln_align_params.emission_probs.not_equal;
+            let qual = ln_align_params.emission_probs.not_equal;
 
-                snv_pileup_calls.push(('0', qual));
-                //indel_pileup_calls.push(('0', qual));
-            }
+            let call =  FragCall {
+                frag_ix: None, // index into fragment list
+                var_ix: 0, // index into variant list
+                allele: a, // allele call
+                qual: qual, // LogProb probability the call is an error
+                one_minus_qual: LogProb::ln_one_minus_exp(&qual), // LogProb probability the call is correct
+            };
+            snv_pileup_calls.push(call);
+
         }
 
         // use a basic genotype likelihood calculation to call SNVs
+        let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
         let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
-            let (_snv_post00, snv_post01, snv_post11) = calculate_genotypes_without_haplotypes(&snv_pileup_calls, &genotype_priors, &snv_ref_allele, &snv_var_allele);
-            LogProb::ln_add_exp(snv_post01, snv_post11)
+            let snv_post = calculate_genotype_posteriors_no_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles, max_p_miscall);
+            LogProb::ln_one_minus_exp(&snv_post.get(Genotype(0,0)))
         } else {
             LogProb::ln_zero()
         };
@@ -247,21 +256,16 @@ pub fn call_potential_snvs(bam_file: &String,
                 tid: tid,
                 chrom: target_names[tid].clone(),
                 pos0: pos,
-                ref_allele: ref_allele.clone(),
-                var_allele: var_allele.clone(),
+                alleles: vec![ref_allele.clone(), var_allele.clone()],
                 dp: depth,
-                ra: 0,
-                aa: 0,
-                na: 0,
+                allele_counts: vec![0, 0],
+                ambiguous_count: 0,
                 qual: 0.0,
                 filter: ".".to_string(),
-                genotype: "./.".to_string(),
+                genotype: Genotype(0,0),
                 gq: 0.0,
-                genotype_post: [LogProb::from(Prob(0.25)); 4],
+                genotype_post: GenotypeProbs::uniform(2),
                 phase_set: None,
-                indel_site: false,
-                mec: 0,
-                mec_frac: 0.0,
                 called: false
             };
 
@@ -310,21 +314,16 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     tid: tid,
                     chrom: chrom.clone(),
                     pos0: l_ref + ref_pos,
-                    ref_allele: (ref_window[ref_pos] as char).to_string(),
-                    var_allele: (consensus[read_pos] as char).to_string(),
+                    alleles: vec![(ref_window[ref_pos] as char).to_string(), (consensus[read_pos] as char).to_string()],
                     dp: depth,
-                    ra: 0,
-                    aa: 0,
-                    na: 0,
+                    allele_counts: vec![0,0],
+                    ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
-                    genotype: "1/1".to_string(), // this will be refined later
+                    genotype: Genotype(0,0), // this will be refined later
                     gq: 0.0,
-                    genotype_post: [LogProb::from(Prob(0.25)); 4],
+                    genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    indel_site: false,
-                    mec: 0,
-                    mec_frac: 0.0,
                     called: false
                 };
                 new_vars.push(new_var);
@@ -350,21 +349,16 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     tid: tid,
                     chrom: chrom.clone(),
                     pos0: l_ref + ref_pos,
-                    ref_allele: u8_to_string(&ref_allele),
-                    var_allele: u8_to_string(&var_allele),
+                    alleles: vec![u8_to_string(&ref_allele), u8_to_string(&var_allele)],
                     dp: depth,
-                    ra: 0,
-                    aa: 0,
-                    na: 0,
+                    allele_counts: vec![0,0],
+                    ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
-                    genotype: "1/1".to_string(), // this will be refined later
+                    genotype: Genotype(0,0), // this will be refined later
                     gq: 0.0,
-                    genotype_post: [LogProb::from(Prob(0.25)); 4],
+                    genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    indel_site: false,
-                    mec: 0,
-                    mec_frac: 0.0,
                     called: false
                 };
                 new_vars.push(new_var);
@@ -390,21 +384,16 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     tid: tid,
                     chrom: chrom.clone(),
                     pos0: l_ref + ref_pos,
-                    ref_allele: u8_to_string(&ref_allele),
-                    var_allele: u8_to_string(&var_allele),
+                    alleles: vec![u8_to_string(&ref_allele), u8_to_string(&var_allele)],
                     dp: depth,
-                    ra: 0,
-                    aa: 0,
-                    na: 0,
+                    allele_counts: vec![0,0],
+                    ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
-                    genotype: "1/1".to_string(), // this will be refined later
+                    genotype: Genotype(0,0), // this will be refined later
                     gq: 0.0,
-                    genotype_post: [LogProb::from(Prob(0.25)); 4],
+                    genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    indel_site: false,
-                    mec: 0,
-                    mec_frac: 0.0,
                     called: false
                 };
                 new_vars.push(new_var);
@@ -442,7 +431,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                                    _max_coverage: Option<u32>,
                                    min_mapq: u8,
                                    _ln_align_params: LnAlignmentParameters)
-                                    -> Vec<Var> {
+                                    -> VarList {
 
     //let potential_snv_qual = LogProb::from(Prob(0.5));
     let target_names = parse_target_names(&bam_file);
@@ -512,9 +501,9 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h1_read_seqs: Vec<Vec<u8>> = vec![];
         let mut h2_read_seqs: Vec<Vec<u8>> = vec![];
 
-        let mut all_seq_count = 0;
-        let mut h1_seq_count = 0;
-        let mut h2_seq_count = 0;
+        let mut all_seq_count: usize = 0;
+        let mut h1_seq_count: usize = 0;
+        let mut h2_seq_count: usize= 0;
 
         // pileup the bases for a single position and count number of each base
         for alignment in pileup.alignments() {
@@ -523,7 +512,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
                 record.is_quality_check_failed() ||
-                record.is_duplicate() {
+                record.is_duplicate() || record.is_supplementary() {
                 continue;
             }
 
@@ -589,7 +578,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             println!("-------");
         }
 
-        
+
 
         let score = |a: u8, b: u8| if a == b {5i32} else {-4i32};
         let k = 6;  // kmer match length
@@ -602,7 +591,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
             let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&h1_read_seqs, ref_window_nullterm.clone(),
-                                            h1_seq_count as i32 / 2,&mut consensus_h1, alignment_type,
+                                            1i32,&mut consensus_h1, alignment_type, //  (h1_seq_count/2) as i32
                                             match_score, mismatch_score, gap_score);
             let h1_alignment = aligner.local(&consensus_h1, &ref_window);
             //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
@@ -622,7 +611,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let mut h2_vars: Option<Vec<Var>> = if h2_seq_count >= min_reads {
             let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&h2_read_seqs, ref_window_nullterm.clone(),
-                                            h2_seq_count as i32 / 2,&mut consensus_h2, alignment_type,
+                                            1i32,&mut consensus_h2, alignment_type, // (h1_seq_count/2) as i32
                                             match_score, mismatch_score, gap_score);
             let h2_alignment = aligner.local(&consensus_h2, &ref_window);
             //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
@@ -644,7 +633,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                                              && all_seq_count >= min_reads {
             let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
-                                            all_seq_count as i32 / 2,
+                                            1i32, // (all_seq_count/2) as i32
                                             &mut consensus_all, alignment_type,
                                             match_score, mismatch_score, gap_score);
             let all_alignment = aligner.local(&consensus_all, &ref_window);
@@ -679,7 +668,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 &Some(ref vars) => {
                     println!("H1 VARS:");
                     for var in vars {
-                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.alleles[0], var.alleles[1]);
                     }
                 },
                 &None => {}
@@ -689,7 +678,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 &Some(ref vars) => {
                     println!("H2 VARS:");
                     for var in vars {
-                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
+                        println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.alleles[0], var.alleles[1]);
                     }
                 },
                 &None => {}
@@ -714,5 +703,5 @@ pub fn call_potential_variants_poa(bam_file: &String,
 
         prev_tid = tid;
     }
-    varlist
+    VarList::new(varlist)
 }

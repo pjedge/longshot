@@ -1,33 +1,14 @@
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{VarList, Fragment, FragCall, GenomicInterval};
+use util::{MAX_VCF_QUAL, GenomicInterval};
+use variants_and_fragments::*;
+use print_output::*;
+use genotype_probs::*;
+
 use haplotype_assembly::{generate_flist_buffer, call_hapcut2};
-use std::collections::HashMap;
-use std::error::Error;
-use std::io::prelude::*;
-use std::fs::File;
-use std::path::Path;
 use chrono::prelude::*;
 
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
-
-// THESE SHOULD BE COMMAND LINE PARAMS
-static MAX_P_MISCALL_F64: f64 = 0.2;
-static MIN_GQ_FOR_PHASING: f64 = 50.0;
-
-fn generate_simple_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<(char,LogProb)>> {
-    let mut pileup_lst: Vec<Vec<(char,LogProb)>> = vec![vec![]; n_var];
-
-    for fragment in flist {
-        for call in fragment.clone().calls {
-            //if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
-            pileup_lst[call.var_ix].push((call.allele, call.qual));
-            //}
-        }
-    }
-    pileup_lst
-}
-
 
 fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
@@ -42,244 +23,106 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
     pileup_lst
 }
 
-pub fn estimate_genotype_priors() -> HashMap<(char, (char, char)), LogProb>{
-    // estimate prior probability of genotypes using strategy described here:
-    // http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
-    // "prior probability of each genotype"
-    let het_snp_rate = LogProb::from(Prob(0.0005));
-    let hom_snp_rate = LogProb::from(Prob(0.001));
-
-    // key of diploid_genotype_priors is (char,(char,char)) (ref_allele, G=(allele1,allele2))
-    // key of haploid priors is (char, char) which is (ref_allele, allele1)
-    let mut diploid_genotype_priors: HashMap<(char,(char,char)), LogProb> = HashMap::new();
-    let mut haploid_genotype_priors: HashMap<(char,char), LogProb> = HashMap::new();
-
-    // define base transitions
-    let mut transition: HashMap<char, char> = HashMap::new();
-    transition.insert('A','G');
-    transition.insert('G','A');
-    transition.insert('T','C');
-    transition.insert('C','T');
-
-    let alleles: Vec<char> = vec!['A','C','G','T'];
-    let genotypes: Vec<(char,char)> = vec![('A', 'A'), ('A', 'C'), ('A', 'G'), ('A', 'T'),
-                                       ('C', 'C'), ('C', 'G'), ('C', 'T'),
-                                       ('G', 'G'), ('G', 'T'),
-                                       ('T', 'T')];
-
-
-    for aref in &alleles {
-        let allele = *aref;
-        // priors on haploid alleles
-        haploid_genotype_priors.insert((allele,allele), LogProb::ln_one_minus_exp(&hom_snp_rate));
-        haploid_genotype_priors.insert((allele,*transition.get(&allele).unwrap()), hom_snp_rate + LogProb::from(Prob(4.0/6.0)));
-
-        for tref in &alleles{
-            let transversion = *tref;
-            if haploid_genotype_priors.contains_key(&(allele,transversion)){
-                continue;
-            }
-            haploid_genotype_priors.insert((allele,transversion), hom_snp_rate + LogProb::from(Prob(1.0/6.0)));
-
-        }
-
-        for gt in &genotypes {
-            let (g1, g2) = *gt;
-            // probability of homozygous reference is the probability of neither het or hom SNP
-            if g1 == g2 && g1 == allele {
-                let snp_rate = LogProb::ln_add_exp(het_snp_rate, hom_snp_rate);
-                let one_minus_snp_rate = LogProb::ln_one_minus_exp(&snp_rate);
-                diploid_genotype_priors.insert((allele,*gt), one_minus_snp_rate);
-            } else if g1 == g2 && g1 != allele {
-                // transitions are 4 times as likely as transversions
-                if g1 == *transition.get(&allele).unwrap() {
-                    diploid_genotype_priors.insert((allele,*gt), het_snp_rate + LogProb::from(Prob(4.0/6.0)));
-                }else {
-                    diploid_genotype_priors.insert((allele,*gt), het_snp_rate + LogProb::from(Prob(1.0/6.0)));
-                }
-            } else { // else it's the product of the haploid priors
-                diploid_genotype_priors.insert((allele,*gt), *haploid_genotype_priors.get(&(allele,g1)).unwrap() +
-                                                     *(haploid_genotype_priors.get(&(allele,g2))).unwrap());
-            }
-        }
-    }
-
-    diploid_genotype_priors
-}
-
-fn count_alleles(pileup: &Vec<FragCall>) -> (usize, usize, usize) {
+fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64) -> (Vec<usize>, usize) {
     // compute probabilities of data given each genotype
-    let mut count0 = 0;
-    let mut count1 = 0;
+    let mut counts: Vec<usize> = vec![0; num_alleles];
     let mut count_amb = 0; // ambiguous
-    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
     for call in pileup {
-        match call.allele {
-            '0' => {
-                if call.qual < ln_max_p_miscall {
-                    //println!("{}",*Prob::from(call.qual));
-                    count0 += 1;
-                } else {
-                    count_amb += 1;
-                }
-            }
-            '1' => {
-                if call.qual < ln_max_p_miscall {
-                    //println!("{}",*Prob::from(call.qual));
-                    count1 += 1;
-                } else {
-                    count_amb += 1;
-                }
-            }
-            _ => {
-                panic!("Unexpected allele observed in pileup.");
-            }
-        }
-    }
-
-    (count0, count1, count_amb)
-}
-
-struct HapPost {
-    post00: LogProb,
-    post01: LogProb,
-    post10: LogProb,
-    post11: LogProb,
-}
-
-pub fn calculate_genotypes_without_haplotypes(pileup: &Vec<(char, LogProb)>,
-                                          genotype_priors: &HashMap<(char, (char, char)),LogProb>,
-                                          ref_allele: &String,
-                                          var_allele: &String) -> (LogProb, LogProb, LogProb) {
-
-    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
-    let ln_half = LogProb::from(Prob(0.5));
-    let mut priors: Vec<LogProb> = vec![LogProb::from(Prob(0.25)); 4];
-
-    for g in 0..4 {
-        if ref_allele.len() == 1 && var_allele.len() == 1 {
-
-            let ra = ref_allele.chars().nth(0).unwrap();
-            let g1 = if g == 0 || g == 1 { ref_allele.chars().nth(0).unwrap() } else { var_allele.chars().nth(0).unwrap() };
-            let g2 = if g == 0 || g == 2 { ref_allele.chars().nth(0).unwrap() } else { var_allele.chars().nth(0).unwrap() };
-
-            match genotype_priors.get(&(ra, (g1, g2))) {
-                Some(p) => {
-                    priors[g] = if g == 1 || g == 2 {ln_half+*p} else {*p};
-                },
-                None => {
-                    match genotype_priors.get(&(ra, (g2, g1))) {
-                        Some(p) => {
-                            priors[g] = if g == 1 || g == 2 {ln_half+*p} else {*p};
-                        },
-                        None => { println!("{} ({},{})",ra,g2,g1); panic!("Genotype not in genotype priors."); }
-                    };
-                }
-            }
+        if call.qual < ln_max_p_miscall {
+            counts[call.allele as usize] += 1;
         } else {
-            // we just assume that the rate of indels is 1e-4
-            priors[0] = LogProb::from(Prob(0.9999));
-            priors[1] = LogProb::from(Prob(0.0001 / 3.0));
-            priors[2] = LogProb::from(Prob(0.0001 / 3.0));
-            priors[3] = LogProb::from(Prob(0.0001 / 3.0));
+            count_amb += 1;
         }
     }
 
-    // compute probabilities of data given each genotype
-    let mut prob00 = priors[0];
-    let mut prob01 = LogProb::ln_add_exp(priors[1], priors[2]);
-    let mut prob11 = priors[3];
+    (counts, count_amb)
+}
 
-    for &(allele, qual) in pileup {
+pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
+                                                   genotype_priors: &GenotypePriors,
+                                                   alleles: &Vec<String>,
+                                                   max_p_miscall: f64) -> GenotypeProbs {
 
-        if qual >= ln_max_p_miscall {
+    let ln_max_p_miscall: LogProb = LogProb::from(Prob(max_p_miscall));
+    let ln_half: LogProb = LogProb::from(Prob(0.5));
+
+    // this matrix holds P(data | g) * p(g)
+    let mut probs: GenotypeProbs = genotype_priors.get_all_priors(alleles);
+
+    for &call in pileup {
+
+        let allele = call.allele;
+        let p_miscall = call.qual;
+        let p_call = call.one_minus_qual;
+
+        if p_miscall >= ln_max_p_miscall {
             continue;
         }
 
-        let p_call = LogProb::ln_sub_exp(LogProb::ln_one(), qual);
-        let p_miscall = qual;
-
-        match allele {
-            '0' => {
-                prob00 = prob00 + p_call;
-                prob01 = prob01 + LogProb::ln_add_exp(ln_half + p_call, ln_half + p_miscall);
-                prob11 = prob11 + p_miscall;
-            }
-            '1' => {
-                prob00 = prob00 + p_miscall;
-                prob01 = prob01 + LogProb::ln_add_exp(ln_half + p_call, ln_half + p_miscall);
-                prob11 = prob11 + p_call;
-            }
-            _ => {
-                panic!("Unexpected allele observed in pileup.");
+        // for each possible genotype, update the P(data | g) * p(g)
+        for g in possible_genotypes(alleles) {
+            if g.0 == allele && g.1 == allele {
+                probs.ln_times_equals(g, p_call);
+            } else if g.0 != allele && g.1 != allele {
+                probs.ln_times_equals(g, p_miscall);
+            } else {
+                let p_het = LogProb::ln_add_exp(ln_half + p_call, ln_half + p_miscall);
+                probs.ln_times_equals(g, p_het);
             }
         }
     }
 
-    // sum of data probabilities
-    let posts: Vec<LogProb> = vec![prob00, prob01, prob11];
-    let total = LogProb::ln_sum_exp(&posts);
+    // posterior probabilities
+    let posts = probs.normalize();
 
-    // genotype posterior probabilities
-    let post00 = prob00 - total;
-    let post01 = prob01 - total;
-    let post11 = prob11 - total;
-
-    (post00, post01, post11)
+    posts
 }
 
-pub fn call_realigned_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList) {
-    let pileup_lst = generate_simple_pileup(&flist, varlist.lst.len());
+pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) {
+    let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
 
     assert_eq!(pileup_lst.len(), varlist.lst.len());
-
-    let genotype_priors = estimate_genotype_priors();
 
     for i in 0..varlist.lst.len() {
         let pileup = &pileup_lst[i];
         let var = &mut varlist.lst[i];
 
+        let posts: GenotypeProbs = calculate_genotype_posteriors_no_haplotypes(&pileup,
+                                                                               &genotype_priors,
+                                                                               &var.alleles,
+                                                                               max_p_miscall);
 
-        let (post00, post01, post11): (LogProb, LogProb, LogProb) = calculate_genotypes_without_haplotypes(&pileup,
-                                                                                                           &genotype_priors,
-                                                                                                           &var.ref_allele,
-                                                                                                           &var.var_allele);
+        let (max_g, max_post) = posts.max_genotype(false);
 
-        let genotype: String;
-        let genotype_qual: f64;
+        let genotype_qual:f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
-        if post00 > post01 && post00 > post11 {
-            let p_call_wrong = LogProb::ln_add_exp(post01, post11);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "0/0".to_string();
-        } else if post01 > post00 && post01 > post11 {
-            let p_call_wrong = LogProb::ln_add_exp(post00, post11);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "0/1".to_string();
-        } else {
-            let p_call_wrong = LogProb::ln_add_exp(post00, post01);
-            genotype_qual = *PHREDProb::from(p_call_wrong);
-            genotype = "1/1".to_string();
+        var.qual = *PHREDProb::from(posts.get(Genotype(0,0)));
+        if var.qual > MAX_VCF_QUAL {
+            var.qual = MAX_VCF_QUAL;
+        }
+        var.genotype = max_g;
+        var.gq = genotype_qual;
+        if var.gq > MAX_VCF_QUAL {
+            var.gq = MAX_VCF_QUAL;
         }
 
-        //let (count_ref, count_var): (usize, usize) = count_alleles(&pileup);
-
-        var.qual = *PHREDProb::from(post00);
-        var.ra = 0;
-        var.aa = 0;
-        var.genotype = genotype.clone();
-        var.gq = genotype_qual;
+        var.phase_set = None;
     }
 }
 
-pub fn call_genotypes(flist: &mut Vec<Fragment>,
-                      varlist: &mut VarList,
-                      interval: &Option<GenomicInterval>,
-                      variant_debug_directory: &Option<String>,
-                      program_step: usize) {
+pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
+                                      varlist: &mut VarList,
+                                      interval: &Option<GenomicInterval>,
+                                      genotype_priors: &GenotypePriors,
+                                      variant_debug_directory: &Option<String>,
+                                      program_step: usize,
+                                      max_cov: Option<u32>,
+                                      max_p_miscall: f64,
+                                      min_hap_gq: f64,
+                                      max_iters_since_improvement: usize) {
 
-    let genotype_priors = estimate_genotype_priors();
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
     assert_eq!(pileup_lst.len(), varlist.lst.len());
@@ -287,7 +130,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
     let max_iterations: usize = 1000000;
     //let sample_every: usize = 1;
     let ln_half = LogProb::from(Prob(0.5));
-    let mut rng: StdRng = StdRng::from_seed(&[1]);
+    let mut rng: StdRng = StdRng::from_seed(&[0]);
     let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     let hap_ixs = vec![0, 1];
@@ -302,33 +145,32 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
         }
     }
 
-    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
-    let mut haps: Vec<Vec<char>> = vec![vec!['0'; n_var]; 2];
-    //let mut prev_total_likelihood = LogProb::ln_zero();
-    let mut prev_num_phased = 0;
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
+    let mut haps: Vec<Vec<u8>> = vec![vec![0u8; n_var]; 2];
+    let mut prev_best_likelihood = LogProb::ln_zero();
+    let mut best_varlist_bak = (*varlist).clone();
+    let mut iters_since_improvement = 0;
 
     for hapcut2_iter in 0..max_iterations {
-
-        //let varlist_bak = (*varlist).clone();
 
         // print the haplotype assembly iteration
         eprintln!("{}    Round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
 
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
         let mut vcf_buffer: Vec<Vec<u8>> = Vec::with_capacity(varlist.lst.len());
-        let mut hap1: Vec<u8> = vec![0u8; varlist.lst.len()];
+        let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
 
         for i in 0..varlist.lst.len() {
 
             let var = &varlist.lst[i];
-            if (var.genotype == "0/1" || var.genotype == "0|1" || var.genotype == "1|0")
-                && var.ref_allele.len() == 1 && var.var_allele.len() == 1
-                && var.gq > MIN_GQ_FOR_PHASING {
+            if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
+                && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
+                && var.gq > min_hap_gq {
                 var_phased[i] = true;
 
-                if var.genotype == "0|1" {
+                if var.genotype == Genotype(0,1) {
                     hap1[i] = '0' as u8;
-                } else if var.genotype == "1|0" {
+                } else if var.genotype == Genotype(1,0) {
                     hap1[i] = '1' as u8;
                 } else {
                     if rng.next_f64() < 0.5 {
@@ -341,15 +183,16 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                 hap1[i] = '-' as u8;
             }
 
-            let line: String = format!("{}\t{}\t.\t{}\t{}\t.\t.\tRA={};AA={}\tGT:GQ\t{}:{}",
+            let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join("/");
+            let line: String = format!("{}\t{}\t.\t{}\t{}\t.\t.\t.\tGT:GQ\t{}:{}",
                                        var.chrom,
                                        var.pos0 + 1,
-                                       var.ref_allele,
-                                       var.var_allele,
-                                       0,
-                                       0,
-                                       var.genotype,
+                                       var.alleles[0],
+                                       var.alleles[1],
+                                       genotype_str,
                                        var.gq);
+
+            //println!("{}", line);
 
             let mut vcf_line: Vec<u8> = vec![];
             for u in line.into_bytes() {
@@ -360,7 +203,7 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
             vcf_buffer.push(vcf_line);
         }
 
-        let frag_buffer = generate_flist_buffer(&flist, &var_phased);
+        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall);
         let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
 
         call_hapcut2(&frag_buffer,
@@ -385,7 +228,8 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
         for i in 0..hap1.len() {
             match hap1[i] as char {
                 '0' => {
-                    varlist.lst[i].genotype = "0|1".to_string();
+                    varlist.lst[i].genotype = Genotype(0,1);
+
                     if phase_sets[i] >= 0 {
                         varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
                     } else {
@@ -393,46 +237,30 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                     }
                 }
                 '1' => {
-                    varlist.lst[i].genotype = "1|0".to_string();
+                    varlist.lst[i].genotype = Genotype(1,0);
+
                     if phase_sets[i] >= 0 {
                         varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
                     } else {
                         varlist.lst[i].phase_set = None;
                     }
                 }
-                _ => {}
-            }
-        }
-
-        for v in 0..varlist.lst.len() {
-            let var = &mut varlist.lst[v];
-
-
-            if var.genotype == "0|0".to_string() || var.genotype == "0/0".to_string() {
-                haps[0][v] = '0';
-                haps[1][v] = '0';
-            } else if var.genotype == "0|1".to_string() {
-                haps[0][v] = '0';
-                haps[1][v] = '1';
-            } else if var.genotype == "1|0".to_string() {
-                haps[0][v] = '1';
-                haps[1][v] = '0';
-            } else if var.genotype == "1|1".to_string() || var.genotype == "1/1".to_string() {
-                haps[0][v] = '1';
-                haps[1][v] = '1';
-            } else if var.genotype == "0/1".to_string() || var.genotype == "1/0".to_string() {
-                if rng.next_f64() < 0.5 {
-                    haps[0][v] = '0';
-                    haps[1][v] = '1';
-                } else {
-                    haps[0][v] = '1';
-                    haps[1][v] = '0';
+                _ => {
+                    var_phased[i] = false;
                 }
-            } else {
-                panic!("Invalid genotype string \"{}\" in Gibbs Sampler genotyping.", var.genotype);
+            }
+
+            haps[0][i] = varlist.lst[i].genotype.0;
+            haps[1][i] = varlist.lst[i].genotype.1;
+            // if the variant isn't phased (phase set is none) then we "flip" the haplotype
+            // alleles with 50% probability
+            if rng.next_f64() < 0.5 {
+                let temp = haps[0][i];
+                haps[0][i] = haps[1][i];
+                haps[1][i] = temp;
             }
         }
-
+        
         // p_read_hap[i][j] contains P(R_j | H_i)
         let mut p_read_hap: Vec<Vec<LogProb>> = vec![vec![LogProb::ln_one(); flist.len()]; 2];
 
@@ -466,26 +294,23 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
 
                 let var = &mut varlist.lst[v];
 
-                /*
-                match interval {
-                    &Some(ref iv) => {
-                        if var.chrom != iv.chrom ||
-                            var.pos0 < iv.start_pos as usize ||
-                            var.pos0 > iv.end_pos as usize {
-                            continue;
-                        }
-                    }
-                    &None => {}
-                }
-                */
-                let mut p_reads: [LogProb; 4] = [LogProb::ln_one(); 4];
+                assert_eq!(v, var.ix);
 
-                // let g be the current genotype being considered to switch to
-                // then p_read_g[g] contains a vector of tuples (frag_ix, p_read_h0, p_read_h1
+                let mut p_reads: GenotypeProbs = genotype_priors.get_all_priors(&var.alleles);
+
+                // let (g1,g2) be the current genotype being considered to switch to
+                // then p_read_g[g1][g2] contains a vector of tuples (frag_ix, p_read_h0, p_read_h1
                 // that have the probability of each fragment under the new genotypes
-                let mut p_read_g: Vec<Vec<(usize, LogProb, LogProb)>> = vec![vec![]; 4];
+                let mut p_reads_g: Vec<Vec<Vec<(usize, LogProb, LogProb)>>> = vec![vec![vec![]; var.alleles.len()]; var.alleles.len()];
 
-                for g in 0..4 {
+
+                // THOUGHT -- p_read_hap contains the probability of reads given haplotypes,
+                // ONLY for variants in variant_phased.
+                // so to correctly calculate p_reads for a variant, if the variant isn't in var_phased
+                // we should simply multiply in the values
+                // if it is in var phased we do the whole divide out, multiply in stuff
+                for g in var.possible_genotypes() {
+
                     for call in &pileup_lst[v] {
                         if call.qual >= ln_max_p_miscall {
                             continue;
@@ -497,151 +322,91 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
                             None => panic!("ERROR: Fragment index is missing in pileup iteration.")
                         };
 
-                        // for each haplotype allele
-                        // if that allele on the haplotype changes in g,
-                        // then we divide out the old value and multiply in the new value
+                        if var_phased[v] {
+                            // for each haplotype allele
+                            // if that allele on the haplotype changes in g = [g1,g2],
+                            // then we divide out the old value and multiply in the new value
 
-                        // haplotype 0 at site j was a '1', but now it will be '0'
-                        // if call on read was '1', we divide out (1 - q) and multiply in q
-                        // if call on read was '0', we divide out q and multiply in (1 - q)
+                            // haplotype 0 at site j will change under this genotype
+                            // therefore p_read_h0 needs to change
+                            if haps[0][v] != g.0 as u8 {
+                                if haps[0][v] == call.allele && g.0 != call.allele {
+                                    // fragment call matched old h0 but doesn't match new h0
+                                    // divide out the p(call), and multiply in p(miscall)
+                                    p_read_h0 = p_read_h0 - call.one_minus_qual + call.qual;
+                                } else if haps[0][v] != call.allele && g.0 == call.allele {
+                                    // fragment call didn't match old h0 but matches new h0
+                                    // divide out the p(miscall), and multiply in p(call)
+                                    p_read_h0 = p_read_h0 - call.qual + call.one_minus_qual;
+                                }
+                            }
 
-                        if (g == 0 || g == 1) && (haps[0][v] == '1') {
-                            if call.allele == '1' {
-                                p_read_h0 = p_read_h0 - call.one_minus_qual + call.qual;
-                            } else if call.allele == '0' {
-                                p_read_h0 = p_read_h0 - call.qual + call.one_minus_qual;
+                            // haplotype 1 at site j will change under this genotype
+                            // therefore p_read_h1 needs to change
+                            if haps[1][v] != g.1 as u8 {
+                                if haps[1][v] == call.allele && g.1 != call.allele {
+                                    // fragment call matched old h1 but doesn't match new h1
+                                    // divide out the p(call), and multiply in p(miscall)
+                                    p_read_h1 = p_read_h1 - call.one_minus_qual + call.qual;
+                                } else if haps[1][v] != call.allele && g.1 == call.allele {
+                                    // fragment call didn't match old h1 but matches new h1
+                                    // divide out the p(miscall), and multiply in p(call)
+                                    p_read_h1 = p_read_h1 - call.qual + call.one_minus_qual;
+                                }
+                            }
+
+                        } else {
+                            if g.0 == call.allele  {
+                                p_read_h0 = p_read_h0 + call.one_minus_qual;
                             } else {
-                                panic!("Unsupported allele");
+                                p_read_h0 = p_read_h0 + call.qual;
+                            }
+
+                            if g.1 == call.allele  {
+                                p_read_h1 = p_read_h1 + call.one_minus_qual;
+                            } else {
+                                p_read_h1 = p_read_h1 + call.qual;
                             }
                         }
 
-                        // haplotype 0 at site j was a '0', but now it will be '1'
-                        // if call on read was '0', we divide out (1 - q) and multiply in q
-                        // if call on read was '1', we divide out q and multiply in (1 - q)
-                        if (g == 2 || g == 3) && (haps[0][v] == '0') {
-                            if call.allele == '0' {
-                                p_read_h0 = p_read_h0 - call.one_minus_qual + call.qual;
-                            } else if call.allele == '1' {
-                                p_read_h0 = p_read_h0 - call.qual + call.one_minus_qual;
-                            } else {
-                                panic!("Unsupported allele");
+                        if var_phased[v]{
+                            match call.frag_ix {
+                                Some(frag_ix) => { p_reads_g[g.0 as usize][g.1 as usize].push((frag_ix, p_read_h0, p_read_h1)); },
+                                None => { panic!("Fragment index in pileup call is None.") },
                             }
-                        }
-
-                        // haplotype 1 at site j was a '1', but now it will be '0'
-                        // if call on read was '1', we divide out (1 - q) and multiply in q
-                        // if call on read was '0', we divide out q and multiply in (1 - q)
-
-                        if (g == 0 || g == 2) && (haps[1][v] == '1') {
-                            if call.allele == '1' {
-                                p_read_h1 = p_read_h1 - call.one_minus_qual + call.qual;
-                            } else if call.allele == '0' {
-                                p_read_h1 = p_read_h1 - call.qual + call.one_minus_qual;
-                            } else {
-                                panic!("Unsupported allele");
-                            }
-                        }
-
-                        // haplotype 1 at site j was a '0', but now it will be '1'
-                        // if call on read was '0', we divide out (1 - q) and multiply in q
-                        // if call on read was '1', we divide out q and multiply in (1 - q)
-                        if (g == 1 || g == 3) && (haps[1][v] == '0') {
-                            if call.allele == '0' {
-                                p_read_h1 = p_read_h1 - call.one_minus_qual + call.qual;
-                            } else if call.allele == '1' {
-                                p_read_h1 = p_read_h1 - call.qual + call.one_minus_qual;
-                            } else {
-                                panic!("Unsupported allele");
-                            }
-                        }
-
-                        match call.frag_ix {
-                            Some(frag_ix) => { p_read_g[g].push((frag_ix, p_read_h0, p_read_h1)); },
-                            None => { panic!("Fragment index in pileup call is None.") },
                         }
 
                         let p_read = LogProb::ln_add_exp(ln_half + p_read_h0, ln_half + p_read_h1);
-                        p_reads[g] = p_reads[g] + p_read;
+
+                        p_reads.ln_times_equals(g, p_read);
                     }
+                }
 
-                    let mut prior;
-                    if var.ref_allele.len() == 1 && var.var_allele.len() == 1 {
-                        let ra = var.ref_allele.chars().nth(0).unwrap();
-                        let g1 = if g == 0 || g == 1 { var.ref_allele.chars().nth(0).unwrap() } else { var.var_allele.chars().nth(0).unwrap() };
-                        let g2 = if g == 0 || g == 2 { var.ref_allele.chars().nth(0).unwrap() } else { var.var_allele.chars().nth(0).unwrap() };
+                let posts: GenotypeProbs = p_reads.normalize();
 
-                        match genotype_priors.get(&(ra, (g1, g2))) {
-                            Some(p) => {
-                                prior = if g == 1 || g == 2 { ln_half + *p } else { *p };
-                            },
-                            None => {
-                                match genotype_priors.get(&(ra, (g2, g1))) {
-                                    Some(p) => {
-                                        prior = if g == 1 || g == 2 { ln_half + *p } else { *p };
-                                    },
-                                    None => { panic!("Genotype not in genotype priors."); }
-                                };
-                            }
+                let (max_g, _) = posts.max_genotype(true);
+
+                var.genotype_post = posts.clone();
+                // TODO: should we reassign var.gq here?
+
+                // we need to track if any changes occured for termination
+                if haps[0][v] != max_g.0 || haps[1][v] != max_g.1 {
+                    changed = true;
+
+                    // if this variant was phased with HapCUT2 and used in calculating P(read | h),
+                    // then we need to update the P(read | h1) and P(read | h2) values that changed
+                    // when we changed h1 and h2
+                    if var_phased[v] {
+                        for &(frag_ix, p_read_h0, p_read_h1) in &p_reads_g[max_g.0 as usize][max_g.1 as usize] {
+                            p_read_hap[0][frag_ix] = p_read_h0;
+                            p_read_hap[1][frag_ix] = p_read_h1;
                         }
-                    } else {
-                        // we just assume that the rate of indels is 1e-4
-                        prior = if g == 0 {
-                            LogProb::from(Prob(0.9999))
-                        } else {
-                            LogProb::from(Prob(0.0001 / 3.0))
-                        };
-                    }
-
-                    //println!("{}",*prior);
-                    p_reads[g] = p_reads[g] + prior;
-                }
-
-                let p_total = LogProb::ln_sum_exp(&p_reads);
-
-                var.genotype_post[0] = p_reads[0] - p_total;
-                var.genotype_post[1] = p_reads[1] - p_total;
-                var.genotype_post[2] = p_reads[2] - p_total;
-                var.genotype_post[3] = p_reads[3] - p_total;
-
-                let mut max_ix = 5;
-                let mut max_val = LogProb::from(Prob(0.0));
-
-                for k in 0..4 {
-                    if var.genotype_post[k] > max_val {
-                        max_ix = k;
-                        max_val = var.genotype_post[k];
                     }
                 }
 
-                match max_ix {
-                    0 => {
-                        if !(haps[0][v] == '0' && haps[1][v] == '0') { changed = true };
-                        haps[0][v] = '0';
-                        haps[1][v] = '0';
-                    },
-                    1 => {
-                        if !(haps[0][v] == '0' && haps[1][v] == '1') { changed = true };
-                        haps[0][v] = '0';
-                        haps[1][v] = '1';
-                    },
-                    2 => {
-                        if !(haps[0][v] == '1' && haps[1][v] == '0') { changed = true };
-                        haps[0][v] = '1';
-                        haps[1][v] = '0';
-                    },
-                    3 => {
-                        if !(haps[0][v] == '1' && haps[1][v] == '1') { changed = true };
-                        haps[0][v] = '1';
-                        haps[1][v] = '1';
-                    },
-                    _ => { panic!("Invalid genotype  index.") }
-                }
-
-                for &(frag_ix, p_read_h0, p_read_h1) in &p_read_g[max_ix] {
-                    p_read_hap[0][frag_ix] = p_read_h0;
-                    p_read_hap[1][frag_ix] = p_read_h1;
-                }
-
+                // update the haplotype vectors with the max scoring phased genotype
+                haps[0][v] = max_g.0;
+                haps[1][v] = max_g.1;
             }
 
             // if the haplotypes have not changed in this iteration, then we break
@@ -650,18 +415,27 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
             }
         }
 
-        let mut total_likelihood: LogProb = LogProb::ln_one();
+        // count how many variants meet the criteria for "phased"
         let mut num_phased = 0;
-
         for var in varlist.lst.iter() {
-            if (var.genotype == "0/1" || var.genotype == "0|1" || var.genotype == "1|0")
-                && var.ref_allele.len() == 1 && var.var_allele.len() == 1
-                && var.gq > MIN_GQ_FOR_PHASING {
+            if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
+                && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
+                && var.gq > min_hap_gq {
                 num_phased += 1;
             }
         }
 
+        // compute the total likelihood of reads given haplotypes
+        // TODO: need to multiply in the haplotype likelihood from variant priors so that we have P(reads | haps) * P(haps)
+        let mut total_likelihood: LogProb = LogProb::ln_one();
+
+        for v in 0..varlist.lst.len() {
+            let g = Genotype(haps[0][v], haps[1][v]);
+            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g);
+        }
+
         for f in 0..flist.len() {
+
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
             for hap_ix in &hap_ixs {
                 for call in &flist[f].calls {
@@ -678,78 +452,43 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
             total_likelihood = total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
         }
 
-
         // update the various fields for the variant.
 
         for i in 0..varlist.lst.len() {
             let pileup = &pileup_lst[i];
             let var = &mut varlist.lst[i];
 
-            //let total: f64 = var.genotype_counts[0] +  var.genotype_counts[1] +
-            //                var.genotype_counts[2] +  var.genotype_counts[3];
+            let (max_g, _) = var.genotype_post.max_genotype(true);
 
-            let post00: LogProb = var.genotype_post[0];
-            let post01: LogProb = var.genotype_post[1];
-            let post10: LogProb = var.genotype_post[2];
-            let post11: LogProb = var.genotype_post[3];
-
-            let genotype: String;
-            let mut genotype_qual: f64;
-
-
-            let post00_unphased = post00;
-            let post01_unphased = LogProb::ln_add_exp(post01, post10);
-            let post11_unphased = post11;
-
-            if post00_unphased > post01_unphased && post00_unphased > post11_unphased {
-                let p_call_wrong = LogProb::ln_add_exp(post01_unphased, post11_unphased);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-                genotype = match var.phase_set {
-                    Some(_) => {"0|0".to_string()}
-                    None => {"0/0".to_string()}
-                };
-            } else if post01_unphased > post00_unphased && post01_unphased > post11_unphased {
-                let p_call_wrong = LogProb::ln_add_exp(post00_unphased, post11_unphased);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-
-                // we only show phase if variant was phased in the first round
-                // we do consider "flipping", if posteriors shifted when genotyping in round 2.
-
-                genotype = match var.phase_set {
-                    Some(_) => {
-                        if post01 > post10 {
-                            "0|1".to_string()
-                        } else {
-                            "1|0".to_string()
-                        }
-                    }
-                    None => {"0/1".to_string()}
-                };
-
-            } else {
-                let p_call_wrong = LogProb::ln_add_exp(post00_unphased, post01_unphased);
-                genotype_qual = *PHREDProb::from(p_call_wrong);
-                genotype = match var.phase_set {
-                    Some(_) => {"1|1".to_string()}
-                    None => {"1/1".to_string()}
-                };
+            // we computed the max phased genotype but we want the unphased genotype quality
+            // sum all of the genotypes that aren't max_g, or the flipped phase version of max_g
+            let mut non_max_post: Vec<LogProb> = vec![];
+            for g in var.possible_genotypes() {
+                if g != max_g && g != Genotype(max_g.1, max_g.0) {
+                    non_max_post.push(var.genotype_post.get(g));
+                }
             }
+            let p_call_wrong: LogProb = LogProb::ln_sum_exp(&non_max_post);
+            //let p_call_wrong: LogProb = LogProb::ln_one_minus_exp(&max_post);
+            let genotype_qual: f64 = *PHREDProb::from(p_call_wrong);
 
-            let (count_ref, count_var, count_amb): (usize, usize, usize) = count_alleles(&pileup);
+            let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
 
-            var.qual = *PHREDProb::from(post00);
-            var.ra = count_ref;
-            var.aa = count_var;
-            var.na = count_amb;
-            var.genotype = genotype;
+            var.qual = *PHREDProb::from(var.genotype_post.get(Genotype(0,0)));
+            var.allele_counts = allele_counts;
+            var.ambiguous_count = ambig_count;
+            var.genotype = max_g;
             var.gq = genotype_qual;
             var.filter = "PASS".to_string();
             var.called = true;
 
-            if var.chrom == "chr20".to_string() && var.pos0 == 66369 && (var.genotype == "0|0".to_string() ||  var.genotype == "0|0".to_string()) {
-                println!("[chr20 66370 G A] FALSE NEGATIVE");
+            if var.qual > MAX_VCF_QUAL {
+                var.qual = MAX_VCF_QUAL;
             }
 
+            if var.gq > MAX_VCF_QUAL {
+                var.gq = MAX_VCF_QUAL;
+            }
         }
 
         for i in 0..flist.len() {
@@ -757,27 +496,33 @@ pub fn call_genotypes(flist: &mut Vec<Fragment>,
         }
 
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
-        print_variant_debug(&varlist, &interval, &variant_debug_directory,&debug_vcf_str);
+        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov);
 
         eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
+        if total_likelihood > prev_best_likelihood { // if num_phased >= prev_num_phased { //
+            iters_since_improvement = 0;
+            prev_best_likelihood = total_likelihood;
+            best_varlist_bak = (*varlist).clone();
 
-        if num_phased <= prev_num_phased { //if total_likelihood <= prev_total_likelihood {
+        } else { // { //
+
+            iters_since_improvement += 1;
 
             // restore the previous varlist
-            //for i in 0..varlist.lst.len() {
-            //    varlist.lst[i] = varlist_bak.lst[i].clone();
-            //}
+            for i in 0..varlist.lst.len() {
+                varlist.lst[i] = best_varlist_bak.lst[i].clone();
+            }
 
-            break;
+            if iters_since_improvement > max_iters_since_improvement {
+
+                break;
+            }
         }
-        
-        prev_num_phased = num_phased;
-        //prev_total_likelihood = total_likelihood;
-
+        //prev_num_phased = num_phased;
     }
 }
-
+/*
 pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
 
     let hap_ixs = vec![0, 1];
@@ -840,153 +585,6 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
         }
     }
 }
-
-pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>, max_mec_frac: Option<f64>) {
-
-    for i in 0..varlist.lst.len() {
-        if varlist.lst[i].qual < density_qual { continue; }
-
-        let mut count = 0;
-        for j in i + 1..varlist.lst.len() {
-            if varlist.lst[j].pos0 - varlist.lst[i].pos0 > density_dist {
-                break;
-            }
-            if varlist.lst[j].qual < density_qual { continue; }
-            count += 1;
-            if count > density_count {
-                for k in i..j + 1 {
-                    varlist.lst[k].filter = "dn".to_string();
-                }
-            }
-        }
-    }
-    match max_depth {
-        Some(dp) => {
-            for i in 0..varlist.lst.len() {
-                if varlist.lst[i].dp > dp as usize {
-                    if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
-                        varlist.lst[i].filter = "dp".to_string();
-                    } else {
-                        varlist.lst[i].filter.push_str(";dp");
-                    }
-                }
-            }
-        }
-        None => {}
-    }
-    match max_mec_frac {
-        Some(frac) => {
-            for i in 0..varlist.lst.len() {
-                if varlist.lst[i].mec_frac >= frac {
-                    if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
-                        varlist.lst[i].filter = "psmf".to_string();
-                    } else {
-                        varlist.lst[i].filter.push_str(";psmf");
-                    }
-                }
-            }
-        },
-        None => {}
-    }
-}
-
-pub fn print_vcf(varlist: &VarList, interval: &Option<GenomicInterval>, indels: bool, output_vcf_file: &String, print_whole_varlist: bool) {
-    let vcf_path = Path::new(output_vcf_file);
-    let vcf_display = vcf_path.display();
-    // Open a file in write-only mode, returns `io::Result<File>`
-    let mut file = match File::create(&vcf_path) {
-        Err(why) => panic!("couldn't create {}: {}", vcf_display, why.description()),
-        Ok(file) => file,
-    };
-
-    let headerstr = "##fileformat=VCFv4.2
-##source=ReaperV0.1
-##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">
-##INFO=<ID=RA,Number=1,Type=Integer,Description=\"Number of Observed Reference Alleles\">
-##INFO=<ID=AA,Number=1,Type=Integer,Description=\"Number of Observed Variant Alleles\">
-##INFO=<ID=NA,Number=1,Type=Integer,Description=\"Number of Observed Ambiguous Alleles\">
-##INFO=<ID=P00,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 0|0 Phased Genotype\">
-##INFO=<ID=P01,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 0|1 Phased Genotype\">
-##INFO=<ID=P10,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 1|0 Phased Genotype\">
-##INFO=<ID=P11,Number=1,Type=Integer,Description=\"Phred-scaled Probability of 1|1 Phased Genotype\">
-##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
-##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
-##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">
-##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
-##FORMAT=<ID=GQ,Number=2,Type=Float,Description=\"Genotype Quality\">
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
-        .to_string();
-
-    match writeln!(file, "{}", headerstr) {
-        Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
-        Ok(_) => {}
-    }
+*/
 
 
-    for var in &varlist.lst {
-        match interval {
-            &Some(ref iv) => {
-                if var.chrom != iv.chrom ||
-                    var.pos0 < iv.start_pos as usize ||
-                    var.pos0 > iv.end_pos as usize {
-                    continue;
-                }
-            }
-            &None => {}
-        }
-
-        if !print_whole_varlist {
-            if var.genotype == "0/0".to_string() ||
-                var.genotype == "0|0".to_string(){
-                continue;
-            }
-
-            if !indels && (var.ref_allele.len() != 1 || var.var_allele.len() != 1) {
-                continue;
-            }
-        }
-        let ps = match var.phase_set {
-            Some(ps) => format!("{}", ps),
-            None => ".".to_string()
-        };
-
-        match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};RA={};AA={};NA={};P00={:.2};P01={:.2};P10={:.2};P11={:.2};MEC={};MF={};PSMF={:.5}\tGT:PS:GQ\t{}:{}:{:.2}",
-                       var.chrom,
-                       var.pos0 + 1,
-                       var.ref_allele,
-                       var.var_allele,
-                       var.qual,
-                       var.filter,
-                       var.dp,
-                       var.ra,
-                       var.aa,
-                       var.na,
-                       *PHREDProb::from(var.genotype_post[0]),
-                       *PHREDProb::from(var.genotype_post[1]),
-                       *PHREDProb::from(var.genotype_post[2]),
-                       *PHREDProb::from(var.genotype_post[3]),
-                       var.mec,
-                       (var.mec as f64 / (var.ra + var.aa) as f64),
-                       var.mec_frac,
-                       var.genotype,
-                       ps,
-                       var.gq) {
-            Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
-            Ok(_) => {}
-        }
-    }
-}
-
-pub fn print_variant_debug(varlist: &VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str){
-    match variant_debug_directory {
-        &Some(ref dir) => {
-            let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
-            Some(s) => {s.to_owned()},
-            None => {panic!("Invalid unicode provided for variant debug directory");}
-            };
-            print_vcf(&varlist, &interval, true, &outfile, true);
-        }
-        &None => {}
-    };
-}
