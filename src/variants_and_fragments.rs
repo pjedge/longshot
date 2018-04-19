@@ -474,8 +474,6 @@ mod tests {
             gq: 0.0,
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            mec: 0,
-            mec_frac: 0.0,
             called: true
         }
     }
@@ -728,8 +726,6 @@ mod tests {
             gq: 0.0,
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            mec: 0,
-            mec_frac: 0.0,
             called: true
         }
     }

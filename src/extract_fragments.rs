@@ -1067,6 +1067,53 @@ mod tests {
     use super::*;
     use genotype_probs::*;
 
+    #[test]
+    fn test_extended_cigar() {
+        let mut fasta = fasta::IndexedReader::from_file(&"/home/peter/git/reaper/study/data/genomes/hs37d5.fa").unwrap();
+
+        let mut ref_seq_u8: Vec<u8> = vec![];
+        fasta.read_all(&"20", &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+        let ref_seq: Vec<char> = dna_vec(&ref_seq_u8);
+
+        let mut bam = bam::IndexedReader::from_path(&"/home/peter/git/reaper/test_data/test_extended_cigar.bam").unwrap();
+
+        for r in bam.records() {
+            let record = r.unwrap();
+
+            let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
+
+            let start_pos = record.pos();
+            let bam_cig: CigarStringView = record.cigar();
+            let cigarpos_list: Vec<CigarPos> =
+                create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+
+            for cigarpos in cigarpos_list.iter() {
+                match cigarpos.cig {
+                    Cigar::Diff(l) => {
+                        for i in 0..l {
+                            assert_ne!(ref_seq[cigarpos.ref_pos as usize + i as usize], read_seq[cigarpos.read_pos as usize + i as usize]);
+                        }
+                    }
+                    Cigar::Equal(l) => {
+                        for i in 0..l {
+                            assert_eq!(ref_seq[cigarpos.ref_pos as usize + i as usize], read_seq[cigarpos.read_pos as usize + i as usize]);
+                        }
+                    }
+                    Cigar::Match(_) |
+                    Cigar::Ins(_) |
+                    Cigar::Del(_) |
+                    Cigar::RefSkip(_) => {}
+                    Cigar::Pad(_) |
+                    Cigar::Back(_) |
+                    Cigar::SoftClip(_) |
+                    Cigar::HardClip(_) => {
+                        panic!("CIGAR operation found in cigarpos_list that should have been removed already.".to_owned());
+                    }
+                }
+            }
+        }
+    }
+
     fn generate_var2(ix: usize, tid: usize, chrom: String, pos0: usize, alleles: Vec<String>) -> Var {
         Var {
             ix: ix,
@@ -1084,8 +1131,6 @@ mod tests {
             gq: 0.0,
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            mec: 0,
-            mec_frac: 0.0,
             called: true
         }
     }
