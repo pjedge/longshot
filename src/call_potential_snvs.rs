@@ -127,13 +127,14 @@ pub fn call_potential_snvs(bam_file: &String,
 
                 match alignment.indel() {
                     Indel::None => {
+
                         // unwrapping a None value here
                         ref_allele =
                             (ref_seq[pos] as char).to_string().to_uppercase();
 
                         let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
 
-                        var_allele = base.to_string();
+                        var_allele = base.to_string().to_uppercase();
                     },
                     Indel::Ins(l) => {
 
@@ -157,7 +158,7 @@ pub fn call_potential_snvs(bam_file: &String,
                             None => "N".to_string()
                         };
 
-                        var_allele = var_char.into_iter().collect::<String>();
+                        var_allele = var_char.into_iter().collect::<String>().to_uppercase();
 
                     },
                     Indel::Del(l) => {
@@ -168,6 +169,10 @@ pub fn call_potential_snvs(bam_file: &String,
                         var_allele = (ref_seq[pos] as char).to_string().to_uppercase();
 
                     },
+                }
+
+                if pos == 565405 {
+                    println!("{} {} {} flags: {}",pos, ref_allele, var_allele, record.flags());
                 }
 
                 pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
@@ -240,6 +245,10 @@ pub fn call_potential_snvs(bam_file: &String,
 
 
         let (ref_allele, var_allele, qual) = (snv_ref_allele, snv_var_allele, snv_qual);
+
+        if pos == 565405 {
+            println!("qual {} <=> potential_snv_qual {}", *qual, *potential_snv_qual);
+        }
 
         next_valid_pos = (pos+1) as u32;
 
