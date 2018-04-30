@@ -121,7 +121,8 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       max_cov: Option<u32>,
                                       max_p_miscall: f64,
                                       min_hap_gq: f64,
-                                      max_iters_since_improvement: usize) {
+                                      max_iters_since_improvement: usize,
+                                      sample_name: &String) {
 
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -496,7 +497,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
 
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
-        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov);
+        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, sample_name);
 
         eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
