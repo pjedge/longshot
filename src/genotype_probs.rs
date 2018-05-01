@@ -29,13 +29,17 @@ impl GenotypeProbs {
         self.tab.len()
     }
 
-    pub fn max_genotype(&self, phased: bool) -> (Genotype, LogProb) {
+    pub fn max_genotype(&self, phased: bool, force_nonreference: bool) -> (Genotype, LogProb) {
         let mut max_post: LogProb = LogProb::ln_zero();
         let mut max_i = 0;
         let mut max_j = 0;
 
         for i in 0..self.n_alleles() {
             for j in 0..self.n_alleles() {
+                if i == 0 && j == 0 && force_nonreference {
+                    continue;
+                }
+
                 let post: LogProb = if i == j || phased {
                     self.tab[i][j]
                 } else {
@@ -78,6 +82,21 @@ impl GenotypeProbs {
         */
 
         //LogProb::ln_sum_exp(&flattened)
+        total
+    }
+
+    pub fn sum_genotypes_with_allele(&self, a: u8) -> LogProb {
+        let i: usize = a as usize;
+        let mut total: LogProb = self.tab[i][i];
+
+        for j in 0..self.n_alleles() {
+            if i == j {
+                continue;
+            }
+            total = LogProb::ln_add_exp(total, self.tab[i][j]);
+            total = LogProb::ln_add_exp(total, self.tab[j][i]);
+        }
+
         total
     }
 
