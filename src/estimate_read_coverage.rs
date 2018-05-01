@@ -64,7 +64,7 @@ pub fn calculate_mean_coverage(bam_file: &String,
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
                 record.is_quality_check_failed() ||
-                record.is_duplicate() {
+                record.is_duplicate() || record.is_supplementary() {
                 continue;
             }
 

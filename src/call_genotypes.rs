@@ -94,7 +94,7 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
                                                                                &var.alleles,
                                                                                max_p_miscall);
 
-        let (max_g, max_post) = posts.max_genotype(false);
+        let (max_g, max_post) = posts.max_genotype(false, false);
 
         let genotype_qual:f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
@@ -385,7 +385,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
                 let posts: GenotypeProbs = p_reads.normalize();
 
-                let (max_g, _) = posts.max_genotype(true);
+                let (max_g, _) = posts.max_genotype(true, false);
 
                 var.genotype_post = posts.clone();
                 // TODO: should we reassign var.gq here?
@@ -459,7 +459,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             let pileup = &pileup_lst[i];
             let var = &mut varlist.lst[i];
 
-            let (max_g, _) = var.genotype_post.max_genotype(true);
+            let (max_g, _) = var.genotype_post.max_genotype(true, false);
 
             // we computed the max phased genotype but we want the unphased genotype quality
             // sum all of the genotypes that aren't max_g, or the flipped phase version of max_g
