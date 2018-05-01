@@ -1,3 +1,4 @@
+
 extern crate rust_htslib;
 
 use rust_htslib::bam;
@@ -114,7 +115,7 @@ pub fn call_potential_snvs(bam_file: &String,
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
                 record.is_quality_check_failed() ||
-                record.is_duplicate() {
+                record.is_duplicate() || record.is_supplementary() {
                 continue;
             }
 
@@ -133,7 +134,7 @@ pub fn call_potential_snvs(bam_file: &String,
 
                         let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
 
-                        var_allele = base.to_string();
+                        var_allele = base.to_string().to_uppercase();
                     },
                     Indel::Ins(l) => {
 
@@ -157,7 +158,7 @@ pub fn call_potential_snvs(bam_file: &String,
                             None => "N".to_string()
                         };
 
-                        var_allele = var_char.into_iter().collect::<String>();
+                        var_allele = var_char.into_iter().collect::<String>().to_uppercase();
 
                     },
                     Indel::Del(l) => {
@@ -431,7 +432,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                                    _max_coverage: Option<u32>,
                                    min_mapq: u8,
                                    _ln_align_params: LnAlignmentParameters)
-                                    -> VarList {
+                                   -> VarList {
 
     //let potential_snv_qual = LogProb::from(Prob(0.5));
     let target_names = parse_target_names(&bam_file);
@@ -596,13 +597,13 @@ pub fn call_potential_variants_poa(bam_file: &String,
             let h1_alignment = aligner.local(&consensus_h1, &ref_window);
             //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
             Some(extract_variants_from_alignment(&h1_alignment,
-                                              &consensus_h1,
-                                              &ref_window,
+                                                 &consensus_h1,
+                                                 &ref_window,
                                                  l_ref,
-                                              tid,
-                                              target_names[tid].clone(),
+                                                 tid,
+                                                 target_names[tid].clone(),
                                                  all_seq_count,
-                                               25))
+                                                 25))
 
         } else {
             None
@@ -616,21 +617,21 @@ pub fn call_potential_variants_poa(bam_file: &String,
             let h2_alignment = aligner.local(&consensus_h2, &ref_window);
             //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
             Some(extract_variants_from_alignment(&h2_alignment,
-                                            &consensus_h2,
-                                            &ref_window,
+                                                 &consensus_h2,
+                                                 &ref_window,
                                                  l_ref,
-                                            tid,
-                                            target_names[tid].clone(),
+                                                 tid,
+                                                 target_names[tid].clone(),
                                                  all_seq_count,
-                                            25))
+                                                 25))
 
         } else {
             None
         };
 
         let mut all_vars: Option<Vec<Var>> = if h1_vars == None
-                                             && h2_vars == None
-                                             && all_seq_count >= min_reads {
+            && h2_vars == None
+            && all_seq_count >= min_reads {
             let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
             poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
                                             1i32, // (all_seq_count/2) as i32

@@ -9,7 +9,7 @@ use std::fs::File;
 use std::path::Path;
 
 
-pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String, print_reference_genotype: bool, max_cov: Option<u32>) {
+pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String, print_reference_genotype: bool, max_cov: Option<u32>, sample_name: &String) {
 
     // first, add filter flags for variant density
     var_filter(varlist, 50.0, 500, 10, max_cov);
@@ -22,16 +22,16 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
         Ok(file) => file,
     };
 
-    let headerstr = "##fileformat=VCFv4.2
+    let headerstr = format!("##fileformat=VCFv4.2
 ##source=ReaperV0.1
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
 ##INFO=<ID=PH,Number=G,Type=Integer,Description=\"Phred-scaled Probabilities of Phased Genotypes\">
+##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
-##FORMAT=<ID=GQ,Number=2,Type=Float,Description=\"Genotype Quality\">
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"
-        .to_string();
+##FORMAT=<ID=GQ,Number=1,Type=Float,Description=\"Genotype Quality\">
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
 
     //"##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
     //##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
@@ -94,7 +94,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};NA={};PH={};\tGT:PS:GQ\t{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};PH={};\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
@@ -114,14 +114,14 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
     }
 }
 
-pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str, max_cov: Option<u32>){
+pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str, max_cov: Option<u32>, sample_name: &String){
     match variant_debug_directory {
         &Some(ref dir) => {
             let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
                 Some(s) => {s.to_owned()},
                 None => {panic!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(varlist, &interval,&outfile, true, max_cov);
+            print_vcf(varlist, &interval,&outfile, true, max_cov, sample_name);
         }
         &None => {}
     };

@@ -94,7 +94,7 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
                                                                                &var.alleles,
                                                                                max_p_miscall);
 
-        let (max_g, max_post) = posts.max_genotype(false);
+        let (max_g, max_post) = posts.max_genotype(false, false);
 
         let genotype_qual:f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
@@ -121,7 +121,8 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       max_cov: Option<u32>,
                                       max_p_miscall: f64,
                                       min_hap_gq: f64,
-                                      max_iters_since_improvement: usize) {
+                                      max_iters_since_improvement: usize,
+                                      sample_name: &String) {
 
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -384,7 +385,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
                 let posts: GenotypeProbs = p_reads.normalize();
 
-                let (max_g, _) = posts.max_genotype(true);
+                let (max_g, _) = posts.max_genotype(true, false);
 
                 var.genotype_post = posts.clone();
                 // TODO: should we reassign var.gq here?
@@ -458,7 +459,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             let pileup = &pileup_lst[i];
             let var = &mut varlist.lst[i];
 
-            let (max_g, _) = var.genotype_post.max_genotype(true);
+            let (max_g, _) = var.genotype_post.max_genotype(true, false);
 
             // we computed the max phased genotype but we want the unphased genotype quality
             // sum all of the genotypes that aren't max_g, or the flipped phase version of max_g
@@ -496,7 +497,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
 
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
-        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov);
+        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, sample_name);
 
         eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 

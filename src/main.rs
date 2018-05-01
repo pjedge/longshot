@@ -165,6 +165,13 @@ fn main() {
             .help("Maximum rounds of haplotype assembly without likelihood improvement before termination.")
             .display_order(170)
             .default_value("5"))
+        .arg(Arg::with_name("Sample ID")
+            .short("s")
+            .long("sample_id")
+            .value_name("string")
+            .help("Specify a sample ID to write to the output VCF")
+            .display_order(177)
+            .default_value(&"SAMPLE"))
         /*.arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -212,6 +219,8 @@ fn main() {
         eprintln!("{} ERROR: BAM file must be indexed with samtools index. Index file should have same name with .bai appended.",print_time());
         return;
     }
+
+    let sample_name: String = input_args.value_of(&"Sample ID").unwrap().to_string();
 
     let variant_debug_directory: Option<String> = match input_args.value_of("Variant debug directory") {
         Some(dir) => {
@@ -427,7 +436,7 @@ fn main() {
     // as the variant list expands
     varlist.backup_indices();
 
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov);
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov, &sample_name);
 
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
@@ -454,7 +463,7 @@ fn main() {
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
     call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall);
 
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov);
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &sample_name);
 
 
     /***********************************************************************************************/
@@ -464,7 +473,7 @@ fn main() {
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, max_p_miscall,
-                                   min_hap_gq, max_iters_since_improvement);
+                                   min_hap_gq, max_iters_since_improvement, &sample_name);
 
 
     if use_poa {
@@ -490,7 +499,7 @@ fn main() {
 
         varlist.combine(&mut varlist_poa);
 
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &sample_name);
 
         eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
@@ -509,11 +518,12 @@ fn main() {
 
 
         call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &sample_name);
 
         eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
         call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-            &variant_debug_directory, 6, max_cov, max_p_miscall, min_hap_gq, max_iters_since_improvement);
+            &variant_debug_directory, 6, max_cov, max_p_miscall, min_hap_gq, max_iters_since_improvement,
+            &sample_name);
 
         /***********************************************************************************************/
         // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
@@ -529,6 +539,6 @@ fn main() {
     };
 
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov);
-    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov);
+    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &sample_name);
+    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &sample_name);
 }
