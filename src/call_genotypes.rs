@@ -255,7 +255,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             haps[1][i] = varlist.lst[i].genotype.1;
             // if the variant isn't phased (phase set is none) then we "flip" the haplotype
             // alleles with 50% probability
-            if rng.next_f64() < 0.5 {
+            if varlist.lst[i].phase_set == None && rng.next_f64() < 0.5 {
                 let temp = haps[0][i];
                 haps[0][i] = haps[1][i];
                 haps[1][i] = temp;
