@@ -58,7 +58,7 @@ void init_fragment_scores(struct SNPfrags* snpfrag, struct fragment* Flist, char
             node = node1;
             if (hap[node] == '-' || (int) Flist[f].list[j].qv[k] - QVoffset < MINQ) continue;
 
-            prob = (QVoffset - (int) Flist[f].list[j].qv[k]) / 10;
+            prob = (QVoffset - (int) Flist[f].list[j].qv[k]); prob /= 10;
             prob2 = Flist[f].list[j].p1[k];
 
             if (node == startnode) {
@@ -96,7 +96,7 @@ void init_fragment_scores(struct SNPfrags* snpfrag, struct fragment* Flist, char
                     if (hap[node] == '-' || (int) Flist[f].list[j].qv[k] - QVoffset < MINQ) continue;
                     if (node == startnode || node == secondnode) continue;
 
-                    prob = (QVoffset - (int) Flist[f].list[j].qv[k]) / 10;
+                    prob = (QVoffset - (int) Flist[f].list[j].qv[k]); prob /= 10;
                     prob2 = Flist[f].list[j].p1[k];
 
                     for (t = 0; t < 4; t++) scores[t] = Flist[f].scores[t];

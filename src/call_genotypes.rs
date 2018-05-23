@@ -152,6 +152,20 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
     let mut best_varlist_bak = (*varlist).clone();
     let mut iters_since_improvement = 0;
 
+    // for all basic biallelic heterozygous variants
+    // randomly shuffle the phase of the variant
+    for i in 0..varlist.lst.len() {
+        let var = &varlist.lst[i];
+        if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
+            && var.alleles[0].len() == 1 && var.alleles[1].len() == 1 {
+            if rng.next_f64() < 0.5 {
+                var.genotype == Genotype(0,1);
+            } else {
+                var.genotype == Genotype(1,0);
+            }
+        }
+    }
+
     for hapcut2_iter in 0..max_iterations {
 
         // print the haplotype assembly iteration
@@ -173,12 +187,6 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                     hap1[i] = '0' as u8;
                 } else if var.genotype == Genotype(1,0) {
                     hap1[i] = '1' as u8;
-                } else {
-                    if rng.next_f64() < 0.5 {
-                        hap1[i] = '0' as u8;
-                    } else {
-                        hap1[i] = '1' as u8;
-                    }
                 }
             } else {
                 hap1[i] = '-' as u8;
@@ -253,13 +261,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
             haps[0][i] = varlist.lst[i].genotype.0;
             haps[1][i] = varlist.lst[i].genotype.1;
-            // if the variant isn't phased (phase set is none) then we "flip" the haplotype
-            // alleles with 50% probability
-            if varlist.lst[i].phase_set == None && rng.next_f64() < 0.5 {
-                let temp = haps[0][i];
-                haps[0][i] = haps[1][i];
-                haps[1][i] = temp;
-            }
+
         }
         
         // p_read_hap[i][j] contains P(R_j | H_i)
