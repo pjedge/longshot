@@ -162,7 +162,8 @@ float compute_goodcut(struct SNPfrags* snpfrag, char* hap, int* slist, struct BL
     int totaledges = 0, i = 0, j = 0, k = 0, l = 0, f = 0;
     int wf = 0; //if (drand48() < 0.5) wf=1;
     float W = 0;
-    int N = component->phased;
+    int N = (int) (component->phased);
+
     int iters_since_improved_cut = 0;
 
     /* CODE TO set up the read-haplotype consistency graph */
@@ -259,6 +260,7 @@ float compute_goodcut(struct SNPfrags* snpfrag, char* hap, int* slist, struct BL
     pinitheap(&pheap, N); // heap for maxcut
 
     /*****************************Maintain two clusters and add each vertex to one of these two ******************/
+    if (N < 0) N = 0;
     bestmincut = (char*) malloc(N);
     for (i = 0; i < N; i++) bestmincut[i] = '0';
     //for (iter=0;iter<totaledges*(int)(log2(totaledges));iter++)

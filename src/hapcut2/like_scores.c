@@ -11,7 +11,7 @@ void calculate_fragscore(struct fragment* Flist, int f, char* h, float* ll) {
         for (k = 0; k < Flist[f].list[j].len; k++) {
 
             if (h[Flist[f].list[j].offset + k] == '-' || (int) Flist[f].list[j].qv[k] - QVoffset < MINQ) continue;
-            prob = (QVoffset - (int) Flist[f].list[j].qv[k])/10;
+            prob = (QVoffset - (int) Flist[f].list[j].qv[k]); prob /= 10;
             prob2 = Flist[f].list[j].p1[k];
 
             if (h[Flist[f].list[j].offset + k] == Flist[f].list[j].hap[k]) {
@@ -85,8 +85,8 @@ void update_fragscore(struct fragment* Flist, int f, char* h) {
 
 float fragment_ll(struct fragment* Flist, int f, char* h, int homozygous, int switch_ix1, int switch_ix2) {
     int j = 0, k = 0;
-    float p0 = 0, p1 = 0, prob = 0, prob1 = 0, prob2 = 0;
-    float good = 0, bad = 0, ll=0;
+    float p0 = 0, p1 = 0, prob = 0, prob2 = 0;
+    float ll = 0;
     int snp_ix, switched;
 
     // normal LL calculation, no Hi-C h-trans
@@ -99,27 +99,19 @@ float fragment_ll(struct fragment* Flist, int f, char* h, int homozygous, int sw
 
             prob = QVoffset - (int) Flist[f].list[j].qv[k];
             prob /= 10;
-            prob1 = 1.0 - pow(10, prob);
             prob2 = Flist[f].list[j].p1[k];
-
-            if (h[Flist[f].list[j].offset + k] == Flist[f].list[j].hap[k]) good += prob1;
-            else bad += prob1;
 
             // this is likelihood based calculation
             assert(switch_ix2 == -1);
             switched = (switch_ix1 != -1 && snp_ix >= switch_ix1);
             if ((h[snp_ix] == Flist[f].list[j].hap[k]) != switched) { // true if match, or not match but switched
                 p0 += prob2;
-                if (snp_ix != homozygous)
-                    p1 += prob;
-                else
-                    p1 += prob2;
+                if (snp_ix != homozygous) p1 += prob;
+                else p1 += prob2;
             } else {
                 p0 += prob;
-                if (snp_ix != homozygous)
-                    p1 += prob2;
-                else
-                    p1 += prob;
+                if (snp_ix != homozygous) p1 += prob2;
+                else p1 += prob;
             }
         }
     }
