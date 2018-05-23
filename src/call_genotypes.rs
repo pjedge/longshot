@@ -171,6 +171,47 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         // print the haplotype assembly iteration
         eprintln!("{}    Round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
 
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
+        // count how many variants meet the criteria for "phased"
+        let mut num_phased = 0;
+        for var in varlist.lst.iter() {
+            if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
+                && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
+                && var.gq > min_hap_gq {
+                num_phased += 1;
+            }
+        }
+
+        let mut total_likelihood: LogProb = LogProb::ln_one();
+
+        for v in 0..varlist.lst.len() {
+            let g = Genotype(haps[0][v], haps[1][v]);
+            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g);
+        }
+
+        for f in 0..flist.len() {
+
+            let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
+            for hap_ix in &hap_ixs {
+                for call in &flist[f].calls {
+                    if call.qual < ln_max_p_miscall {
+                        // read allele matches haplotype allele
+                        if call.allele == haps[*hap_ix][call.var_ix] {
+                            pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
+                        } else { // read allele does not match haplotype allele
+                            pr[*hap_ix] = pr[*hap_ix] + call.qual;
+                        }
+                    }
+                }
+            }
+            total_likelihood = total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
+        }
+
+        eprintln!("{}    (Before HapCUT2) Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
         let mut vcf_buffer: Vec<Vec<u8>> = Vec::with_capacity(varlist.lst.len());
         let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
@@ -263,7 +304,49 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             haps[1][i] = varlist.lst[i].genotype.1;
 
         }
-        
+
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
+        // count how many variants meet the criteria for "phased"
+        num_phased = 0;
+        for var in varlist.lst.iter() {
+            if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
+                && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
+                && var.gq > min_hap_gq {
+                num_phased += 1;
+            }
+        }
+
+        total_likelihood = LogProb::ln_one();
+
+        for v in 0..varlist.lst.len() {
+            let g = Genotype(haps[0][v], haps[1][v]);
+            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g);
+        }
+
+        for f in 0..flist.len() {
+
+            let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
+            for hap_ix in &hap_ixs {
+                for call in &flist[f].calls {
+                    if call.qual < ln_max_p_miscall {
+                        // read allele matches haplotype allele
+                        if call.allele == haps[*hap_ix][call.var_ix] {
+                            pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
+                        } else { // read allele does not match haplotype allele
+                            pr[*hap_ix] = pr[*hap_ix] + call.qual;
+                        }
+                    }
+                }
+            }
+            total_likelihood = total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
+        }
+
+        eprintln!("{}    (After HapCUT2)  Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
         // p_read_hap[i][j] contains P(R_j | H_i)
         let mut p_read_hap: Vec<Vec<LogProb>> = vec![vec![LogProb::ln_one(); flist.len()]; 2];
 
@@ -282,7 +365,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
-        eprintln!("{}    Refining genotypes using round {} haplotypes...",print_time(), hapcut2_iter+1);
+        //eprintln!("{}    Refining genotypes using round {} haplotypes...",print_time(), hapcut2_iter+1);
 
         for _ in 0..max_iterations {
             let mut changed = false;
@@ -419,7 +502,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
 
         // count how many variants meet the criteria for "phased"
-        let mut num_phased = 0;
+        num_phased = 0;
         for var in varlist.lst.iter() {
             if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
                 && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
@@ -428,9 +511,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
-        // compute the total likelihood of reads given haplotypes
-        // TODO: need to multiply in the haplotype likelihood from variant priors so that we have P(reads | haps) * P(haps)
-        let mut total_likelihood: LogProb = LogProb::ln_one();
+        total_likelihood = LogProb::ln_one();
 
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
@@ -501,7 +582,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
         print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, sample_name);
 
-        eprintln!("{}    Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
+        eprintln!("{}    (After Greedy)   Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
         if total_likelihood > prev_best_likelihood { // if num_phased >= prev_num_phased { //
             iters_since_improvement = 0;
