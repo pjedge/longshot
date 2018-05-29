@@ -708,10 +708,9 @@ pub fn extract_fragment(bam_record: &Record,
 
     if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
         bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
-        || bam_record.is_supplementary()
-        {
-            return fragment;
-        }
+        || bam_record.is_supplementary(){
+        return fragment;
+    }
 
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
     let mut cluster_lst: Vec<(AnchorPositions, Vec<Var>)> = vec![];
@@ -919,6 +918,12 @@ pub fn extract_fragments(bamfile_name: &String,
             for (i,r) in bam.records().enumerate() {
                 let record = r.unwrap();
 
+                if record.is_quality_check_failed() || record.is_duplicate() ||
+                    record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
+                    || record.is_supplementary(){
+                        continue;
+                }
+
                 let old_frag: Option<Fragment> = match &old_flist {
                     &Some(ref fl) => {
                         assert_eq!(fl[i].id, u8_to_string(record.qname()));
@@ -984,6 +989,12 @@ pub fn extract_fragments(bamfile_name: &String,
             for (i,r) in bam.records().enumerate() {
 
                 let record = r.unwrap();
+
+                if record.is_quality_check_failed() || record.is_duplicate() ||
+                    record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
+                    || record.is_supplementary(){
+                        continue;
+                }
 
                 let old_frag: Option<Fragment> = match &old_flist {
                     &Some(ref fl) => {
@@ -1223,4 +1234,3 @@ mod tests {
         assert_eq!(haps, exp);
     }
 }
-
