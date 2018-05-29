@@ -389,7 +389,7 @@ fn main() {
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());
-    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval);
+    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq);
     /*
     let alignment_parameters = AlignmentParameters {
         transition_probs: TransitionProbs {

@@ -208,7 +208,13 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                     match state {
                         AlignmentState::Insertion => {transition_counts.insertion_from_insertion += 1;},
                         AlignmentState::Match => {transition_counts.insertion_from_match += 1;},
-                        AlignmentState::Deletion => {panic!("Unexpected DELETION alignment state transition observed during INSERTION in bam file.");}
+                        AlignmentState::Deletion => {
+                            // MINIMAP2 sometimes goes directly from insertion <-> deletion
+                            // we will just add an implicit deletion -> match -> insertion
+                            transition_counts.match_from_deletion += 1;
+                            transition_counts.insertion_from_match += 1;
+                            //panic!("Unexpected DELETION alignment state transition observed during INSERTION in bam file.");
+                        }
                     }
 
                     state = AlignmentState::Insertion;
@@ -231,7 +237,13 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                     match state {
                         AlignmentState::Deletion => {transition_counts.deletion_from_deletion += 1;},
                         AlignmentState::Match => {transition_counts.deletion_from_match += 1;},
-                        AlignmentState::Insertion => {panic!("Unexpected INSERTION alignment state transition observed during DELETION in bam file.");}
+                        AlignmentState::Insertion => {
+                            // MINIMAP2 sometimes goes directly from insertion <-> deletion
+                            // we will just add an implicit Insertion -> match -> deletion
+                            transition_counts.match_from_insertion += 1;
+                            transition_counts.deletion_from_match += 1;
+                            //panic!("Unexpected INSERTION alignment state transition observed during DELETION in bam file.");
+                        }
                     }
 
                     state = AlignmentState::Deletion;
@@ -260,7 +272,8 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
 
 pub fn estimate_alignment_parameters(bamfile_name: &String,
                                      fastafile_name: &String,
-                                     interval: &Option<GenomicInterval>)
+                                     interval: &Option<GenomicInterval>,
+                                     min_mapq: u8)
                                      -> AlignmentParameters {
 
     let t_names = parse_target_names(&bamfile_name);
@@ -295,9 +308,16 @@ pub fn estimate_alignment_parameters(bamfile_name: &String,
             for r in bam.records() {
                 let record = r.unwrap();
 
+                // may be faster to implement this as bitwise operation on raw flag in the future?
+                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                    record.is_quality_check_failed() ||
+                    record.is_duplicate() || record.is_supplementary() {
+                    continue;
+                }
+
                 let tid: usize = record.tid() as usize;
                 let chrom: String = t_names[record.tid() as usize].clone();
-
+                //println!("{}",u8_to_string(record.qname()));
                 if tid != prev_tid {
                     let mut ref_seq_u8: Vec<u8> = vec![];
                     fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
@@ -321,7 +341,14 @@ pub fn estimate_alignment_parameters(bamfile_name: &String,
         &None => {
             let mut bam = bam::Reader::from_path(bamfile_name).unwrap();
             for r in bam.records() {
+
                 let record = r.unwrap();
+                // may be faster to implement this as bitwise operation on raw flag in the future?
+                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                    record.is_quality_check_failed() ||
+                    record.is_duplicate() || record.is_supplementary() {
+                    continue;
+                }
 
                 let tid: usize = record.tid() as usize;
                 let chrom: String = t_names[record.tid() as usize].clone();
