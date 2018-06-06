@@ -1,4 +1,3 @@
-use std::ascii::AsciiExt;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use chrono::prelude::*;
@@ -93,8 +92,8 @@ pub fn u8_to_string(u: &[u8]) -> String {
 //
 pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
     let mut v: Vec<char> = Vec::with_capacity(u.len());
-    for cu in AsciiExt::to_ascii_uppercase(u) {
-        let c = cu as char;
+    for cu in u.iter() {
+        let c = cu.to_ascii_uppercase() as char;
         //assert!(c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N');
         if c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N' {
             v.push(c);

@@ -5,77 +5,98 @@ use rust_htslib::prelude::*;
 use util::{print_time, GenomicInterval};
 
 pub fn calculate_mean_coverage(bam_file: &String,
-                           interval: &Option<GenomicInterval>,
-                           min_mapq: u8)
-                           -> f64 {
+                               interval: &Option<GenomicInterval>,
+                               min_mapq: u8)
+                               -> f64 {
 
     // there is a really weird bug going on here,
     // hence the duplicate file handles to the bam file.
     // if an indexed reader is used, and fetch is never called, pileup() hangs.
     // so we need to iterate over the fetched indexed pileup if there's a region,
     // or a totally separate pileup from the unindexed file if not.
-    // TODO: try to reproduce as a minimal example and possibly raise issue on Rust-htslib repo
-    let bam = bam::Reader::from_path(bam_file).unwrap();
-    /*
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
-    let bam_pileup = match interval {
-        &Some(ref iv) => {
-            let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
-            bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
-            bam_ix.pileup()
-        }
-        &None => bam.pileup(),
-    };
-    */
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-    // temporarily assume there is a region, until HTSlib v0.17.0 build issue is resolved
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-
-    let iv = interval.clone().unwrap();
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
-    let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
-    bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-
-    let bam_pileup = bam_ix.pileup();
-
 
     let mut prev_tid = 4294967295;
     let mut bam_covered_positions = 0;
     let mut total_read_bases = 0;
     let mut total_bam_ref_positions = 0;
 
-    for p in bam_pileup {
+    match interval {
+        Some(iv) => {
+            let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+            let header = bam_ix.header().clone();
+            let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
+            bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
 
-        let pileup = p.unwrap();
+            for p in bam_ix.pileup() {
 
-        let tid: u32 = pileup.tid();
+                let pileup = p.unwrap();
 
-        if tid != prev_tid {
-            total_bam_ref_positions += bam.header().target_len(tid).unwrap();
-        }
+                let tid: u32 = pileup.tid();
 
-        let mut depth: usize = 0;
+                if tid != prev_tid {
+                    total_bam_ref_positions += header.target_len(tid).unwrap();
+                }
 
-        // pileup the bases for a single position and count number of each base
-        for alignment in pileup.alignments() {
-            let record = alignment.record();
+                let mut depth: usize = 0;
 
-            // may be faster to implement this as bitwise operation on raw flag in the future?
-            if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
-                record.is_quality_check_failed() ||
-                record.is_duplicate() || record.is_supplementary() {
-                continue;
+                // pileup the bases for a single position and count number of each base
+                for alignment in pileup.alignments() {
+                    let record = alignment.record();
+
+                    // may be faster to implement this as bitwise operation on raw flag in the future?
+                    if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                        record.is_quality_check_failed() ||
+                        record.is_duplicate() || record.is_supplementary() {
+                        continue;
+                    }
+
+                    depth += 1;
+
+                }
+
+                bam_covered_positions += 1;
+                total_read_bases += depth;
+                prev_tid = tid;
             }
-
-            depth += 1;
-
         }
+        None => {
+            let mut bam = bam::Reader::from_path(bam_file).unwrap();
+            let header = bam.header().clone();
 
-        bam_covered_positions += 1;
-        total_read_bases += depth;
-        prev_tid = tid;
+            for p in bam.pileup() {
+
+                let pileup = p.unwrap();
+
+                let tid: u32 = pileup.tid();
+
+                if tid != prev_tid {
+                    total_bam_ref_positions += header.target_len(tid).unwrap();
+                }
+
+                let mut depth: usize = 0;
+
+                // pileup the bases for a single position and count number of each base
+                for alignment in pileup.alignments() {
+                    let record = alignment.record();
+
+                    // may be faster to implement this as bitwise operation on raw flag in the future?
+                    if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                        record.is_quality_check_failed() ||
+                        record.is_duplicate() || record.is_supplementary() {
+                        continue;
+                    }
+
+                    depth += 1;
+
+                }
+
+                bam_covered_positions += 1;
+                total_read_bases += depth;
+                prev_tid = tid;
+            }
+        }
     }
+
 
     let total_ref_positions: usize = match interval {
         &Some(ref iv) => {
