@@ -252,7 +252,6 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                 }
             }
             Cigar::Pad(_) |
-            Cigar::Back(_) |
             Cigar::SoftClip(_) |
             Cigar::HardClip(_) => {
                 return Err(CigarError::UnexpectedOperation(
