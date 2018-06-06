@@ -110,13 +110,6 @@ fn main() {
             .help("Minimum estimated quality (Phred-scaled) of allele observation on read to use for genotyping/haplotyping.")
             .display_order(90)
             .default_value("7.0"))
-        .arg(Arg::with_name("Min genotype quality for haplotype scaffold")
-            .short("Q")
-            .long("min_hap_gq")
-            .value_name("float")
-            .help("Minimum genotype quality (Phred-scaled) of a variant to use its haplotype phase to genotype other variants.")
-            .display_order(90)
-            .default_value("50.0"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
@@ -159,12 +152,6 @@ fn main() {
                 .help("Minimum width of alignment band. Band will increase in size if sequences are different lengths.")
                 .display_order(170)
                 .default_value("20"))
-        .arg(Arg::with_name("Max iters since likelihood improvement")
-            .short("I")
-            .long("max_iters")
-            .help("Maximum rounds of haplotype assembly without likelihood improvement before termination.")
-            .display_order(170)
-            .default_value("5"))
         .arg(Arg::with_name("Sample ID")
             .short("s")
             .long("sample_id")
@@ -274,15 +261,6 @@ fn main() {
         panic!("Min allele quality must be a positive float.");
     }
 
-    let min_hap_gq: f64 = input_args.value_of("Min genotype quality for haplotype scaffold")
-        .unwrap()
-        .parse::<f64>()
-        .expect("Argument min_hap_gq must be a positive float!");
-
-    if min_hap_gq <= 0.0 {
-        panic!("min_hap_gq must be a positive float.");
-    }
-
     let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
 
     /*
@@ -332,11 +310,6 @@ fn main() {
         .unwrap()
         .parse::<usize>()
         .expect("Argument band_width must be a positive integer!");
-
-    let max_iters_since_improvement: usize = input_args.value_of("Max iters since likelihood improvement")
-        .unwrap()
-        .parse::<usize>()
-        .expect("Argument max_iters must be a positive integer!");
 
     let use_poa = match input_args.occurrences_of("Use POA") {
         0 => false,
@@ -473,7 +446,7 @@ fn main() {
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, max_p_miscall,
-                                   min_hap_gq, max_iters_since_improvement, &sample_name);
+                                   &sample_name);
 
 
     if use_poa {
@@ -522,8 +495,7 @@ fn main() {
 
         eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
         call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-            &variant_debug_directory, 6, max_cov, max_p_miscall, min_hap_gq, max_iters_since_improvement,
-            &sample_name);
+            &variant_debug_directory, 6, max_cov, max_p_miscall,&sample_name);
 
         /***********************************************************************************************/
         // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
