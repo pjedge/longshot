@@ -82,6 +82,7 @@ fn main() {
                 .value_name("string")
                 .help("Region in format <chrom> or <chrom:start-stop> in which to call variants.")
                 .display_order(40)
+                .required(true)
                 .takes_value(true))
         .arg(Arg::with_name("Max coverage fraction")
             .short("c")
@@ -495,7 +496,7 @@ fn main() {
 
         eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
         call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-            &variant_debug_directory, 6, max_cov, max_p_miscall,&sample_name);
+            &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name);
 
         /***********************************************************************************************/
         // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
