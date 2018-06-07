@@ -122,8 +122,9 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       max_p_miscall: f64,
                                       sample_name: &String) {
 
-    let max_iters_since_improvement = 1;
     let min_hap_gq: f64 = 1.0;
+    let max_iters_since_improvement: usize = 1;
+
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
     assert_eq!(pileup_lst.len(), varlist.lst.len());

@@ -12,6 +12,7 @@ use std::collections::{HashMap,HashSet};
 use bio::stats::{LogProb, Prob};
 use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
 use spoa::poa_multiple_sequence_alignment;
+use std::ascii::AsciiExt;
 use realignment::{LnAlignmentParameters};
 
 use std::str;
@@ -491,7 +492,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
         let r_ref: usize = pos_ref + d;
         let mut ref_window: Vec<u8> = vec![];
         for i in l_ref..r_ref + 1 {
-            ref_window.push(ref_seq[i].to_ascii_uppercase());
+            ref_window.push(AsciiExt::to_ascii_uppercase(&ref_seq[i]));
         }
 
         let mut ref_window_nullterm = ref_window.clone();
@@ -531,7 +532,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
 
             let mut read_seq: Vec<u8> = vec![];
             for i in l_read..r_read {
-                let c = alignment.record().seq()[i].to_ascii_uppercase();
+                let c = AsciiExt::to_ascii_uppercase(&alignment.record().seq()[i]);
                 read_seq.push(c)
             }
             read_seq.push('\0' as u8);

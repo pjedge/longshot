@@ -5,15 +5,31 @@ use rust_htslib::prelude::*;
 use util::{print_time, GenomicInterval};
 
 pub fn calculate_mean_coverage(bam_file: &String,
-                               interval: &Option<GenomicInterval>,
-                               min_mapq: u8)
-                               -> f64 {
+                           interval: &Option<GenomicInterval>,
+                           min_mapq: u8)
+                           -> f64 {
 
     // there is a really weird bug going on here,
     // hence the duplicate file handles to the bam file.
     // if an indexed reader is used, and fetch is never called, pileup() hangs.
     // so we need to iterate over the fetched indexed pileup if there's a region,
     // or a totally separate pileup from the unindexed file if not.
+    // TODO: try to reproduce as a minimal example and possibly raise issue on Rust-htslib repo
+    let bam = bam::Reader::from_path(bam_file).unwrap();
+    /*
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let bam_pileup = match interval {
+        &Some(ref iv) => {
+            let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
+            bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+            bam_ix.pileup()
+        }
+        &None => bam.pileup(),
+    };
+    */
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // temporarily assume there is a region, until HTSlib v0.17.0 build issue is resolved
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
     let mut prev_tid = 4294967295;
     let mut bam_covered_positions = 0;
@@ -21,9 +37,8 @@ pub fn calculate_mean_coverage(bam_file: &String,
     let mut total_bam_ref_positions = 0;
 
     match interval {
-        Some(iv) => {
+        &Some(ref iv) => {
             let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
-            let header = bam_ix.header().clone();
             let iv_tid = bam_ix.header().tid(iv.chrom.as_bytes()).unwrap();
             bam_ix.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
 
@@ -34,7 +49,7 @@ pub fn calculate_mean_coverage(bam_file: &String,
                 let tid: u32 = pileup.tid();
 
                 if tid != prev_tid {
-                    total_bam_ref_positions += header.target_len(tid).unwrap();
+                    total_bam_ref_positions += bam.header().target_len(tid).unwrap();
                 }
 
                 let mut depth: usize = 0;
@@ -58,19 +73,18 @@ pub fn calculate_mean_coverage(bam_file: &String,
                 total_read_bases += depth;
                 prev_tid = tid;
             }
-        }
-        None => {
-            let mut bam = bam::Reader::from_path(bam_file).unwrap();
-            let header = bam.header().clone();
+        },
+        &None => {
+            let mut bam2 = bam::Reader::from_path(bam_file).unwrap();
 
-            for p in bam.pileup() {
+            for p in bam2.pileup() {
 
                 let pileup = p.unwrap();
 
                 let tid: u32 = pileup.tid();
 
                 if tid != prev_tid {
-                    total_bam_ref_positions += header.target_len(tid).unwrap();
+                    total_bam_ref_positions += bam.header().target_len(tid).unwrap();
                 }
 
                 let mut depth: usize = 0;
