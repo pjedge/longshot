@@ -5,7 +5,7 @@ extern crate cc;
 fn main() {
     cc::Build::new()
         .flag_if_supported("-O3")
-        .flag_if_supported("-D_GNU_SOURCE")
+        //.flag_if_supported("-D_GNU_SOURCE")
         .flag_if_supported("-Wall")
         .file("src/hapcut2/common.c")
         .file("src/hapcut2/fragmatrix.c")
@@ -28,6 +28,6 @@ fn main() {
         .file("src/poa/poa_func.cpp")
         .compile("poa_func");
 
-        println!("cargo:rustc-flags=-L src/poa/spoa/build/lib/ -l spoa");
+        println!("cargo:rustc-flags=-L src/poa/spoa/build/lib/ -L /home/pedge/anaconda3/envs/tscc/lib -l spoa");
         //println!("cargo:rustc-flags=-l dylib=stdc++ -lspoa");
 }
