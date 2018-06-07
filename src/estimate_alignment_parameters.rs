@@ -252,6 +252,7 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                 }
             }
             Cigar::Pad(_) |
+            Cigar::Back(_) |
             Cigar::SoftClip(_) |
             Cigar::HardClip(_) => {
                 return Err(CigarError::UnexpectedOperation(
@@ -340,8 +341,6 @@ pub fn estimate_alignment_parameters(bamfile_name: &String,
 
         prev_tid = tid;
     }
-
-    };
 
     let alignment_counts = AlignmentCounts {
         transition_counts: transition_counts,
