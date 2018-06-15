@@ -12,7 +12,7 @@ extern crate petgraph;
 
 mod haplotype_assembly;
 mod call_potential_snvs;
-mod extract_fragments;
+mod extract_fragments; mod extract_fragments_debug;
 mod call_genotypes;
 mod realignment;
 mod util;
@@ -170,12 +170,19 @@ fn main() {
             .long("max_alignment")
             .help("Use max scoring alignment algorithm rather than pair HMM forward algorithm.")
             .display_order(165))
+        .arg(Arg::with_name("Debug Allele Realignment")
+            .short("u")
+            .long("debug_allele_realignment")
+            .hidden(true)
+            .help("Do NOT call variants, only print out meta-stats (number of expected operations etc) for allele realignment.")
+            .display_order(165))
         .arg(Arg::with_name("Variant debug directory")
             .short("d")
             .long("variant_debug_dir")
             .value_name("path")
             .help("write out current information about variants at each step of algorithm to files in this directory")
             .display_order(210))
+
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -307,6 +314,12 @@ fn main() {
         }
     };
 
+    let debug_allele_realignment: bool = match input_args.occurrences_of("Debug Allele Realignment") {
+        0 => {false},
+        1 => {true},
+        _ => {panic!("debug_allele_realignment specified multiple times");}
+    };
+
     let band_width: usize = input_args.value_of("Band width")
         .unwrap()
         .parse::<usize>()
@@ -415,6 +428,20 @@ fn main() {
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
     if varlist.lst.len() == 0 {
+        return;
+    }
+
+    if debug_allele_realignment {
+
+        extract_fragments_debug::extract_fragments_debug(&bamfile_name,
+                                             &fasta_file,
+                                             &varlist,
+                                             &interval,
+                                             extract_fragment_parameters,
+                                             alignment_parameters,
+                                             None);
+
+        eprintln!("{} Allele realignment debugging complete. Exiting...",print_time());
         return;
     }
     /***********************************************************************************************/
