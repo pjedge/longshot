@@ -11,8 +11,8 @@ use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use realignment::*;
-static VERBOSE: bool = false;
 
+static VERBOSE: bool = true;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 
 #[derive(Clone, Copy)]
