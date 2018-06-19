@@ -137,6 +137,13 @@ fn main() {
                 .help("Maximum \"padding\" bases on either side of variant realignment window")
                 .display_order(150)
                 .default_value("50"))
+        .arg(Arg::with_name("Max CIGAR indel")
+                .short("I")
+                .long("max_cigar_indel")
+                .value_name("int")
+                .default_value("20")
+                .help("Throw away a read-variant during allelotyping if there is a CIGAR indel (I/D/N) longer than this amount in its window.")
+                .display_order(151))
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
@@ -260,6 +267,11 @@ fn main() {
         .parse::<usize>()
         .expect("Argument max_window must be a positive integer!");
 
+    let max_cigar_indel: usize = input_args.value_of("Max CIGAR indel")
+        .unwrap()
+        .parse::<usize>()
+        .expect("Argument max_cigar_indel must be a positive integer!");
+
     let min_allele_qual: f64 = input_args.value_of("Min allele quality")
         .unwrap()
         .parse::<f64>()
@@ -372,7 +384,8 @@ fn main() {
         band_width: band_width,
         anchor_length: anchor_length,
         short_hap_max_snvs: short_hap_max_snvs,
-        max_window_padding: max_window_padding
+        max_window_padding: max_window_padding,
+        max_cigar_indel: max_cigar_indel
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());

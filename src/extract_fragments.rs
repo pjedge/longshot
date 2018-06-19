@@ -12,7 +12,7 @@ use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use realignment::*;
 
-static VERBOSE: bool = true;
+static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 
 #[derive(Clone, Copy)]
@@ -23,6 +23,7 @@ pub struct ExtractFragmentParameters {
     pub anchor_length: usize,
     pub short_hap_max_snvs: usize,
     pub max_window_padding: usize,
+    pub max_cigar_indel: usize
 }
 
 // an extension of the rust-htslib cigar representation
@@ -222,6 +223,10 @@ pub fn find_anchors(bam_record: &Record,
         ref_seq_max_window.push(*c as u8);
     }
 
+    if VERBOSE {
+        eprintln!("Finding anchors for variant at {} {} {}:",var_interval.chrom, var_interval.start_pos, var_interval.end_pos);
+    }
+
     if var_interval.chrom != target_names[bam_record.tid() as usize] ||
         (var_interval.start_pos as i32) >=
             bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
@@ -242,6 +247,7 @@ pub fn find_anchors(bam_record: &Record,
     let contains_pos = |pos: u32, cigar_op_start: u32, cigar_op_length: u32| {
         cigar_op_start <= pos && cigar_op_start + cigar_op_length > pos
     };
+
 
     // find left_ix and right_ix.
     // these are the indexes into the CIGAR of the CIGAR operation holding the
@@ -282,9 +288,15 @@ pub fn find_anchors(bam_record: &Record,
     //println!("**************************************************");
     //println!("searching for left anchor...");
 
+    if VERBOSE {
+        eprint!("Finding left anchor: ");
+    }
+
     for i in (0..left_ix + 1).rev() {
         match cigarpos_list[i].cig {
+
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
+
                 match_len_left += l;
                 let mut potential_anchor = false;
                 if seen_indel_left && match_len_left > anchor_length {
@@ -301,6 +313,10 @@ pub fn find_anchors(bam_record: &Record,
                         (var_interval.start_pos - anchor_length -
                             cigarpos_list[i].ref_pos);
                     potential_anchor = true;
+                }
+
+                if VERBOSE {
+                    eprint!("M/=/X {},", l);
                 }
 
                 if potential_anchor {
@@ -350,9 +366,15 @@ pub fn find_anchors(bam_record: &Record,
                     }
                 }
             }
-            Cigar::Ins(_) |
-            Cigar::Del(_) |
-            Cigar::RefSkip(_) => {
+            Cigar::Ins(l) |
+            Cigar::Del(l) |
+            Cigar::RefSkip(l) => {
+                if l > extract_params.max_cigar_indel as u32 {
+                    return Ok(None); // cigar indel too long
+                }
+                if VERBOSE {
+                    eprint!("I/D/N {},", l);
+                }
                 match_len_left = 0;
                 seen_indel_left = true;
             }
@@ -367,13 +389,18 @@ pub fn find_anchors(bam_record: &Record,
         }
     }
 
+    if VERBOSE {
+        eprintln!("");
+    }
+
     if !found_anchor_left {
         return Ok(None); // failed to find a left anchor
     }
 
     //println!("**************************************************");
-    //println!("searching for right anchor...");
-    // step forwards to find right anchor
+    if VERBOSE {
+        eprint!("Finding right anchor: ");
+    }    // step forwards to find right anchor
     let mut match_len_right = 0;
     let mut seen_indel_right = false;
     let mut found_anchor_right = false;
@@ -398,6 +425,10 @@ pub fn find_anchors(bam_record: &Record,
                         (var_interval.end_pos + anchor_length -
                             cigarpos_list[i].ref_pos);
                     potential_anchor = true;
+                }
+
+                if VERBOSE {
+                    eprint!("M/=/X {}, ", l);
                 }
 
                 if potential_anchor {
@@ -447,9 +478,15 @@ pub fn find_anchors(bam_record: &Record,
                     }
                 }
             }
-            Cigar::Ins(_) |
-            Cigar::Del(_) |
-            Cigar::RefSkip(_) => {
+            Cigar::Ins(l) |
+            Cigar::Del(l) |
+            Cigar::RefSkip(l) => {
+                if l > extract_params.max_cigar_indel as u32 {
+                    return Ok(None); // cigar indel too long
+                }
+                if VERBOSE {
+                    eprint!("I/D/N {}, ", l);
+                }
                 match_len_right = 0;
                 seen_indel_right = true;
             }
@@ -462,6 +499,10 @@ pub fn find_anchors(bam_record: &Record,
                 ));
             }
         }
+    }
+
+    if VERBOSE {
+        eprintln!("");
     }
 
     if !found_anchor_right {
@@ -562,16 +603,16 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
     if VERBOSE {
         for var in var_cluster.clone() {
-            print!("{} {}",
+            eprint!("{} {}",
                      var.chrom,
                      var.pos0);
             for allele in var.alleles {
-                print!(" {}", allele);
+                eprint!(" {}", allele);
             }
-            println!("");
+            eprintln!("");
         }
         let read_seq_str: String = read_window.clone().into_iter().collect();
-        println!("read: {}", read_seq_str);
+        eprintln!("read: {}", read_seq_str);
     }
 
     let haps = generate_haps(&var_cluster);
@@ -630,7 +671,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
         if VERBOSE {
             let hap_seq_str: String = hap_window.into_iter().collect();
-            println!("hap:{:?} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
+            eprintln!("hap:{:?} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
         }
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
@@ -658,13 +699,13 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
 
         if VERBOSE {
-            print!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
+            eprint!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
             for allele in &var_cluster[v].alleles {
-                print!(" {}", allele);
+                eprint!(" {}", allele);
             }
 
-            print!("; allele = {};", best_allele);
-            println!(" qual = {};", *Prob::from(qual));
+            eprint!("; allele = {};", best_allele);
+            eprintln!(" qual = {};", *Prob::from(qual));
 
         }
 
@@ -678,7 +719,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     }
 
     if VERBOSE {
-        println!("--------------------------------------");
+        eprintln!("--------------------------------------");
     }
 
     calls
@@ -698,7 +739,7 @@ pub fn extract_fragment(bam_record: &Record,
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname());
 
-    if VERBOSE {println!("Extracting fragment for read {}...", id);}
+    if VERBOSE {eprintln!("Extracting fragment for read {}...", id);}
 
     let mut fragment = Fragment {
         id: id,
