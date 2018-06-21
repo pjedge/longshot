@@ -1,3 +1,6 @@
 [submodule "src/poa/spoa"]
 	path = src/poa/spoa
 	url = https://github.com/rvaser/spoa
+[submodule "study/HapCUT2"]
+	path = study/HapCUT2
+	url = https://github.com/vibansal/HapCUT2
