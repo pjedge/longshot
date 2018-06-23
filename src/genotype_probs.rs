@@ -196,13 +196,17 @@ impl GenotypePriors {
     // "prior probability of each genotype"
     // we've modified it in this case to have two extra options: 'I' and 'D'
     // these represent short insertions and short deletions.
-    pub fn new() -> GenotypePriors {
+    pub fn new(hom_snv_rate: LogProb, het_snv_rate: LogProb,
+               hom_indel_rate: LogProb, het_indel_rate: LogProb,
+               ts_tv_ratio: f64) -> GenotypePriors {
 
-        let hom_snp_rate = LogProb::from(Prob(0.0005));
-        let het_snp_rate = LogProb::from(Prob(0.001));
-        let hom_indel_rate = LogProb::from(Prob(0.00005));
-        let het_indel_rate = LogProb::from(Prob(0.0001));
+        //let hom_snv_rate = LogProb::from(Prob(0.0005));
+        //let het_snv_rate = LogProb::from(Prob(0.001));
+        //let hom_indel_rate = LogProb::from(Prob(0.00005));
+        //let het_indel_rate = LogProb::from(Prob(0.0001));
 
+        let ts: LogProb = LogProb::from(Prob(ts_tv_ratio / (ts_tv_ratio + 2.0)));
+        let tv: LogProb = LogProb::from(Prob(1.0 / (ts_tv_ratio + 2.0)));
         // key of diploid_genotype_priors is (char,(char,char)) (ref_allele, G=(allele1,allele2))
         // key of haploid priors is (char, char) which is (ref_allele, allele1)
         let mut diploid_genotype_priors: HashMap<(char, (char, char)), LogProb> = HashMap::new();
@@ -233,19 +237,19 @@ impl GenotypePriors {
         for aref in &alleles {
             let allele = *aref;
             // priors on haploid alleles
-            haploid_genotype_priors.insert((allele, allele), LogProb::ln_one_minus_exp(&(het_snp_rate + het_indel_rate)));
-            haploid_genotype_priors.insert((allele, *transition.get(&allele).unwrap()), het_snp_rate + LogProb::from(Prob(4.0 / 6.0)));
+            haploid_genotype_priors.insert((allele, allele), LogProb::ln_one_minus_exp(&(het_snv_rate + het_indel_rate)));
+            haploid_genotype_priors.insert((allele, *transition.get(&allele).unwrap()), het_snv_rate + ts);
 
             for tref in &alleles {
                 let transversion = *tref;
                 if haploid_genotype_priors.contains_key(&(allele, transversion)) {
                     continue;
                 }
-                haploid_genotype_priors.insert((allele, transversion), het_snp_rate + LogProb::from(Prob(1.0 / 6.0)));
+                haploid_genotype_priors.insert((allele, transversion), het_snv_rate + tv);
             }
 
             // assume indel has a 0.5 chance of being insertion, 0.5 chance of deletion
-            // scale the prior by 1/3 since the SNP events are divided into 3 types... (transition to each base)
+            // scale the prior by 1/4 since the SNP events are divided into 3 types... (transition to each base)
             haploid_genotype_priors.insert((allele, 'D'), het_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
             haploid_genotype_priors.insert((allele, 'I'), het_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
 
@@ -254,7 +258,7 @@ impl GenotypePriors {
                 // probability of homozygous reference is the probability of neither het or hom SNP
                 if g1 == g2 && g1 == allele {
                     // g1 and g2 are the reference bases
-                    let var_rate = LogProb::ln_sum_exp(&[hom_snp_rate, het_snp_rate, hom_indel_rate, het_indel_rate]);
+                    let var_rate = LogProb::ln_sum_exp(&[hom_snv_rate, het_snv_rate, hom_indel_rate, het_indel_rate]);
                     let one_minus_snp_rate = LogProb::ln_one_minus_exp(&var_rate);
                     diploid_genotype_priors.insert((allele, *gt), one_minus_snp_rate);
                 } else if g1 == g2 && g1 != allele {
@@ -263,10 +267,10 @@ impl GenotypePriors {
                         diploid_genotype_priors.insert((allele, *gt), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
                     } else if g1 == *transition.get(&allele).unwrap() { // otherwise it is a homozygous SNV
                         // transitions are 4 times as likely as transversions
-                        diploid_genotype_priors.insert((allele, *gt), hom_snp_rate + LogProb::from(Prob(4.0 / 6.0)));
+                        diploid_genotype_priors.insert((allele, *gt), hom_snv_rate + ts);
                     } else {
                         // transversion
-                        diploid_genotype_priors.insert((allele, *gt), hom_snp_rate + LogProb::from(Prob(1.0 / 6.0)));
+                        diploid_genotype_priors.insert((allele, *gt), hom_snv_rate + tv);
                     }
                 } else { // else it's the product of the haploid priors
                     diploid_genotype_priors.insert((allele, *gt), *haploid_genotype_priors.get(&(allele, g1)).unwrap() +
@@ -281,10 +285,29 @@ impl GenotypePriors {
         //    .map(|(&(ra,(g1,g2)),&p)| (&(ra,(g1,g2)),&*Prob::from(p)))
         //    .collect::<Vec<_>>();
         //priors_vec.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        /*
+        let mut a_sum = LogProb::ln_zero();
+        let mut c_sum = LogProb::ln_zero();
+        let mut g_sum = LogProb::ln_zero();
+        let mut t_sum = LogProb::ln_zero();
 
         for (&(ref ra, (ref g1, ref g2)), &p) in &diploid_genotype_priors {
             eprintln!("{} {} {}/{} {}", SPACER, ra, g1, g2, *Prob::from(p));
+            match ra {
+                'A' => {a_sum = LogProb::ln_add_exp(a_sum, p);},
+                'C' => {c_sum = LogProb::ln_add_exp(c_sum, p);},
+                'G' => {g_sum = LogProb::ln_add_exp(g_sum, p);},
+                'T' => {t_sum = LogProb::ln_add_exp(t_sum, p);},
+                _   => {panic!("Invalid ref allele")}
+            }
         }
+
+        eprintln!("\n{}Sum of ref allele \"A\" priors: {}", SPACER, *Prob::from(a_sum));
+        eprintln!("{}Sum of ref allele \"C\" priors: {}", SPACER, *Prob::from(c_sum));
+        eprintln!("{}Sum of ref allele \"G\" priors: {}", SPACER, *Prob::from(g_sum));
+        eprintln!("{}Sum of ref allele \"T\" priors: {}\n", SPACER, *Prob::from(t_sum));
+        */
+
 
         GenotypePriors{priors_dict: diploid_genotype_priors}
     }
