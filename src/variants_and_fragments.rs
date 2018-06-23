@@ -107,7 +107,7 @@ impl VarList {
         if self.lst.len() == 0 {
             return;
         }
-        for i in 0..self.lst.len()-1{
+        for i in 0..self.lst.len()-1 {
             assert!((self.lst[i].tid < self.lst[i+1].tid) ||
                     (self.lst[i].tid == self.lst[i+1].tid && self.lst[i].pos0 <= self.lst[i+1].pos0));
             assert_eq!(self.lst[i].ix, i);
@@ -190,13 +190,20 @@ impl VarList {
 
         let mut i = self.ix.get(&interval.chrom).unwrap()[index_pos];
 
-        while i < self.lst.len() &&
+        while i < self.lst.len() && self.lst[i].tid == interval.tid as usize &&
             self.lst[i].pos0 + self.lst[i].longest_allele_len() <= interval.end_pos as usize {
             if self.lst[i].pos0 >= interval.start_pos as usize {
                 vlst.push(self.lst[i].clone());
             }
             i += 1;
         }
+
+        for var in &vlst {
+            assert!(var.chrom == interval.chrom);
+            assert!(var.pos0 >= interval.start_pos as usize);
+            assert!(var.pos0 <= interval.end_pos as usize);
+        }
+
         vlst
     }
 
@@ -503,10 +510,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range1() {
         let vlst = generate_test_lst1();
+        let t = 0;
         let c = "chr1".to_string();
         let p1 = 2500;
         let p2 = 8000;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,
@@ -523,10 +532,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range2() {
         let vlst = generate_test_lst1();
+        let t = 1;
         let c = "chr2".to_string();
         let p1 = 0;
         let p2 = 3000;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,
@@ -545,10 +556,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range3() {
         let vlst = generate_test_lst1();
+        let t = 1;
         let c = "chr2".to_string();
         let p1 = 6000;
         let p2 = 10000;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,
@@ -565,10 +578,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range4() {
         let vlst = generate_test_lst1();
+        let t = 2;
         let c = "chr3".to_string();
         let p1 = 20100;
         let p2 = 20200;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,
@@ -584,10 +599,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range5() {
         let vlst = generate_test_lst1();
+        let t = 2;
         let c = "chr3".to_string();
         let p1 = 20200;
         let p2 = 20200;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,
@@ -604,10 +621,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range6() {
         let vlst = generate_test_lst1();
+        let t = 2;
         let c = "chr3".to_string();
         let p1 = 25000;
         let p2 = 30500;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,
@@ -625,10 +644,12 @@ mod tests {
     #[test]
     fn test_varlist_get_variants_range7() {
         let vlst = generate_test_lst1();
+        let t = 2;
         let c = "chr3".to_string();
         let p1 = 100000;
         let p2 = 200000;
         let interval = GenomicInterval {
+            tid: t,
             chrom: c,
             start_pos: p1,
             end_pos: p2,

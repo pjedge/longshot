@@ -103,8 +103,6 @@ impl AlignmentCounts {
 }
 
 
-// for a given read
-
 //************************************************************************************************
 // BEGINNING OF RUST-HTSLIB BASED CODE *****************************************************************
 //************************************************************************************************
@@ -270,16 +268,16 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
 //************************************************************************************************
 
 
-pub fn estimate_alignment_parameters(bamfile_name: &String,
-                                     fastafile_name: &String,
+pub fn estimate_alignment_parameters(bam_file: &String,
+                                     fasta_file: &String,
                                      interval: &Option<GenomicInterval>,
                                      min_mapq: u8)
                                      -> AlignmentParameters {
 
-    let t_names = parse_target_names(&bamfile_name);
+    let t_names = parse_target_names(&bam_file);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
-    let mut fasta = fasta::IndexedReader::from_file(fastafile_name).unwrap();
+    let mut fasta = fasta::IndexedReader::from_file(fasta_file).unwrap();
     let mut ref_seq: Vec<char> = vec![];
 
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
@@ -300,80 +298,45 @@ pub fn estimate_alignment_parameters(bamfile_name: &String,
         not_equal: 1
     };
 
-    match interval {
-        &Some(ref iv) => {
-            let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
-            let iv_tid = bam.header().tid(iv.chrom.as_bytes()).unwrap();
-            bam.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
-            for r in bam.records() {
-                let record = r.unwrap();
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
 
-                // may be faster to implement this as bitwise operation on raw flag in the future?
-                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
-                    record.is_quality_check_failed() ||
-                    record.is_duplicate() || record.is_supplementary() {
-                    continue;
-                }
+    for iv in interval_lst {
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
 
-                let tid: usize = record.tid() as usize;
-                let chrom: String = t_names[record.tid() as usize].clone();
-                //println!("{}",u8_to_string(record.qname()));
-                if tid != prev_tid {
-                    let mut ref_seq_u8: Vec<u8> = vec![];
-                    fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
-                    ref_seq = dna_vec(&ref_seq_u8);
-                }
+        for r in bam_ix.records() {
+            let record = r.unwrap();
 
-                let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
-                let bam_cig: CigarStringView = record.cigar();
-                let cigarpos_list: Vec<CigarPos> =
-                    create_augmented_cigarlist(record.pos() as u32, &bam_cig).expect("Error creating augmented cigarlist.");
-
-                let (read_transition_counts, read_emission_counts) =
-                    count_alignment_events(&cigarpos_list, &ref_seq, &read_seq).expect("Error counting cigar alignment events.");
-
-                transition_counts.add(read_transition_counts);
-                emission_counts.add(read_emission_counts);
-
-                prev_tid = tid;
+            // may be faster to implement this as bitwise operation on raw flag in the future?
+            if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                record.is_quality_check_failed() ||
+                record.is_duplicate() || record.is_supplementary() {
+                continue;
             }
-        }
-        &None => {
-            let mut bam = bam::Reader::from_path(bamfile_name).unwrap();
-            for r in bam.records() {
 
-                let record = r.unwrap();
-                // may be faster to implement this as bitwise operation on raw flag in the future?
-                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
-                    record.is_quality_check_failed() ||
-                    record.is_duplicate() || record.is_supplementary() {
-                    continue;
-                }
-
-                let tid: usize = record.tid() as usize;
-                let chrom: String = t_names[record.tid() as usize].clone();
-
-                if tid != prev_tid {
-                    let mut ref_seq_u8: Vec<u8> = vec![];
-                    fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
-                    ref_seq = dna_vec(&ref_seq_u8);
-                }
-
-                let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
-                let bam_cig: CigarStringView = record.cigar();
-                let cigarpos_list: Vec<CigarPos> =
-                    create_augmented_cigarlist(record.pos() as u32, &bam_cig).expect("Error creating augmented cigarlist.");
-
-                let (read_transition_counts, read_emission_counts) =
-                    count_alignment_events(&cigarpos_list, &ref_seq, &read_seq).expect("Error counting cigar alignment events.");
-
-                transition_counts.add(read_transition_counts);
-                emission_counts.add(read_emission_counts);
-
-                prev_tid = tid;
+            let tid: usize = record.tid() as usize;
+            let chrom: String = t_names[record.tid() as usize].clone();
+            //println!("{}",u8_to_string(record.qname()));
+            if tid != prev_tid {
+                let mut ref_seq_u8: Vec<u8> = vec![];
+                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                ref_seq = dna_vec(&ref_seq_u8);
             }
+
+            let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
+            let bam_cig: CigarStringView = record.cigar();
+            let cigarpos_list: Vec<CigarPos> =
+                create_augmented_cigarlist(record.pos() as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+
+            let (read_transition_counts, read_emission_counts) =
+                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq).expect("Error counting cigar alignment events.");
+
+            transition_counts.add(read_transition_counts);
+            emission_counts.add(read_emission_counts);
+
+            prev_tid = tid;
         }
-    };
+    }
 
     let alignment_counts = AlignmentCounts {
         transition_counts: transition_counts,

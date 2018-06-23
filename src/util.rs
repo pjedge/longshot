@@ -1,4 +1,3 @@
-use std::ascii::AsciiExt;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use chrono::prelude::*;
@@ -46,6 +45,7 @@ pub fn parse_region_string(region_string: Option<&str>,
             }
 
             Some(GenomicInterval {
+                tid: tid,
                 chrom: iv_chrom,
                 start_pos: iv_start,
                 end_pos: iv_end - 1,
@@ -66,6 +66,7 @@ pub fn parse_region_string(region_string: Option<&str>,
 
             let tlen = bam.header().target_len(tid).unwrap();
             Some(GenomicInterval {
+                tid: tid,
                 chrom: r_str,
                 start_pos: 0,
                 end_pos: tlen - 1,
@@ -77,6 +78,7 @@ pub fn parse_region_string(region_string: Option<&str>,
 
 #[derive(Clone)]
 pub struct GenomicInterval {
+    pub tid: u32,
     pub chrom: String,
     // chromosome name
     pub start_pos: u32,
@@ -93,7 +95,7 @@ pub fn u8_to_string(u: &[u8]) -> String {
 //
 pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
     let mut v: Vec<char> = Vec::with_capacity(u.len());
-    for cu in AsciiExt::to_ascii_uppercase(u) {
+    for cu in u.to_ascii_uppercase() {
         let c = cu as char;
         //assert!(c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N');
         if c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N' {
@@ -124,4 +126,43 @@ pub fn parse_target_names(bam_file: &String) -> Vec<String> {
     }
 
     target_names
+}
+
+pub fn get_whole_genome_intervals(bam_file: &String) -> Vec<GenomicInterval> {
+    let bam = bam::Reader::from_path(bam_file).unwrap();
+    let header_view = bam.header();
+    let target_names_dec: Vec<&[u8]> = header_view.target_names();
+    let mut intervals: Vec<GenomicInterval> = vec![];
+
+    for (tid, t_name_dec) in target_names_dec.iter().enumerate() {
+        let mut name_vec: Vec<char> = vec![];
+        for decr in t_name_dec.iter() {
+            let dec: u8 = *decr;
+            name_vec.push(dec as char);
+        }
+        let name_string: String = name_vec.into_iter().collect();
+        intervals.push(GenomicInterval{
+            tid: tid as u32,
+            chrom: name_string,
+            start_pos: 0,
+            end_pos: header_view.target_len(tid as u32).unwrap()-1
+        });
+    }
+
+    intervals
+}
+
+// given a bam file name and a possible genomic interval,
+// if the interval exists then just return a vector holding that lone interval
+// otherwise, if the interval is None,
+// return a vector holding GenomicIntervals representing the whole genome.
+pub fn get_interval_lst(bam_file: &String, interval: &Option<GenomicInterval>) -> Vec<GenomicInterval> {
+    match interval {
+        &Some(ref iv) => {
+            vec![iv.clone()]
+        }
+        &None => {
+            get_whole_genome_intervals(bam_file)
+        }
+    }
 }
