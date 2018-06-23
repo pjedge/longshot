@@ -18,7 +18,7 @@ mod realignment;
 mod util;
 mod estimate_read_coverage;
 mod estimate_alignment_parameters;
-mod spoa;
+//mod spoa;
 mod variants_and_fragments;
 mod print_output;
 mod genotype_probs;
@@ -33,7 +33,7 @@ use util::*;
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use bio::stats::{LogProb,Prob, PHREDProb};
-use haplotype_assembly::separate_reads_by_haplotype;
+//use haplotype_assembly::separate_reads_by_haplotype;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType};
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
@@ -82,7 +82,7 @@ fn main() {
                 .value_name("string")
                 .help("Region in format <chrom> or <chrom:start-stop> in which to call variants.")
                 .display_order(40)
-                .required(true)
+                //.required(true)
                 .takes_value(true))
         .arg(Arg::with_name("Max coverage fraction")
             .short("c")
@@ -125,11 +125,11 @@ fn main() {
                 .help("Cut off short haplotypes after this many SNVs. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
                 .display_order(130)
                 .default_value("3"))
-        .arg(Arg::with_name("Use POA")
+        /*.arg(Arg::with_name("Use POA")
             .short("p")
             .long("poa")
             .help("EXPERIMENTAL: Run the algorithm twice, using Partial-Order-Alignment on phased reads to find new candidate SNVs and Indels the second time.")
-            .display_order(130))
+            .display_order(130))*/
         .arg(Arg::with_name("Max window padding")
                 .short("W")
                 .long("max_window")
@@ -167,11 +167,41 @@ fn main() {
             .help("Specify a sample ID to write to the output VCF")
             .display_order(177)
             .default_value(&"SAMPLE"))
-        /*.arg(Arg::with_name("No haplotypes")
+        .arg(Arg::with_name("Homozygous SNV Rate")
+            .long("hom_snv_rate")
+            .value_name("float")
+            .help("Specify the homozygous SNV Rate for genotype prior estimation")
+            .display_order(178)
+            .default_value(&"0.0005"))
+        .arg(Arg::with_name("Heterozygous SNV Rate")
+            .long("het_snv_rate")
+            .value_name("float")
+            .help("Specify the heterozygous SNV Rate for genotype prior estimation")
+            .display_order(179)
+            .default_value(&"0.001"))
+        .arg(Arg::with_name("Homozygous Indel Rate")
+            .long("hom_indel_rate")
+            .value_name("float")
+            .help("Specify the homozygous Indel Rate for genotype prior estimation")
+            .display_order(180)
+            .default_value(&"0.00005"))
+        .arg(Arg::with_name("Heterozygous Indel Rate")
+            .long("het_indel_rate")
+            .value_name("float")
+            .help("Specify the heterozygous Indel Rate for genotype prior estimation")
+            .display_order(181)
+            .default_value(&"0.0001"))
+        .arg(Arg::with_name("ts/tv Ratio")
+            .long("ts_tv_ratio")
+            .value_name("float")
+            .help("Specify the transition/transversion ratio for Genotype Prior estimation")
+            .display_order(182)
+            .default_value(&"4.0"))
+        .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
                 .help("Don't call HapCUT2 to phase variants.")
-                .display_order(190))*/
+                .display_order(190))
         .arg(Arg::with_name("Max alignment")
             .short("x")
             .long("max_alignment")
@@ -205,6 +235,14 @@ fn main() {
         1 => true,
         _ => {
             panic!("force_overwrite specified multiple times");
+        }
+    };
+
+    let no_haps = match input_args.occurrences_of("No haplotypes") {
+        0 => false,
+        1 => true,
+        _ => {
+            panic!("no_haps specified multiple times");
         }
     };
 
@@ -283,6 +321,31 @@ fn main() {
 
     let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
 
+    let hom_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous SNV Rate")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument hom_snv_rate must be a positive float!")));
+
+    let het_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Heterozygous SNV Rate")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument het_snv_rate must be a positive float!")));
+
+    let hom_indel_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous Indel Rate")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument hom_indel_rate must be a positive float!")));
+
+    let het_indel_rate: LogProb = LogProb::from(Prob(input_args.value_of("Heterozygous Indel Rate")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument het_indel_rate must be a positive float!")));
+
+    let ts_tv_ratio = input_args.value_of("ts/tv Ratio")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument ts_tv_ratio must be a positive float!");
+
     /*
     let max_mec_frac = match input_args.occurrences_of("Max MEC Fraction") {
         0 => None,
@@ -337,13 +400,14 @@ fn main() {
         .parse::<usize>()
         .expect("Argument band_width must be a positive integer!");
 
+    /*
     let use_poa = match input_args.occurrences_of("Use POA") {
         0 => false,
         1 => true,
         _ => {
             panic!("Use POA specified multiple times");
         }
-    };
+    };*/
 
     if input_args.occurrences_of("Max coverage") > 0 && input_args.occurrences_of("Max coverage fraction") > 0 {
         eprintln!("{} ERROR: -c and -C options cannot be used at the same time.",print_time());
@@ -390,31 +454,14 @@ fn main() {
 
     eprintln!("{} Estimating alignment parameters...",print_time());
     let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq);
-    /*
-    let alignment_parameters = AlignmentParameters {
-        transition_probs: TransitionProbs {
-                            match_from_match: 0.9,
-                            insertion_from_match: 0.08,
-                            deletion_from_match: 0.02,
-                            insertion_from_insertion: 0.25,
-                            match_from_insertion: 0.75,
-                            deletion_from_deletion: 0.1,
-                            match_from_deletion: 0.9,
-        },
-        emission_probs: EmissionProbs {
-                            equal: 0.99,
-                            not_equal: 0.01 / 3.0,
-                            deletion: 1.0,
-                            insertion: 1.0
-        }
-    };*/
-
 
     /***********************************************************************************************/
     // GET HUMAN GENOTYPE PRIORS
     /***********************************************************************************************/
 
-    let genotype_priors = GenotypePriors::new();
+    let genotype_priors = GenotypePriors::new(hom_snv_rate, het_snv_rate,
+                                                            hom_indel_rate, het_indel_rate,
+                                                            ts_tv_ratio);
 
     /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
@@ -483,13 +530,16 @@ fn main() {
     /***********************************************************************************************/
     // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
     /***********************************************************************************************/
-
+    if no_haps {
+        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &sample_name);
+        return;
+    }
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, max_p_miscall,
                                    &sample_name);
 
-
+    /*
     if use_poa {
         /***********************************************************************************************/
         // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
@@ -550,6 +600,8 @@ fn main() {
     } else {
         "4.0.final_genotypes.vcf"
     };
+    */
+    let debug_filename = "4.0.final_genotypes.vcf";
 
     eprintln!("{} Printing VCF file...",print_time());
     print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &sample_name);

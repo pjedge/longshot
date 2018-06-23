@@ -231,6 +231,9 @@ pub fn find_anchors(bam_record: &Record,
         (var_interval.start_pos as i32) >=
             bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
         (var_interval.end_pos as i32) < bam_record.pos() {
+        eprintln!("var_interval: {}\t{}\t{}",var_interval.chrom, var_interval.start_pos, var_interval.end_pos);
+        eprintln!("bam_record:   {}\t{}\t{}",target_names[bam_record.tid() as usize], bam_record.pos(), bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position"));
+
         return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
             "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
         ));
@@ -760,6 +763,7 @@ pub fn extract_fragment(bam_record: &Record,
     // populate a list with tuples of each variant, and anchor sequences for its alignment
     for ref var in vars {
         let var_interval = GenomicInterval{
+            tid: var.tid as u32,
             chrom: var.chrom.clone(),
             start_pos: var.pos0 as u32,
             end_pos: var.pos0 as u32
@@ -931,7 +935,7 @@ pub fn extract_fragment(bam_record: &Record,
     fragment
 }
 
-pub fn extract_fragments(bamfile_name: &String,
+pub fn extract_fragments(bam_file: &String,
                          fastafile_name: &String,
                          varlist: &VarList,
                          interval: &Option<GenomicInterval>,
@@ -940,7 +944,7 @@ pub fn extract_fragments(bamfile_name: &String,
                          old_flist: Option<Vec<Fragment>>)
                          -> Vec<Fragment> {
 
-    let t_names = parse_target_names(&bamfile_name);
+    let t_names = parse_target_names(&bam_file);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
     let mut fasta = fasta::IndexedReader::from_file(fastafile_name).unwrap();
@@ -951,152 +955,81 @@ pub fn extract_fragments(bamfile_name: &String,
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
     let mut complete = 0;
 
-    match interval {
-        &Some(ref iv) => {
-            let mut bam = bam::IndexedReader::from_path(bamfile_name).unwrap();
-            let iv_tid = bam.header().tid(iv.chrom.as_bytes()).unwrap();
-            bam.fetch(iv_tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
-            for (i,r) in bam.records().enumerate() {
-                let record = r.unwrap();
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
 
-                if record.is_quality_check_failed() || record.is_duplicate() ||
-                    record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
-                    || record.is_supplementary(){
-                        continue;
-                }
+    for iv in interval_lst {
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
 
-                let old_frag: Option<Fragment> = match &old_flist {
-                    &Some(ref fl) => {
-                        assert_eq!(fl[i].id, u8_to_string(record.qname()));
-                        Some(fl[i].clone())
-                    }
-                    &None => {None}
-                };
+        for (i, r) in bam_ix.records().enumerate() {
+            let record = r.unwrap();
 
-                let tid: usize = record.tid() as usize;
-                let chrom: String = t_names[record.tid() as usize].clone();
-
-                if tid != prev_tid {
-                    let mut ref_seq_u8: Vec<u8> = vec![];
-                    fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
-                    ref_seq = dna_vec(&ref_seq_u8);
-                }
-
-                let start_pos = record.pos();
-                let end_pos =
-                    record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
-
-                let bam_cig: CigarStringView = record.cigar();
-                let cigarpos_list: Vec<CigarPos> =
-                    create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
-
-
-                let interval = GenomicInterval {
-                    chrom: chrom,
-                    start_pos: start_pos as u32,
-                    end_pos: end_pos as u32,
-                };
-
-                // get the list of variants that overlap this read
-                let read_vars = varlist.get_variants_range(interval);
-
-                // print the percentage of variants processed every 10%
-                if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
-                    complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
-                    if complete < 10 {
-                        eprintln!("{}    {}% of variants processed...", print_time(), complete * 10);
-                    }
-                }
-
-                let frag = extract_fragment(&record,
-                                            &cigarpos_list,
-                                            read_vars,
-                                            &ref_seq,
-                                            &t_names,
-                                            extract_params,
-                                            align_params,
-                                            old_frag);
-
-                flist.push(frag);
-
-                prev_tid = tid;
+            if record.is_quality_check_failed() || record.is_duplicate() ||
+                record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
+                || record.is_supplementary() {
+                continue;
             }
 
-            eprintln!("{}    100% of variants processed.",print_time());
-
-        }
-        &None => {
-            let mut bam = bam::Reader::from_path(bamfile_name).unwrap();
-            for (i,r) in bam.records().enumerate() {
-
-                let record = r.unwrap();
-
-                if record.is_quality_check_failed() || record.is_duplicate() ||
-                    record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
-                    || record.is_supplementary(){
-                        continue;
+            let old_frag: Option<Fragment> = match &old_flist {
+                &Some(ref fl) => {
+                    assert_eq!(fl[i].id, u8_to_string(record.qname()));
+                    Some(fl[i].clone())
                 }
+                &None => { None }
+            };
 
-                let old_frag: Option<Fragment> = match &old_flist {
-                    &Some(ref fl) => {
-                        assert_eq!(fl[i].id, u8_to_string(record.qname()));
-                        Some(fl[i].clone())
-                    }
-                    &None => {None}
-                };
+            let tid: usize = record.tid() as usize;
+            let chrom: String = t_names[tid].clone();
 
-                let tid: usize = record.tid() as usize;
-                let chrom: String = t_names[record.tid() as usize].clone();
-
-                if tid != prev_tid {
-                    let mut ref_seq_u8: Vec<u8> = vec![];
-                    fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
-                    ref_seq = dna_vec(&ref_seq_u8);
-                }
-
-                let start_pos = record.pos();
-                let end_pos =
-                    record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
-
-                let interval = GenomicInterval {
-                    chrom: chrom,
-                    start_pos: start_pos as u32,
-                    end_pos: end_pos as u32,
-                };
-
-                let bam_cig: CigarStringView = record.cigar();
-                let cigarpos_list: Vec<CigarPos> =
-                    create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
-
-                // get the list of variants that overlap this read
-                let read_vars = varlist.get_variants_range(interval);
-
-                // print the percentage of variants processed every 10%
-                if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
-                    complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
-                    if complete < 10 {
-                        eprintln!("{}    {}% of variants processed...",print_time(), complete*10);
-                    }
-                }
-
-                let frag = extract_fragment(&record,
-                                            &cigarpos_list,
-                                            read_vars,
-                                            &ref_seq,
-                                            &t_names,
-                                            extract_params,
-                                            align_params,
-                                            old_frag);
-
-                flist.push(frag);
-
-                prev_tid = tid;
+            if tid != prev_tid {
+                let mut ref_seq_u8: Vec<u8> = vec![];
+                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                ref_seq = dna_vec(&ref_seq_u8);
             }
 
-            eprintln!("{}    100% of variants processed.",print_time());
+            let start_pos = record.pos();
+            let end_pos =
+                record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
 
+            let bam_cig: CigarStringView = record.cigar();
+            let cigarpos_list: Vec<CigarPos> =
+                create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+
+
+            let interval = GenomicInterval {
+                tid: tid as u32,
+                chrom: chrom,
+                start_pos: start_pos as u32,
+                end_pos: end_pos as u32,
+            };
+
+            // get the list of variants that overlap this read
+            let read_vars = varlist.get_variants_range(interval);
+
+            // print the percentage of variants processed every 10%
+            if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
+                complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
+                if complete < 10 {
+                    eprintln!("{}    {}% of variants processed...", print_time(), complete * 10);
+                }
+            }
+
+            let frag = extract_fragment(&record,
+                                        &cigarpos_list,
+                                        read_vars,
+                                        &ref_seq,
+                                        &t_names,
+                                        extract_params,
+                                        align_params,
+                                        old_frag);
+
+            flist.push(frag);
+
+            prev_tid = tid;
         }
-    };
+    }
+    eprintln!("{}    100% of variants processed.", print_time());
+
 
     // label every fragment call with its index in the fragment list.
     for i in 0..flist.len() {
@@ -1119,6 +1052,7 @@ mod tests {
     use super::*;
     use genotype_probs::*;
 
+    /*
     #[test]
     fn test_extended_cigar() {
         let mut fasta = fasta::IndexedReader::from_file(&"/home/peter/git/reaper/study/data/genomes/hs37d5.fa").unwrap();
@@ -1165,7 +1099,7 @@ mod tests {
             }
         }
     }
-
+    */
     fn generate_var2(ix: usize, tid: usize, chrom: String, pos0: usize, alleles: Vec<String>) -> Var {
         Var {
             ix: ix,

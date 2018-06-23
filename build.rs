@@ -14,7 +14,7 @@ fn main() {
         .file("src/hapcut2/hapcut2.c")
         .compile("hapcut2");
 
-    cc::Build::new()
+    /*cc::Build::new()
         .cpp(true)
         .shared_flag(false)
         .static_flag(true)
@@ -29,5 +29,6 @@ fn main() {
         .compile("poa_func");
 
         println!("cargo:rustc-flags=-L src/poa/spoa/build/lib/ -L /home/pedge/anaconda3/envs/tscc/lib -l spoa");
-        //println!("cargo:rustc-flags=-l dylib=stdc++ -lspoa");
+    */
+
 }
