@@ -42,8 +42,13 @@ pub fn call_potential_snvs(bam_file: &String,
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
     // pileup over all covered sites
-    let mut ref_seq: Vec<u8> = vec![];
+    let mut ref_seq: Vec<char> = vec![];
     let mut prev_tid = 4294967295;
+
+    let a_str = "A".to_string();
+    let c_str = "C".to_string();
+    let g_str = "G".to_string();
+    let t_str = "T".to_string();
 
     // there is a really weird bug going on here,
     // hence the duplicate file handles to the bam file.
@@ -63,9 +68,12 @@ pub fn call_potential_snvs(bam_file: &String,
             let pileup = p.unwrap();
 
             let tid: usize = pileup.tid() as usize;
+            let chrom: String = target_names[tid].clone();
 
             if tid != prev_tid {
-                fasta.read_all(&target_names[tid], &mut ref_seq).expect("Failed to read fasta sequence record.");
+                let mut ref_seq_u8: Vec<u8> = vec![];
+                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                ref_seq = dna_vec(&ref_seq_u8);
                 next_valid_pos = 0;
             }
 
@@ -75,11 +83,13 @@ pub fn call_potential_snvs(bam_file: &String,
             }
 
 
-            let ref_base_str = (ref_seq[pileup.pos() as usize] as char).to_string().to_uppercase();
+            let ref_base_str = (ref_seq[pileup.pos() as usize]).to_string();
 
             if ref_base_str.contains("N") {
                 continue;
             }
+
+            assert!(ref_base_str == a_str || ref_base_str == c_str || ref_base_str == g_str || ref_base_str == t_str);
 
             //let mut counts = [0; 5]; // A,C,G,T,N
             let mut counts: HashMap<(String, String), usize> = HashMap::new();
@@ -142,7 +152,7 @@ pub fn call_potential_snvs(bam_file: &String,
                             let start = pos;
                             let end: usize = pos + l as usize + 1;
 
-                            ref_allele = u8_to_string(&ref_seq[start..end]).to_uppercase();
+                            ref_allele = ref_seq[start..end].iter().collect();
                             var_allele = (ref_seq[pos] as char).to_string().to_uppercase();
                         },
                     }
@@ -417,7 +427,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
     // pileup over all covered sites
-    let mut ref_seq: Vec<u8> = vec![];
+    let mut ref_seq: Vec<char> = vec![];
     let mut prev_tid = 4294967295;
 
     // there is a really weird bug going on here,
@@ -444,10 +454,12 @@ pub fn call_potential_variants_poa(bam_file: &String,
             let pileup = p.unwrap();
 
             let tid: usize = pileup.tid() as usize;
+            let chrom: String = target_names[tid].clone();
 
             if tid != prev_tid {
-                fasta.read_all(&target_names[tid], &mut ref_seq).expect("Failed to read fasta sequence record.");
-                //next_valid_pos = 0;
+                let mut ref_seq_u8: Vec<u8> = vec![];
+                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                ref_seq = dna_vec(&ref_seq_u8);
             }
 
             if pileup.pos() % d as u32 != 0 {
@@ -460,7 +472,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             let r_ref: usize = pos_ref + d;
             let mut ref_window: Vec<u8> = vec![];
             for i in l_ref..r_ref + 1 {
-                ref_window.push(ref_seq[i].to_ascii_uppercase());
+                ref_window.push(ref_seq[i]);
             }
 
             let mut ref_window_nullterm = ref_window.clone();
