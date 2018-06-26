@@ -29,3 +29,42 @@ Usage:
 ```
 $ ./target/release/reaper --help
 ```
+
+
+## troubleshooting
+### linker errors
+For example:
+```
+error: linking with `cc` failed: exit code: 1
+...
+...
+...
+= note: Non-UTF-8 output: /usr/bin/ld: /home/pedge/temp/reaper/target/release/build/reaper-347f3774e75b380c/out/libhapcut2.a(common.o)(.text.fprintf_time+0x81): unresolvable H\x89\\$\xe8H\x89l$\xf0H\x89\xf3L\x89d$\xf8H\x83\xec\x18H\x8bG\x10H\x89\xfdI\x89\xd4H\x89\xd6H\x8b;\xffPxH\x8bE\x10I\x8dt$\x08H\x8b{\x08\xffPxH\x8bE\x10H\x8b{\x10I\x8dt$\x10H\x8b\x1c$H\x8bl$\x08L\x8bd$\x10H\x8b@xH\x83\xc4\x18\xff\xe0f\x90H\x89\\$\xe8H\x89l$\xf0H\x89\xfbL\x89d$\xf8H\x83\xec\x18H\x8bG\x10I\x89\xd4H\x89\xf5H\x89\xf7\xffPhI\x89\x04$H\x8bC\x10H\x8d}\x08\xffPhH\x8b\x1c$I\x89D$\x08H\x8bl$\x08L\x8bd$\x10H\x83\xc4\x18\xc3\x0f\x1f relocation against symbol `time@@GLIBC_2.2.5\'\n/usr/bin/ld: BFD version 2.20.51.0.2-5.42.el6 20100205 internal error, aborting at reloc.c line 443 in bfd_get_reloc_size\n\n/usr/bin/ld: Please report this bug.\n\ncollect2: ld returned 1 exit status\n
+...
+...
+...
+```
+Your system may have multiple versions of your linker that are causing a conflict. Rustc may be calling to a different or old version of the linker. In this case, specify the linker (in linux, gcc) as follows:
+```
+rustc -vV
+```
+Note the build target after "host: ", i.e. "x86_64-unknown-linux-gnu".
+```
+mkdir .cargo
+nano .cargo/config
+```
+edit the config file to have these contents:
+```
+[target.<target-name>]
+linker = "</path/to/linker>"
+```
+for example,
+```
+[target.x86_64-unknown-linux-gnu]
+linker = "/opt/gnu/gcc/bin/gcc"
+```
+then,
+```
+cargo clean
+cargo build --release
+```
