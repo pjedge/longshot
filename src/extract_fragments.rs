@@ -215,9 +215,19 @@ pub fn find_anchors(bam_record: &Record,
 
     let anchor_length = extract_params.anchor_length as u32;
 
-    let l_max = var_interval.start_pos as usize - max_window_padding;
-    let r_max = var_interval.end_pos as usize + max_window_padding;
+    let l_max = if var_interval.start_pos as usize >= max_window_padding {
+        var_interval.start_pos as usize - max_window_padding
+    } else {
+        0
+    };
+
+    let r_max = if var_interval.end_pos as usize + max_window_padding < ref_seq.len() {
+        var_interval.end_pos as usize + max_window_padding
+    } else {
+        ref_seq.len() - 1
+    };
     let mut ref_seq_max_window: Vec<u8> = vec![];
+
 
     for c in ref_seq[l_max..r_max+1].iter() {
         ref_seq_max_window.push(*c as u8);
