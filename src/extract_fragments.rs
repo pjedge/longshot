@@ -306,6 +306,12 @@ pub fn find_anchors(bam_record: &Record,
     }
 
     for i in (0..left_ix + 1).rev() {
+
+        if cigarpos_list[i].ref_pos <= anchor_length
+            || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length {
+            return Ok(None);
+        }
+
         match cigarpos_list[i].cig {
 
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
@@ -418,6 +424,12 @@ pub fn find_anchors(bam_record: &Record,
     let mut seen_indel_right = false;
     let mut found_anchor_right = false;
     for i in right_ix..cigarpos_list.len() {
+
+        if cigarpos_list[i].ref_pos <= anchor_length
+            || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length {
+            return Ok(None);
+        }
+
         match cigarpos_list[i].cig {
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
                 match_len_right += l;
@@ -521,17 +533,6 @@ pub fn find_anchors(bam_record: &Record,
     if !found_anchor_right {
         return Ok(None); // failed to find a right anchor
     }
-
-    // commented out 1/16/18 -- we no longer care if we found anchors or not,
-    // we're going to use them anyway.
-
-    // return none if read window or ref window is larger or smaller than the allowed lengths
-    //let ref_window_len = (right_anchor_ref - left_anchor_ref) as usize;
-    //let read_window_len = (right_anchor_read - left_anchor_read) as usize;
-    //if ref_window_len < min_window_length || read_window_len < min_window_length ||
-    //    ref_window_len > max_window_length || read_window_len > max_window_length {
-    //    return Ok(None);
-    //}
 
     // return none if any of the anchors are out of bounds
     if right_anchor_ref as usize >= ref_seq.len() ||
