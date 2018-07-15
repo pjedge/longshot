@@ -249,6 +249,10 @@ pub fn call_potential_snvs(bam_file: &String,
                     gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
+                    mec: 0,
+                    mec_frac_variant: 0.0,  // mec fraction for this variant
+                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    mean_allele_qual: 0.0,
                     called: false
                 };
 
@@ -308,6 +312,10 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
+                    mec: 0,                 // mec for variant
+                    mec_frac_variant: 0.0,  // mec fraction for this variant
+                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    mean_allele_qual: 0.0,
                     called: false
                 };
                 new_vars.push(new_var);
@@ -343,6 +351,10 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
+                    mec: 0,                 // mec for variant
+                    mec_frac_variant: 0.0,  // mec fraction for this variant
+                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    mean_allele_qual: 0.0,
                     called: false
                 };
                 new_vars.push(new_var);
@@ -378,6 +390,10 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
+                    mec: 0,                 // mec for variant
+                    mec_frac_variant: 0.0,  // mec fraction for this variant
+                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    mean_allele_qual: 0.0,
                     called: false
                 };
                 new_vars.push(new_var);

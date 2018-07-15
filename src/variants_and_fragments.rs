@@ -42,6 +42,10 @@ pub struct Var {
     pub genotype_post: GenotypeProbs,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
+    pub mec: usize,             // mec for variant
+    pub mec_frac_variant: f64,  // mec fraction for this variant
+    pub mec_frac_block: f64,    // mec fraction for this haplotype block
+    pub mean_allele_qual: f64,
     pub called: bool
     //pub pileup: Option(Vec<PileupElement>),
 }

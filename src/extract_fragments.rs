@@ -948,7 +948,7 @@ pub fn extract_fragment(bam_record: &Record,
 
 pub fn extract_fragments(bam_file: &String,
                          fastafile_name: &String,
-                         varlist: &VarList,
+                         varlist: &mut VarList,
                          interval: &Option<GenomicInterval>,
                          extract_params: ExtractFragmentParameters,
                          align_params: AlignmentParameters,
@@ -1048,6 +1048,27 @@ pub fn extract_fragments(bam_file: &String,
         for j in 0..flist[i].calls.len() {
             flist[i].calls[j].frag_ix = Some(i);
         }
+    }
+
+    // annotate each variant with its mean allele quality
+
+    let mut var_qual_sum: Vec<LogProb> = vec![LogProb::ln_zero(); varlist.lst.len()];
+    let mut var_num_alleles: Vec<usize> = vec![0; varlist.lst.len()];
+
+    for i in 0..flist.len() {
+
+        for j in 0..flist[i].calls.len() {
+            let vix = flist[i].calls[j].var_ix;
+            let qual = flist[i].calls[j].qual;
+            var_qual_sum[vix] = LogProb::ln_add_exp(var_qual_sum[vix], qual);
+            var_num_alleles[vix] += 1;
+        }
+    }
+
+    for (i, ref mut var) in varlist.lst.iter_mut().enumerate() {
+
+        let q = var_qual_sum[i] - LogProb::from(Prob(var_num_alleles[i] as f64)); // q is LogProb of mean allele qual
+        var.mean_allele_qual = *PHREDProb::from(q);
     }
 
     flist

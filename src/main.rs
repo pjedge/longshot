@@ -39,6 +39,7 @@ use realignment::{AlignmentType};
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
+use haplotype_assembly::calculate_mec;
 
 fn main() {
 
@@ -147,8 +148,13 @@ fn main() {
         .arg(Arg::with_name("Fast alignment")
                 .short("z")
                 .long("fast_alignment")
-                .help("Use non-numerically stable pair HMM algorithm. Is significantly faster but may be less accurate or have unexpected behaviour.")
+                .help("(DEPRECATED) Fast alignment is now default, this flag doesn't do anything.")
                 .display_order(160))
+        .arg(Arg::with_name("Numerically stable alignment")
+            .short("S")
+            .long("stable_alignment")
+            .help("Use numerically-stable (logspace) pair HMM forward algorithm. Is significantly slower but may be more accurate. Tests have shown this not to be necessary.")
+            .display_order(161))
         .arg(Arg::with_name("Force overwrite")
             .short("F")
             .long("force_overwrite")
@@ -194,7 +200,7 @@ fn main() {
         .arg(Arg::with_name("ts/tv Ratio")
             .long("ts_tv_ratio")
             .value_name("float")
-            .help("Specify the transition/transversion ratio for Genotype Prior estimation")
+            .help("Specify the transition/transversion rate (rate of transition vs a single one of the two transversion events, NOT either) for Genotype Prior estimation")
             .display_order(182)
             .default_value(&"4.0"))
         .arg(Arg::with_name("No haplotypes")
@@ -366,13 +372,13 @@ fn main() {
         }
     };*/
 
-    let mut alignment_type = AlignmentType::NumericallyStableAllAlignment;
+    let mut alignment_type = AlignmentType::FastAllAlignment;
 
-    match input_args.occurrences_of("Fast alignment") {
+    match input_args.occurrences_of("Numerically stable alignment") {
         0 => {},
-        1 => {alignment_type = AlignmentType::FastAllAlignment;},
+        1 => {alignment_type = AlignmentType::NumericallyStableAllAlignment;},
         _ => {
-            panic!("fast_alignment specified multiple times");
+            panic!("stable_alignment specified multiple times");
         }
     };
 
@@ -511,7 +517,7 @@ fn main() {
     eprintln!("{} Generating condensed read data for SNVs...",print_time());
     let mut flist = extract_fragments::extract_fragments(&bamfile_name,
                                                          &fasta_file,
-                                                         &varlist,
+                                                         &mut varlist,
                                                          &interval,
                                                          extract_fragment_parameters,
                                                          alignment_parameters,
@@ -601,6 +607,9 @@ fn main() {
         "4.0.final_genotypes.vcf"
     };
     */
+
+    calculate_mec(&flist, &mut varlist, max_p_miscall);
+
     let debug_filename = "4.0.final_genotypes.vcf";
 
     eprintln!("{} Printing VCF file...",print_time());

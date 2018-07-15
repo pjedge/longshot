@@ -1,7 +1,7 @@
 // calls HapCUT2 as a static library
-use variants_and_fragments::Fragment;
+use variants_and_fragments::*;
 use bio::stats::{LogProb, Prob, PHREDProb};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::char::from_digit;
 
 pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
@@ -129,5 +129,70 @@ pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,
                 snps,
                 hap1.as_mut_ptr(),
                 phase_sets.as_mut_ptr());
+    }
+}
+
+pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall: f64) {
+
+    let hap_ixs = vec![0, 1];
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
+
+    for mut var in &mut varlist.lst {
+        var.mec = 0;
+        var.mec_frac_variant = 0.0;
+        var.mec_frac_block = 0.0;
+    }
+
+    for f in 0..flist.len() {
+
+        let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
+
+        for &hap_ix in &hap_ixs {
+            for call in &flist[f].calls {
+                if call.qual < ln_max_p_miscall {
+                    let var = &varlist.lst[call.var_ix]; // the variant that the fragment call covers
+
+                    if var.phase_set == None {
+                        continue; // only care about phased variants.
+                    }
+
+                    let hap_allele = if hap_ix == 0 {var.genotype.0} else {var.genotype.1};
+
+                    // read allele matches haplotype allele
+                    if call.allele != hap_allele {
+                        mismatched_vars[hap_ix].push(call.var_ix);
+                    }
+                }
+            }
+        }
+
+        let min_error_hap = if mismatched_vars[0].len() < mismatched_vars[1].len() { 0 } else { 1 };
+
+        for &ix in &mismatched_vars[min_error_hap] {
+            varlist.lst[ix].mec += 1;
+        }
+    }
+
+    let mut block_mec: HashMap<usize, usize> = HashMap::new();
+    let mut block_total: HashMap<usize, usize> = HashMap::new();
+
+    for mut var in &mut varlist.lst {
+        match var.phase_set {
+            Some(ps) => {
+                *block_mec.entry(ps).or_insert(0) += var.mec;
+                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<usize>();
+            }
+            None => {}
+        }
+    }
+
+    for mut var in &mut varlist.lst {
+        match var.phase_set {
+            Some(ps) => {
+                var.mec_frac_block = *block_mec.get(&ps).unwrap() as f64 / *block_total.get(&ps).unwrap() as f64;
+                var.mec_frac_variant = var.mec as f64 / var.allele_counts.iter().sum::<usize>() as f64;
+            }
+            None => {}
+        }
     }
 }
