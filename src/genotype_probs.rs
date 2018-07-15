@@ -281,33 +281,10 @@ impl GenotypePriors {
 
         eprintln!("{} GENOTYPE PRIORS:", SPACER);
         eprintln!("{} REF G1/G2 PROB", SPACER);
-        //let mut priors_vec: Vec<_> = diploid_genotype_priors.iter()
-        //    .map(|(&(ra,(g1,g2)),&p)| (&(ra,(g1,g2)),&*Prob::from(p)))
-        //    .collect::<Vec<_>>();
-        //priors_vec.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        /*
-        let mut a_sum = LogProb::ln_zero();
-        let mut c_sum = LogProb::ln_zero();
-        let mut g_sum = LogProb::ln_zero();
-        let mut t_sum = LogProb::ln_zero();
 
         for (&(ref ra, (ref g1, ref g2)), &p) in &diploid_genotype_priors {
             eprintln!("{} {} {}/{} {}", SPACER, ra, g1, g2, *Prob::from(p));
-            match ra {
-                'A' => {a_sum = LogProb::ln_add_exp(a_sum, p);},
-                'C' => {c_sum = LogProb::ln_add_exp(c_sum, p);},
-                'G' => {g_sum = LogProb::ln_add_exp(g_sum, p);},
-                'T' => {t_sum = LogProb::ln_add_exp(t_sum, p);},
-                _   => {panic!("Invalid ref allele")}
-            }
         }
-
-        eprintln!("\n{}Sum of ref allele \"A\" priors: {}", SPACER, *Prob::from(a_sum));
-        eprintln!("{}Sum of ref allele \"C\" priors: {}", SPACER, *Prob::from(c_sum));
-        eprintln!("{}Sum of ref allele \"G\" priors: {}", SPACER, *Prob::from(g_sum));
-        eprintln!("{}Sum of ref allele \"T\" priors: {}\n", SPACER, *Prob::from(t_sum));
-        */
-
 
         GenotypePriors{priors_dict: diploid_genotype_priors}
     }

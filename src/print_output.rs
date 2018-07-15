@@ -27,7 +27,11 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
-##INFO=<ID=PH,Number=G,Type=Integer,Description=\"Phred-scaled Probabilities of Phased Genotypes\">
+##INFO=<ID=MC,Number=1,Type=Integer,Description=\"Minimum Error Correction (MEC) for this single variant\">
+##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
+##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant's haplotype block.\">
+##INFO=<ID=AQ,Number=1,Type=Float,Description=\"Mean Allele Quality value (PHRED-scaled).\">
+##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=GQ,Number=1,Type=Float,Description=\"Genotype Quality\">
@@ -94,7 +98,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};PH={};\tGT:PS:GQ\t{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};PH={};\tGT:PS:GQ\t{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
@@ -104,6 +108,10 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
                        var.dp,
                        allele_counts_str,
                        var.ambiguous_count,
+                       var.mec,
+                       var.mec_frac_variant,
+                       var.mec_frac_block,
+                       var.mean_allele_qual,
                        post_str,
                        genotype_str,
                        ps,
