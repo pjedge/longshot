@@ -156,13 +156,13 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
     // for all basic biallelic heterozygous variants
     // randomly shuffle the phase of the variant
     for i in 0..varlist.lst.len() {
-        let var = &varlist.lst[i];
+        let var = &mut varlist.lst[i];
         if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
             && var.alleles[0].len() == 1 && var.alleles[1].len() == 1 {
             if rng.next_f64() < 0.5 {
-                var.genotype == Genotype(0,1);
+                var.genotype = Genotype(0,1);
             } else {
-                var.genotype == Genotype(1,0);
+                var.genotype = Genotype(1,0);
             }
         }
     }
