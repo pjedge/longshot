@@ -748,7 +748,7 @@ pub fn extract_fragment(bam_record: &Record,
                         extract_params: ExtractFragmentParameters,
                         align_params: AlignmentParameters,
                         old_frag: Option<Fragment>)
-                        -> Fragment {
+                        -> Option<Fragment> {
 
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname());
@@ -764,7 +764,7 @@ pub fn extract_fragment(bam_record: &Record,
     if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
         bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
         || bam_record.is_supplementary(){
-        return fragment;
+        return None;
     }
 
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
@@ -943,7 +943,7 @@ pub fn extract_fragment(bam_record: &Record,
         }
     }
 
-    fragment
+    Some(fragment)
 }
 
 pub fn extract_fragments(bam_file: &String,
@@ -1034,7 +1034,10 @@ pub fn extract_fragments(bam_file: &String,
                                         align_params,
                                         old_frag);
 
-            flist.push(frag);
+            match frag {
+                Some(some_frag) => {flist.push(some_frag);},
+                None => {}
+            }
 
             prev_tid = tid;
         }
@@ -1147,6 +1150,19 @@ mod tests {
             filter: ".".to_string(),
             genotype: Genotype(0,1),
             gq: 0.0,
+            mean_allele_qual: 0.0,
+            mec: 0,
+            mec_frac_block: 0.0,
+            mec_frac_variant: 0.0,
+            dp_any_mq: 40,
+            mq10_frac: 1.0,
+            mq20_frac: 1.0,
+            mq30_frac: 1.0,
+            mq40_frac: 1.0,
+            mq50_frac: 1.0,
+            unphased_genotype: Genotype(0,1),
+            unphased_gq: 0.0,
+            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
             called: true

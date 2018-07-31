@@ -3,11 +3,18 @@ use variants_and_fragments::*;
 use bio::stats::{LogProb, Prob, PHREDProb};
 use std::collections::{HashMap, HashSet};
 use std::char::from_digit;
+use rust_htslib::bam;
+use rust_htslib::bam::Read;
+use util::*;
 
-pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
+pub fn separate_fragments_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
 
     let mut h1 = HashSet::new();
     let mut h2 = HashSet::new();
+
+    let mut h1_count = 0;
+    let mut h2_count = 0;
+    let mut unassigned_count = 0;
 
     for ref f in flist {
         let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
@@ -15,13 +22,69 @@ pub fn separate_reads_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) ->
         let p_read_hap1: LogProb = f.p_read_hap[1] - total;
 
         if p_read_hap0 > threshold {
+            h1_count += 1;
             h1.insert(f.id.clone());
         } else if p_read_hap1 > threshold {
+            h2_count += 1;
             h2.insert(f.id.clone());
+        } else {
+            unassigned_count += 1;
         }
     }
 
+    // count the number assigned to either haplotype
+    let total: f64 = (h1_count + h2_count + unassigned_count) as f64;
+    let h1_percent: f64 = 100.0 * h1_count as f64 / total;
+    let h2_percent: f64 = 100.0 * h2_count as f64 / total;
+    let unassigned_percent: f64 = 100.0 * unassigned_count as f64 / total;
+
+    eprintln!("{}     {} reads ({:.2}%) assigned to haplotype 1", print_time(), h1_count, h1_percent);
+    eprintln!("{}     {} reads ({:.2}%) assigned to haplotype 2", print_time(), h2_count, h2_percent);
+    eprintln!("{}     {} reads ({:.2}%) unassigned.", print_time(), unassigned_count, unassigned_percent);
+
     (h1,h2)
+}
+
+pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<GenomicInterval>,
+                                       hap_bam_prefix: String, h1: &HashSet<String>, h2: &HashSet<String>,
+                                       min_mapq: u8){
+
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval);
+
+    let mut bam_ix = bam::IndexedReader::from_path(bamfile_name).unwrap();
+
+    let h1_bam_file = format!("{}.hap1.bam", &hap_bam_prefix);
+    let h2_bam_file = format!("{}.hap2.bam", &hap_bam_prefix);
+    let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
+
+    let header = bam::Header::from_template(&bam_ix.header);
+    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header).unwrap();
+    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header).unwrap();
+    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header).unwrap();
+
+    for iv in interval_lst {
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+
+        for r in bam_ix.records() {
+            let record = r.unwrap();
+
+            if record.is_quality_check_failed() || record.is_duplicate() ||
+                record.is_secondary() || record.is_unmapped() || record.mapq() < min_mapq
+                || record.is_supplementary() {
+                continue;
+            }
+
+            let read_id = u8_to_string(record.qname());
+
+            if h1.contains(&read_id) {
+                h1_bam.write(&record).unwrap();
+            } else if h2.contains(&read_id) {
+                h2_bam.write(&record).unwrap();
+            } else {
+                unassigned_bam.write(&record).unwrap();
+            }
+        }
+    }
 }
 
 pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Vec<Vec<u8>> {

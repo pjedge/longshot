@@ -39,7 +39,7 @@ use realignment::{AlignmentType};
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
-use haplotype_assembly::calculate_mec;
+use haplotype_assembly::*;
 
 fn main() {
 
@@ -85,8 +85,21 @@ fn main() {
                 .display_order(40)
                 //.required(true)
                 .takes_value(true))
-        .arg(Arg::with_name("Max coverage fraction")
+        .arg(Arg::with_name("Haplotype Bam Prefix")
+            .short("p")
+            .long("hap_bam_prefix")
+            .value_name("string")
+            .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
+            .display_order(50))
+        .arg(Arg::with_name("Min coverage")
             .short("c")
+            .long("min_cov")
+            .value_name("int")
+            .help("Minimum coverage (of reads passing filters) to consider position as a potential SNV.")
+            .display_order(78)
+            .default_value("0"))
+        .arg(Arg::with_name("Max coverage fraction")
+            .short("j")
             .long("max_cov_frac")
             .value_name("float")
             .help("Maximum coverage (of reads passing filters) to consider position as a potential SNV, as a fraction of the mean coverage. For example, \"-c 2.0\" throws out positions with more than twice the mean coverage.")
@@ -112,6 +125,13 @@ fn main() {
             .help("Minimum estimated quality (Phred-scaled) of allele observation on read to use for genotyping/haplotyping.")
             .display_order(90)
             .default_value("7.0"))
+        .arg(Arg::with_name("Haplotype Assignment Quality")
+            .short("y")
+            .long("hap_assignment_qual")
+            .value_name("float")
+            .help("Minimum quality (Phred-scaled) of read->haplotype assignment (for read separation).")
+            .display_order(90)
+            .default_value("20.0"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
@@ -166,6 +186,15 @@ fn main() {
                 .help("Minimum width of alignment band. Band will increase in size if sequences are different lengths.")
                 .display_order(170)
                 .default_value("20"))
+        .arg(Arg::with_name("Density parameters")
+            .short("D")
+            .long("density_params")
+            .value_name("string")
+            .help("Parameters to flag a variant as part of a \"dense cluster\". Format <n>:<l>:<gq>. \
+                     If there are at least n variants within l base pairs with genotype quality >=gq, \
+                     then these variants are flagged as \"dn\"")
+            .display_order(175)
+            .default_value("10:500:50"))
         .arg(Arg::with_name("Sample ID")
             .short("s")
             .long("sample_id")
@@ -235,6 +264,8 @@ fn main() {
 
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
+
+    let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
 
     let force = match input_args.occurrences_of("Force overwrite") {
         0 => false,
@@ -325,7 +356,18 @@ fn main() {
         panic!("Min allele quality must be a positive float.");
     }
 
+    let hap_assignment_qual: f64 = input_args.value_of("Haplotype Assignment Quality")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument max_mec_frac must be a positive float!");
+
+    if hap_assignment_qual <= 0.0 {
+        panic!("Haplotype assignment quality must be a positive float.");
+    }
+
     let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
+
+    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(min_allele_qual));
 
     let hom_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous SNV Rate")
         .unwrap()
@@ -352,6 +394,17 @@ fn main() {
         .parse::<f64>()
         .expect("Argument ts_tv_ratio must be a positive float!");
 
+    let dn_params = input_args.value_of("Density parameters").unwrap().split(":").collect::<Vec<&str>>();
+
+    if dn_params.len() != 3 {
+        panic!("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
+    }
+
+    let dn_count = dn_params[0].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
+    let dn_len = dn_params[1].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
+    let dn_gq = dn_params[2].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
+
+    let density_params = DensityParameters{n: dn_count, len: dn_len, gq: dn_gq as f64};
     /*
     let max_mec_frac = match input_args.occurrences_of("Max MEC Fraction") {
         0 => None,
@@ -420,6 +473,11 @@ fn main() {
         return;
     }
 
+    let min_cov: u32 = input_args.value_of("Min coverage")
+        .unwrap()
+        .parse::<u32>()
+        .expect("Argument min_cov must be a positive integer!");
+
     let max_cov: Option<u32> = match input_args.value_of("Max coverage") {
         Some(cov) => {
             Some(cov.parse::<u32>().expect("Argument max_cov must be a positive integer!"))
@@ -479,6 +537,7 @@ fn main() {
                                                            &fasta_file,
                                                            &interval,
                                                                &genotype_priors,
+                                                               min_cov,
                                                                max_cov,
                                                                min_mapq,
                                                                max_p_miscall,
@@ -489,7 +548,7 @@ fn main() {
     // as the variant list expands
     varlist.backup_indices();
 
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov, &sample_name);
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov, &density_params, &sample_name);
 
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
@@ -530,19 +589,19 @@ fn main() {
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
     call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall);
 
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &sample_name);
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &density_params, &sample_name);
 
 
     /***********************************************************************************************/
     // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
     /***********************************************************************************************/
     if no_haps {
-        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &sample_name);
+        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name);
         return;
     }
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
-                                   &variant_debug_directory, 3, max_cov, max_p_miscall,
+                                   &variant_debug_directory, 3, max_cov, &density_params, max_p_miscall,
                                    &sample_name);
 
     /*
@@ -569,7 +628,7 @@ fn main() {
 
         varlist.combine(&mut varlist_poa);
 
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &sample_name);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &density_params, &sample_name);
 
         eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
@@ -588,7 +647,7 @@ fn main() {
 
 
         call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &sample_name);
+        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &density_params, &sample_name);
 
         eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
         call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
@@ -612,7 +671,18 @@ fn main() {
 
     let debug_filename = "4.0.final_genotypes.vcf";
 
+    eprintln!("{} Calculating fraction of reads assigned to either haplotype...",print_time());
+    let (h1,h2) = separate_fragments_by_haplotype(&flist,
+                                                  LogProb::from(Prob(1.0 - hap_max_p_misassign)));
+    match hap_bam_prefix {
+        Some(p) => {
+            eprintln!("{} Writing haplotype-assigned reads to bam files...",print_time());
+            separate_bam_reads_by_haplotype(&bamfile_name, &interval, p.to_string(), &h1, &h2, min_mapq);
+        },
+        None => {}
+    }
+
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &sample_name);
-    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &sample_name);
+    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &density_params, &sample_name);
+    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name);
 }

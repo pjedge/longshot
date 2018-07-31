@@ -9,10 +9,12 @@ use std::fs::File;
 use std::path::Path;
 
 
-pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String, print_reference_genotype: bool, max_cov: Option<u32>, sample_name: &String) {
+pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String,
+                 print_reference_genotype: bool, max_cov: Option<u32>, density_params: &DensityParameters,
+                 sample_name: &String) {
 
     // first, add filter flags for variant density
-    var_filter(varlist, 50.0, 500, 10, max_cov);
+    var_filter(varlist, density_params.gq, density_params.len, density_params.n, max_cov);
 
     let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
@@ -24,17 +26,27 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 
     let headerstr = format!("##fileformat=VCFv4.2
 ##source=ReaperV0.1
-##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth\">
+##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
 ##INFO=<ID=MC,Number=1,Type=Integer,Description=\"Minimum Error Correction (MEC) for this single variant\">
 ##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
 ##INFO=<ID=MB,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant's haplotype block.\">
 ##INFO=<ID=AQ,Number=1,Type=Float,Description=\"Mean Allele Quality value (PHRED-scaled).\">
+##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">
+##INFO=<ID=DA,Number=1,Type=Integer,Description=\"Total Depth of reads at any MAPQ (but passing samtools filter 0xF00).\">
+##INFO=<ID=MQ10,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=10.\">
+##INFO=<ID=MQ20,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=20.\">
+##INFO=<ID=MQ30,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=30.\">
+##INFO=<ID=MQ40,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=40.\">
+##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">
 ##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
+##INFO=<ID=SC,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">
-##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=GQ,Number=1,Type=Float,Description=\"Genotype Quality\">
+##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
+##FORMAT=<ID=UG,Number=1,Type=String,Description=\"Unphased Genotype (pre-haplotype-assembly)\">
+##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
 
     //"##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
@@ -95,10 +107,13 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
         };
 
         let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
+        let unphased_genotype_str = vec![var.unphased_genotype.0.to_string(), var.unphased_genotype.1.to_string()].join("/");
 
+        let genotypes_match: usize = (var.genotype == var.unphased_genotype
+            || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype) as usize;
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};PH={};\tGT:PS:GQ\t{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2},MQ20={:.2},MQ30={:.2},MQ40={:.2},MQ50={:.2},PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
@@ -112,24 +127,36 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
                        var.mec_frac_variant,
                        var.mec_frac_block,
                        var.mean_allele_qual,
+                       genotypes_match,
+                       var.dp_any_mq,
+                       var.mq10_frac,
+                       var.mq20_frac,
+                       var.mq30_frac,
+                       var.mq40_frac,
+                       var.mq50_frac,
                        post_str,
+                       var.sequence_context,
                        genotype_str,
+                       var.gq,
                        ps,
-                       var.gq) {
+                       unphased_genotype_str,
+                       var.unphased_gq) {
             Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
             Ok(_) => {}
         }
     }
 }
 
-pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>, variant_debug_directory: &Option<String>, debug_filename: &str, max_cov: Option<u32>, sample_name: &String){
+pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>,
+                           variant_debug_directory: &Option<String>, debug_filename: &str,
+                           max_cov: Option<u32>, density_params: &DensityParameters, sample_name: &String){
     match variant_debug_directory {
         &Some(ref dir) => {
             let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
                 Some(s) => {s.to_owned()},
                 None => {panic!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(varlist, &interval,&outfile, true, max_cov, sample_name);
+            print_vcf(varlist, &interval,&outfile, true, max_cov, density_params, sample_name);
         }
         &None => {}
     };
