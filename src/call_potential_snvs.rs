@@ -15,9 +15,9 @@ use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
 use realignment::{LnAlignmentParameters};
 
 //use std::str;
-use bio::alignment::Alignment;
+//use bio::alignment::Alignment;
 //use bio::alignment::pairwise::banded::*;
-use bio::alignment::AlignmentOperation::*;
+//use bio::alignment::AlignmentOperation::*;
 use genotype_probs::*;
 
 static VARLIST_CAPACITY: usize = 1000000;
@@ -28,6 +28,7 @@ pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
                            interval: &Option<GenomicInterval>,
                            genotype_priors: &GenotypePriors,
+                           min_coverage: u32,
                            max_coverage: Option<u32>,
                            min_mapq: u8,
                            max_p_miscall: f64,
@@ -82,6 +83,10 @@ pub fn call_potential_snvs(bam_file: &String,
                 continue;
             }
 
+            let l_window = if pileup.pos() >= 10 {pileup.pos() as usize - 10} else {0};
+            let mut r_window = pileup.pos() as usize + 11;
+            if r_window >= ref_seq.len() {r_window = ref_seq.len();}
+            let sequence_context: String = (ref_seq[l_window .. r_window]).iter().collect::<String>();
 
             let ref_base_str = (ref_seq[pileup.pos() as usize]).to_string();
 
@@ -98,14 +103,31 @@ pub fn call_potential_snvs(bam_file: &String,
             let mut pileup_alleles: Vec<(String, String)> = vec![];
             let pos: usize = pileup.pos() as usize;
 
+            let mut passing_reads: usize = 0; // total number of reads in this pileup at any mapq
+            let mut mq10: f64 = 0.0; // total number of reads in this pileup with mapq >= 10
+            let mut mq20: f64 = 0.0; // total number of reads in this pileup with mapq >= 20
+            let mut mq30: f64 = 0.0; // total number of reads in this pileup with mapq >= 30
+            let mut mq40: f64 = 0.0; // total number of reads in this pileup with mapq >= 40
+            let mut mq50: f64 = 0.0; // total number of reads in this pileup with mapq >= 50
+
             // pileup the bases for a single position and count number of each base
             for alignment in pileup.alignments() {
                 let record = alignment.record();
 
                 // may be faster to implement this as bitwise operation on raw flag in the future?
-                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
-                    record.is_quality_check_failed() ||
+                if record.is_secondary() || record.is_quality_check_failed() ||
                     record.is_duplicate() || record.is_supplementary() {
+                    continue;
+                }
+
+                passing_reads += 1;
+                if record.mapq() >= 10 {mq10 += 1.0};
+                if record.mapq() >= 20 {mq20 += 1.0};
+                if record.mapq() >= 30 {mq30 += 1.0};
+                if record.mapq() >= 40 {mq40 += 1.0};
+                if record.mapq() >= 50 {mq50 += 1.0};
+
+                if record.is_unmapped() || record.mapq() < min_mapq {
                     continue;
                 }
 
@@ -160,6 +182,16 @@ pub fn call_potential_snvs(bam_file: &String,
                     pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
                     *counts.entry((ref_allele.clone(), var_allele.clone())).or_insert(0) += 1;
                 }
+            }
+
+            let mq10_frac = mq10 / (passing_reads as f64);
+            let mq20_frac = mq20 / (passing_reads as f64);
+            let mq30_frac = mq30 / (passing_reads as f64);
+            let mq40_frac = mq40 / (passing_reads as f64);
+            let mq50_frac = mq50 / (passing_reads as f64);
+
+            if depth < min_coverage as usize {
+                continue;
             }
 
             match max_coverage {
@@ -247,12 +279,21 @@ pub fn call_potential_snvs(bam_file: &String,
                     filter: ".".to_string(),
                     genotype: Genotype(0, 0),
                     gq: 0.0,
+                    unphased_genotype: Genotype(0, 0),
+                    unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
                     mec: 0,
                     mec_frac_variant: 0.0,  // mec fraction for this variant
                     mec_frac_block: 0.0,    // mec fraction for this haplotype block
                     mean_allele_qual: 0.0,
+                    dp_any_mq: passing_reads,
+                    mq10_frac,
+                    mq20_frac,
+                    mq30_frac,
+                    mq40_frac,
+                    mq50_frac,
+                    sequence_context,
                     called: false
                 };
 
@@ -271,6 +312,7 @@ pub fn call_potential_snvs(bam_file: &String,
 // alignment: a rust-bio alignment object where x is a read consensus window, and y is the window from the reference
 //
 // l_ref: the 0-indexed position on the reference of the start of the reference window
+/*
 fn extract_variants_from_alignment(alignment: &Alignment,
                                    consensus: &Vec<u8>,
                                    ref_window: &Vec<u8>,
@@ -316,6 +358,9 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                     mec_frac_variant: 0.0,  // mec fraction for this variant
                     mec_frac_block: 0.0,    // mec fraction for this haplotype block
                     mean_allele_qual: 0.0,
+                    dp_any_mq: depth,
+                    mq10_frac: //TODO,
+                    mq20_frac: //TODO,
                     called: false
                 };
                 new_vars.push(new_var);
@@ -422,7 +467,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
 
     new_vars
 }
-
+*/
 /*
 pub fn call_potential_variants_poa(bam_file: &String,
                                    fasta_file: &String,

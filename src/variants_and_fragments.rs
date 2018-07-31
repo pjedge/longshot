@@ -39,6 +39,8 @@ pub struct Var {
     pub filter: String,
     pub genotype: Genotype,
     pub gq: f64,
+    pub unphased_genotype: Genotype,
+    pub unphased_gq: f64,
     pub genotype_post: GenotypeProbs,  // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
@@ -46,6 +48,13 @@ pub struct Var {
     pub mec_frac_variant: f64,  // mec fraction for this variant
     pub mec_frac_block: f64,    // mec fraction for this haplotype block
     pub mean_allele_qual: f64,
+    pub dp_any_mq: usize,
+    pub mq10_frac: f64,
+    pub mq20_frac: f64,
+    pub mq30_frac: f64,
+    pub mq40_frac: f64,
+    pub mq50_frac: f64,
+    pub sequence_context: String,
     pub called: bool
     //pub pileup: Option(Vec<PileupElement>),
 }
@@ -483,6 +492,19 @@ mod tests {
             filter: ".".to_string(),
             genotype: Genotype(0,1),
             gq: 0.0,
+            mean_allele_qual: 0.0,
+            mec: 0,
+            mec_frac_block: 0.0,
+            mec_frac_variant: 0.0,
+            dp_any_mq: 40,
+            mq10_frac: 1.0,
+            mq20_frac: 1.0,
+            mq30_frac: 1.0,
+            mq40_frac: 1.0,
+            mq50_frac: 1.0,
+            unphased_genotype: Genotype(0,1),
+            unphased_gq: 0.0,
+            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
             called: true
@@ -749,6 +771,19 @@ mod tests {
             filter: ".".to_string(),
             genotype: Genotype(0,1),
             gq: 0.0,
+            mean_allele_qual: 0.0,
+            mec: 0,
+            mec_frac_block: 0.0,
+            mec_frac_variant: 0.0,
+            dp_any_mq: 40,
+            mq10_frac: 1.0,
+            mq20_frac: 1.0,
+            mq30_frac: 1.0,
+            mq40_frac: 1.0,
+            mq50_frac: 1.0,
+            unphased_genotype: Genotype(0,1),
+            unphased_gq: 0.0,
+            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
             called: true

@@ -1,5 +1,5 @@
 use bio::stats::{PHREDProb, LogProb, Prob};
-use util::{MAX_VCF_QUAL, GenomicInterval};
+use util::{MAX_VCF_QUAL, GenomicInterval, DensityParameters};
 use variants_and_fragments::*;
 use print_output::*;
 use genotype_probs::*;
@@ -103,7 +103,9 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
             var.qual = MAX_VCF_QUAL;
         }
         var.genotype = max_g;
+        var.unphased_genotype = max_g;
         var.gq = genotype_qual;
+        var.unphased_gq = genotype_qual;
         if var.gq > MAX_VCF_QUAL {
             var.gq = MAX_VCF_QUAL;
         }
@@ -119,6 +121,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       variant_debug_directory: &Option<String>,
                                       program_step: usize,
                                       max_cov: Option<u32>,
+                                      density_params: &DensityParameters,
                                       max_p_miscall: f64,
                                       sample_name: &String) {
 
@@ -581,7 +584,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
 
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
-        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, sample_name);
+        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, density_params, sample_name);
 
         eprintln!("{}    (After Greedy)   Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 

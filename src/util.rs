@@ -87,6 +87,13 @@ pub struct GenomicInterval {
     // end of interval (inclusive)
 }
 
+#[derive(Clone)]
+pub struct DensityParameters {
+    pub n: usize,
+    pub len: usize,
+    pub gq: f64
+}
+
 
 pub fn u8_to_string(u: &[u8]) -> String {
     String::from_utf8(u.to_vec()).unwrap()
