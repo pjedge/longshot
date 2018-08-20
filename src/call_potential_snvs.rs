@@ -206,7 +206,7 @@ pub fn call_potential_snvs(bam_file: &String,
             // iterate over everything.
 
             for (&(ref r, ref v), &count) in &counts {
-                if r.contains("N") || v.contains("N") {
+                if has_non_acgt(&r) || has_non_acgt(&v) {
                     continue;
                 }
 
@@ -253,7 +253,6 @@ pub fn call_potential_snvs(bam_file: &String,
             } else {
                 LogProb::ln_zero()
             };
-
 
             let (ref_allele, var_allele, qual) = (snv_ref_allele, snv_var_allele, snv_qual);
 

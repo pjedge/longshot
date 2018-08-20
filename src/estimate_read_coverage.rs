@@ -39,6 +39,13 @@ pub fn calculate_mean_coverage(bam_file: &String,
                 total_bam_ref_positions += bam.header().target_len(tid).unwrap();
             }
 
+            if tid != iv.tid ||
+                pileup.pos() < iv.start_pos ||
+                pileup.pos() > iv.end_pos {
+                prev_tid = tid;
+                continue;
+            }
+
             let mut depth: usize = 0;
 
             // pileup the bases for a single position and count number of each base
