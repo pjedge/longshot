@@ -30,8 +30,8 @@ pub fn parse_region_string(region_string: Option<&str>,
                 panic!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
             }
             let iv_chrom = split1[0].to_string();
-            let iv_start = split2[0].parse::<u32>().expect("Invalid position value specified in region string.");
-            let iv_end = split2[1].parse::<u32>().expect("Invalid position value specified in region string.");
+            let iv_start = split2[0].parse::<u32>().expect("Invalid position value specified in region string."); // read in as 1-based inclusive range
+            let iv_end = split2[1].parse::<u32>().expect("Invalid position value specified in region string.");   // read in as 1-based inclusive range
 
             let mut tid: u32 = 0;
             for name in bam.header().target_names() {
@@ -47,8 +47,8 @@ pub fn parse_region_string(region_string: Option<&str>,
             Some(GenomicInterval {
                 tid: tid,
                 chrom: iv_chrom,
-                start_pos: iv_start,
-                end_pos: iv_end - 1,
+                start_pos: iv_start - 1, // convert to 0-based inclusive range
+                end_pos: iv_end - 1,     // convert to 0-based inclusive range
             })
         }
         Some(r) => {
@@ -82,9 +82,9 @@ pub struct GenomicInterval {
     pub chrom: String,
     // chromosome name
     pub start_pos: u32,
-    // start of interval
+    // start of interval (0-indexed)
     pub end_pos: u32,
-    // end of interval (inclusive)
+    // end of interval (0-indexed, inclusive)
 }
 
 #[derive(Clone)]
@@ -114,6 +114,15 @@ pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
         }
     }
     v
+}
+
+pub fn has_non_acgt(s: &String) -> bool {
+    for c in s.chars() {
+        if !(c == 'A' || c == 'C' || c == 'G' || c == 'T') {
+            return true
+        }
+    }
+    false
 }
 
 pub fn parse_target_names(bam_file: &String) -> Vec<String> {
