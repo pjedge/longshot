@@ -674,5 +674,3 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
     }
 }
 */
-
-

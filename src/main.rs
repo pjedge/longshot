@@ -81,7 +81,7 @@ fn main() {
                 .short("r")
                 .long("region")
                 .value_name("string")
-                .help("Region in format <chrom> or <chrom:start-stop> in which to call variants.")
+                .help("Region in format <chrom> or <chrom:start-stop> in which to call variants (1-based, inclusive).")
                 .display_order(40)
                 //.required(true)
                 .takes_value(true))
