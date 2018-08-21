@@ -561,8 +561,8 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             let genotype_qual: f64 = *PHREDProb::from(p_call_wrong);
 
             let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
-            //let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
-            //assert!(var.dp >= allele_total);
+            let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
+            assert!(var.dp >= allele_total);
 
             var.qual = *PHREDProb::from(var.genotype_post.get(Genotype(0,0)));
             var.allele_counts = allele_counts;
