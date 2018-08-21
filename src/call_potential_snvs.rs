@@ -78,6 +78,8 @@ pub fn call_potential_snvs(bam_file: &String,
                 next_valid_pos = 0;
             }
 
+            prev_tid = tid;
+
             // this is specifically to avoid having a variant inside a previous variant's deletion.
             if pileup.pos() < next_valid_pos {
                 continue;
@@ -301,8 +303,6 @@ pub fn call_potential_snvs(bam_file: &String,
 
                 varlist.push(new_var);
             }
-
-            prev_tid = tid;
         }
     }
     VarList::new(varlist)
