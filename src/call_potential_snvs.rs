@@ -63,6 +63,7 @@ pub fn call_potential_snvs(bam_file: &String,
     for iv in interval_lst {
         bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).ok().expect("Error seeking BAM file while extracting fragments.");
         let bam_pileup = bam_ix.pileup();
+        //bam_pileup.set_max_depth(100000000);
         let mut next_valid_pos = 0;
 
         for p in bam_pileup {
