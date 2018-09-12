@@ -117,7 +117,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
         for u in frag.id.clone().into_bytes() {
             line.push(u as u8);
         }
-        line.push(' ' as u8);
+        //line.push(' ' as u8);
 
         let mut prev_call = phase_variant.len() + 1;
 

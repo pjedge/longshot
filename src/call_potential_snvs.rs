@@ -20,7 +20,7 @@ use realignment::{LnAlignmentParameters};
 //use bio::alignment::AlignmentOperation::*;
 use genotype_probs::*;
 
-static VARLIST_CAPACITY: usize = 1000000;
+pub static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
 static POTENTIAL_SNV_MIN_PROB: f64 = 0.001;
 

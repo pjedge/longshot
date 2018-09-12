@@ -25,8 +25,11 @@ mod genotype_probs;
 
 use clap::{Arg, App};
 use std::fs::create_dir;
-use std::path::Path;
 use std::fs::remove_dir_all;
+use std::error::Error;
+use std::io::prelude::*;
+use std::fs::File;
+use std::path::Path;
 
 use call_genotypes::*;
 use util::*;
@@ -40,6 +43,8 @@ use realignment::{AlignmentType};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
 use haplotype_assembly::*;
+use variants_and_fragments::parse_VCF_potential_variants;
+
 
 fn main() {
 
@@ -85,10 +90,17 @@ fn main() {
                 .display_order(40)
                 //.required(true)
                 .takes_value(true))
+        .arg(Arg::with_name("Potential Variants VCF")
+            .short("v")
+            .long("potential_variants")
+            .value_name("VCF")
+            .help("Use the variants in this VCF as the potential variants instead of using pileup method. NOTE: every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
+            .display_order(45)
+            .takes_value(true))
         .arg(Arg::with_name("Haplotype Bam Prefix")
             .short("p")
             .long("hap_bam_prefix")
-            .value_name("string")
+            .value_name("BAM")
             .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
             .display_order(50))
         .arg(Arg::with_name("Min coverage")
@@ -254,6 +266,14 @@ fn main() {
             .value_name("path")
             .help("write out current information about variants at each step of algorithm to files in this directory")
             .display_order(210))
+        .arg(Arg::with_name("Fragment file")
+            .short("t")
+            .long("fragment_file")
+            .value_name("string")
+            .help("Do not genotype/haplotype at all, just write a fragment file describing the haplotype fragments to this file. Homozygous variants are included, so DO NOT use this file with HapCUT2!")
+            .hidden(true)
+            .display_order(220))
+
 
         .get_matches();
 
@@ -265,6 +285,7 @@ fn main() {
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
 
+    let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
 
     let force = match input_args.occurrences_of("Force overwrite") {
@@ -321,6 +342,8 @@ fn main() {
         }
         None => None,
     };
+
+    let fragment_filename: Option<&str> = input_args.value_of("Fragment file");
 
     let min_mapq: u8 = input_args.value_of("Min mapq")
         .unwrap()
@@ -533,15 +556,18 @@ fn main() {
 
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("{} Calling potential SNVs using pileup...",print_time());
-    let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
-                                                           &fasta_file,
-                                                           &interval,
-                                                               &genotype_priors,
-                                                               min_cov,
-                                                               max_cov,
-                                                               min_mapq,
-                                                               max_p_miscall,
-                                                           alignment_parameters.ln());
+    let mut varlist = match potential_variants_file {
+        Some(file) => { parse_VCF_potential_variants(&file.to_string(), &bamfile_name) }
+        None => { call_potential_snvs::call_potential_snvs(&bamfile_name,
+                                                 &fasta_file,
+                                                 &interval,
+                                                 &genotype_priors,
+                                                 min_cov,
+                                                 max_cov,
+                                                 min_mapq,
+                                                 max_p_miscall,
+                                                 alignment_parameters.ln()) }
+    };
 
     // back up the variant indices
     // they will be needed later when we try to re-use fragment alleles that don't change
@@ -581,6 +607,36 @@ fn main() {
                                                          extract_fragment_parameters,
                                                          alignment_parameters,
                                                           None);
+
+    match fragment_filename {
+        Some(ffn) => {
+            // normally phase_variant is used to select which variants are heterozygous, so that
+            // we only pass to HapCUT2 heterozygous variants
+            // in this case, we set them all to 1 so we generate fragments for all variants
+            let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
+            let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall);
+
+            let fragment_file_path = Path::new(ffn);
+            let fragment_file_display = fragment_file_path.display();
+            let mut fragment_file = match File::create(&fragment_file_path) {
+                Err(why) => panic!("couldn't create {}: {}", fragment_file_display, why.description()),
+                Ok(file) => file,
+            };
+            for mut line_u8 in fragment_buffer {
+                line_u8.pop();
+                match writeln!(fragment_file, "{}", u8_to_string(&line_u8)) {
+                    Err(why) => panic!("couldn't write to {}: {}", fragment_file_display, why.description()),
+                    Ok(_) => {}
+                }
+            }
+            print_vcf(&mut varlist, &interval,&output_vcf_file, true, max_cov, &density_params, &sample_name);
+
+            eprintln!("{} Finished generating haplotype fragment file. Exiting...",print_time());
+
+            return;
+        },
+        None => {}
+    }
 
     /***********************************************************************************************/
     // CALL GENOTYPES USING REFINED QUALITY SCORES
