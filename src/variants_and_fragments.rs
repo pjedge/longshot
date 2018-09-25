@@ -4,6 +4,10 @@ use util::*;
 use std::collections::HashMap;
 use std::cmp::Ordering;
 use genotype_probs::*;
+use rust_htslib::bcf;
+use call_potential_snvs::VARLIST_CAPACITY;
+use rust_htslib::bam;
+use rust_htslib::bam::Read;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
@@ -97,6 +101,80 @@ impl Eq for Var {}
 pub struct VarList {
     pub lst: Vec<Var>,
     ix: HashMap<String, Vec<usize>>,
+}
+
+pub fn parse_VCF_potential_variants (vcffile_name: &String, bamfile_name: &String) -> VarList {
+
+    // must assert that the VCF file is sorted correctly
+    // can we just read it in and then check that it's sorted using the check_sorted function vs the bam's tlist?
+
+    let mut vcf = bcf::Reader::from_path(vcffile_name).unwrap();
+    let mut vcfh = bcf::Reader::from_path(vcffile_name).unwrap();
+
+    let bam = bam::Reader::from_path(bamfile_name).unwrap();
+    let mut chrom2tid: HashMap<String, usize> = HashMap::new();
+
+    for (t, name) in bam.header().target_names().iter().enumerate() {
+        chrom2tid.insert(u8_to_string(name),t);
+    }
+
+    let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
+
+    for r in vcf.records(){
+        let record = r.unwrap();
+        // map the VCF rid to chrom name
+        // use BAM header to map this to TID
+        // fill in the tid, chrom, and pos
+        // get the alleles from the vcf record as well
+
+        let rid = record.rid().unwrap();
+        let chrom: String = u8_to_string(vcfh.header.rid2name(rid));
+
+        if !chrom2tid.contains_key(&chrom) {
+            println!("Potential variant VCF contains contig {} not found in BAM contigs.", chrom);
+        }
+
+
+        let alleles: Vec<String> = record.alleles().iter().map(|x| u8_to_string(x)).collect::<Vec<String>>();
+
+        let new_var = Var {
+            ix: 0,
+            old_ix: None,
+            // these will be set automatically,
+            tid: *chrom2tid.get(&chrom).unwrap(),
+            chrom: chrom.clone(),
+            pos0: record.pos() as usize,
+            alleles: alleles.clone(),
+            dp: 0,
+            allele_counts: vec![0; alleles.len()],
+            ambiguous_count: 0,
+            qual: 0.0,
+            filter: ".".to_string(),
+            genotype: Genotype(0, 0),
+            gq: 0.0,
+            unphased_genotype: Genotype(0, 0),
+            unphased_gq: 0.0,
+            genotype_post: GenotypeProbs::uniform(alleles.len()),
+            phase_set: None,
+            mec: 0,
+            mec_frac_variant: 0.0,  // mec fraction for this variant
+            mec_frac_block: 0.0,    // mec fraction for this haplotype block
+            mean_allele_qual: 0.0,
+            dp_any_mq: 0,
+            mq10_frac: 0.0,
+            mq20_frac: 0.0,
+            mq30_frac: 0.0,
+            mq40_frac: 0.0,
+            mq50_frac: 0.0,
+            sequence_context: "None".to_string(),
+            called: false
+        };
+        varlist.push(new_var);
+    }
+
+    let vlst = VarList::new(varlist);
+    vlst.assert_sorted();
+    return vlst
 }
 
 impl VarList {
