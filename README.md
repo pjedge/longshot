@@ -1,23 +1,22 @@
-# reaper
-The REAlign error PronE Reads variant caller.
+# longshot
 
-Reaper is a prototype SNV caller for long error prone reads such as Pacific Biosciences SMRT.
+Longshot is a diploid SNV caller for long error prone reads such as Pacific Biosciences SMRT.
 
 ## dependencies
 * rust 1.26.2 (see installation)
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
-First, install the Rust programming language. Reaper requires Rust 1.26.2 which comes with the cargo package manager. You can install rust with the following command:
+First, install the Rust programming language. Longshot requires Rust 1.26.2 which comes with the cargo package manager. You can install rust with the following command:
 ```
 curl https://sh.rustup.rs -sSf | sh
 ```
-To build reaper, type:
+To build Longshot, type:
 ```
 cargo build --release
 ```
 This will compile the code with optimizations in release mode, and the binary will be
-in ```target/release/reaper```. It will automatically install Rust dependencies for reaper,
+in ```target/release/longshot```. It will automatically install Rust dependencies for reaper,
 such rust-bio and rust-htslib.
 
 To run unit tests, type:
@@ -27,7 +26,7 @@ cargo test
 
 Usage:
 ```
-$ ./target/release/reaper --help
+$ ./target/release/longshot --help
 ```
 
 
@@ -39,7 +38,7 @@ error: linking with `cc` failed: exit code: 1
 ...
 ...
 ...
-= note: Non-UTF-8 output: /usr/bin/ld: /home/pedge/temp/reaper/target/release/build/reaper-347f3774e75b380c/out/libhapcut2.a(common.o)(.text.fprintf_time+0x81): unresolvable H\x89\\$\xe8H\x89l$\xf0H\x89\xf3L\x89d$\xf8H\x83\xec\x18H\x8bG\x10H\x89\xfdI\x89\xd4H\x89\xd6H\x8b;\xffPxH\x8bE\x10I\x8dt$\x08H\x8b{\x08\xffPxH\x8bE\x10H\x8b{\x10I\x8dt$\x10H\x8b\x1c$H\x8bl$\x08L\x8bd$\x10H\x8b@xH\x83\xc4\x18\xff\xe0f\x90H\x89\\$\xe8H\x89l$\xf0H\x89\xfbL\x89d$\xf8H\x83\xec\x18H\x8bG\x10I\x89\xd4H\x89\xf5H\x89\xf7\xffPhI\x89\x04$H\x8bC\x10H\x8d}\x08\xffPhH\x8b\x1c$I\x89D$\x08H\x8bl$\x08L\x8bd$\x10H\x83\xc4\x18\xc3\x0f\x1f relocation against symbol `time@@GLIBC_2.2.5\'\n/usr/bin/ld: BFD version 2.20.51.0.2-5.42.el6 20100205 internal error, aborting at reloc.c line 443 in bfd_get_reloc_size\n\n/usr/bin/ld: Please report this bug.\n\ncollect2: ld returned 1 exit status\n
+= note: Non-UTF-8 output: /usr/bin/ld: /home/pedge/temp/longshot/target/release/build/longshot-347f3774e75b380c/out/libhapcut2.a(common.o)(.text.fprintf_time+0x81): unresolvable H\x89\\$\xe8H\x89l$\xf0H\x89\xf3L\x89d$\xf8H\x83\xec\x18H\x8bG\x10H\x89\xfdI\x89\xd4H\x89\xd6H\x8b;\xffPxH\x8bE\x10I\x8dt$\x08H\x8b{\x08\xffPxH\x8bE\x10H\x8b{\x10I\x8dt$\x10H\x8b\x1c$H\x8bl$\x08L\x8bd$\x10H\x8b@xH\x83\xc4\x18\xff\xe0f\x90H\x89\\$\xe8H\x89l$\xf0H\x89\xfbL\x89d$\xf8H\x83\xec\x18H\x8bG\x10I\x89\xd4H\x89\xf5H\x89\xf7\xffPhI\x89\x04$H\x8bC\x10H\x8d}\x08\xffPhH\x8b\x1c$I\x89D$\x08H\x8bl$\x08L\x8bd$\x10H\x83\xc4\x18\xc3\x0f\x1f relocation against symbol `time@@GLIBC_2.2.5\'\n/usr/bin/ld: BFD version 2.20.51.0.2-5.42.el6 20100205 internal error, aborting at reloc.c line 443 in bfd_get_reloc_size\n\n/usr/bin/ld: Please report this bug.\n\ncollect2: ld returned 1 exit status\n
 ...
 ...
 ...
