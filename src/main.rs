@@ -49,7 +49,7 @@ fn main() {
 
     eprintln!("");
 
-    let input_args = App::new("Reaper (REAlign error PronE Reads)")
+    let input_args = App::new("Longshot")
         .version("0.1")
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
