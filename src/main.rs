@@ -273,8 +273,6 @@ fn main() {
             .help("Do not genotype/haplotype at all, just write a fragment file describing the haplotype fragments to this file. Homozygous variants are included, so DO NOT use this file with HapCUT2!")
             .hidden(true)
             .display_order(220))
-
-
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -541,6 +539,23 @@ fn main() {
 
     eprintln!("{} Estimating alignment parameters...",print_time());
     let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq);
+    /*let alignment_parameters = AlignmentParameters{
+        transition_probs: TransitionProbs {
+            match_from_match: 0.879,
+            insertion_from_match: 0.080,
+            deletion_from_match: 0.041,
+            insertion_from_insertion: 0.240,
+            match_from_insertion: 0.760,
+            deletion_from_deletion: 0.113,
+            match_from_deletion: 0.887,
+        },
+        emission_probs: EmissionProbs {
+            equal: 0.982,
+            not_equal: 0.006,
+            insertion: 1.0,
+            deletion: 1.0
+        }
+    };*/
 
     /***********************************************************************************************/
     // GET HUMAN GENOTYPE PRIORS
@@ -608,6 +623,16 @@ fn main() {
                                                          alignment_parameters,
                                                           None);
 
+
+    //for f in 0..flist.len() {
+    //    for call in &flist[f].calls {
+    //        if varlist.lst[call.var_ix].chrom == "chr1".to_string() && varlist.lst[call.var_ix].pos0 == 12067043 {
+    //            println!("{}\t{}\t{:.2}", &flist[f].id, varlist.lst[call.var_ix].alleles[call.allele as usize], *PHREDProb::from(call.qual));
+    //        }
+    //    }
+    //}
+    //return;
+
     match fragment_filename {
         Some(ffn) => {
             // normally phase_variant is used to select which variants are heterozygous, so that
@@ -629,7 +654,7 @@ fn main() {
                     Ok(_) => {}
                 }
             }
-            print_vcf(&mut varlist, &interval,&output_vcf_file, true, max_cov, &density_params, &sample_name);
+            print_vcf(&mut varlist, &interval,&output_vcf_file, true, max_cov, &density_params, &sample_name, true);
 
             eprintln!("{} Finished generating haplotype fragment file. Exiting...",print_time());
 
@@ -652,7 +677,7 @@ fn main() {
     // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
     /***********************************************************************************************/
     if no_haps {
-        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name);
+        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false);
         return;
     }
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
@@ -738,7 +763,8 @@ fn main() {
         None => {}
     }
 
+
     eprintln!("{} Printing VCF file...",print_time());
     print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &density_params, &sample_name);
-    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name);
+    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false);
 }

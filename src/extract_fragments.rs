@@ -391,6 +391,8 @@ pub fn find_anchors(bam_record: &Record,
                 if l > extract_params.max_cigar_indel as u32 {
                     return Ok(None); // cigar indel too long
                 }
+
+
                 if VERBOSE {
                     eprint!("I/D/N {},", l);
                 }
