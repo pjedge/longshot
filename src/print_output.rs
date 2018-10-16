@@ -11,7 +11,7 @@ use std::path::Path;
 
 pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String,
                  print_reference_genotype: bool, max_cov: Option<u32>, density_params: &DensityParameters,
-                 sample_name: &String) {
+                 sample_name: &String, print_outside_region: bool) {
 
     // first, add filter flags for variant density
     var_filter(varlist, density_params.gq, density_params.len, density_params.n, max_cov);
@@ -66,9 +66,10 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 
         match interval {
             &Some(ref iv) => {
-                if var.chrom != iv.chrom ||
+                if !print_outside_region &&
+                    (var.chrom != iv.chrom ||
                     var.pos0 < iv.start_pos as usize ||
-                    var.pos0 > iv.end_pos as usize {
+                    var.pos0 > iv.end_pos as usize) {
                     continue;
                 }
             }
@@ -156,7 +157,7 @@ pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInter
                 Some(s) => {s.to_owned()},
                 None => {panic!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(varlist, &interval,&outfile, true, max_cov, density_params, sample_name);
+            print_vcf(varlist, &interval,&outfile, true, max_cov, density_params, sample_name, true);
         }
         &None => {}
     };
