@@ -90,13 +90,13 @@ fn main() {
                 .display_order(40)
                 //.required(true)
                 .takes_value(true))
-        .arg(Arg::with_name("Potential Variants VCF")
+        /*.arg(Arg::with_name("Potential Variants VCF")
             .short("v")
             .long("potential_variants")
             .value_name("VCF")
             .help("Use the variants in this VCF as the potential variants instead of using pileup method. NOTE: every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
             .display_order(45)
-            .takes_value(true))
+            .takes_value(true))*/
         .arg(Arg::with_name("Haplotype Bam Prefix")
             .short("p")
             .long("hap_bam_prefix")
@@ -283,7 +283,7 @@ fn main() {
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
 
-    let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
+    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
 
     let force = match input_args.occurrences_of("Force overwrite") {
@@ -571,7 +571,7 @@ fn main() {
 
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("{} Calling potential SNVs using pileup...",print_time());
-    let mut varlist = match potential_variants_file {
+    /*let mut varlist = match potential_variants_file {
         Some(file) => { parse_VCF_potential_variants(&file.to_string(), &bamfile_name) }
         None => { call_potential_snvs::call_potential_snvs(&bamfile_name,
                                                  &fasta_file,
@@ -582,7 +582,16 @@ fn main() {
                                                  min_mapq,
                                                  max_p_miscall,
                                                  alignment_parameters.ln()) }
-    };
+    };*/
+    let mut varlist = call_potential_snvs::call_potential_snvs(&bamfile_name,
+                                             &fasta_file,
+                                             &interval,
+                                             &genotype_priors,
+                                             min_cov,
+                                             max_cov,
+                                             min_mapq,
+                                             max_p_miscall,
+                                             alignment_parameters.ln());
 
     // back up the variant indices
     // they will be needed later when we try to re-use fragment alleles that don't change
