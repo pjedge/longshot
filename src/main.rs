@@ -43,7 +43,7 @@ use realignment::{AlignmentType};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
 use haplotype_assembly::*;
-use variants_and_fragments::parse_VCF_potential_variants;
+//use variants_and_fragments::parse_VCF_potential_variants;
 
 
 fn main() {
@@ -103,25 +103,22 @@ fn main() {
             .value_name("BAM")
             .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
             .display_order(50))
+        .arg(Arg::with_name("Auto min/max coverage")
+            .short("A")
+            .long("auto_min_max_cov")
+            .help("Automatically set min and max coverage to mean_coverage +- 5*sqrt(mean_coverage). (SLOWER)")
+            .display_order(77))
         .arg(Arg::with_name("Min coverage")
             .short("c")
             .long("min_cov")
             .value_name("int")
             .help("Minimum coverage (of reads passing filters) to consider position as a potential SNV.")
-            .display_order(78)
-            .default_value("0"))
-        .arg(Arg::with_name("Max coverage fraction")
-            .short("j")
-            .long("max_cov_frac")
-            .value_name("float")
-            .help("Maximum coverage (of reads passing filters) to consider position as a potential SNV, as a fraction of the mean coverage. For example, \"-c 2.0\" throws out positions with more than twice the mean coverage.")
-            .display_order(79)
-            .default_value("2.0"))
+            .display_order(78))
         .arg(Arg::with_name("Max coverage")
                 .short("C")
                 .long("max_cov")
                 .value_name("int")
-                .help("Maximum coverage (of reads passing filters) to consider position as a potential SNV. Overrides --max_cov_frac parameter.")
+                .help("Maximum coverage (of reads passing filters) to consider position as a potential SNV.")
                 .display_order(80))
         .arg(Arg::with_name("Min mapq")
                 .short("q")
@@ -144,6 +141,20 @@ fn main() {
             .help("Minimum quality (Phred-scaled) of read->haplotype assignment (for read separation).")
             .display_order(90)
             .default_value("20.0"))
+        .arg(Arg::with_name("Potential SNV Cutoff")
+            .long("potential_snv_cutoff")
+            .short("Q")
+            .value_name("float")
+            .help("Consider a site as a potential SNV if the original PHRED quality for 0/0 genotype is below this amount (a larger value considers more potential SNV sites).")
+            .display_order(91)
+            .default_value(&"30.0"))
+        .arg(Arg::with_name("Haplotype Convergence Delta")
+            .long("hap_converge_delta")
+            .short("L")
+            .value_name("float")
+            .help("Terminate the haplotype/genotype iteration when the relative change in log-likelihood falls below this amount. Setting a larger value results in faster termination but potentially less accurate results.")
+            .display_order(92)
+            .default_value(&"0.0001"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
                 .long("anchor_length")
@@ -177,15 +188,10 @@ fn main() {
                 .default_value("20")
                 .help("Throw away a read-variant during allelotyping if there is a CIGAR indel (I/D/N) longer than this amount in its window.")
                 .display_order(151))
-        .arg(Arg::with_name("Fast alignment")
-                .short("z")
-                .long("fast_alignment")
-                .help("(DEPRECATED) Fast alignment is now default, this flag doesn't do anything.")
-                .display_order(160))
         .arg(Arg::with_name("Numerically stable alignment")
             .short("S")
             .long("stable_alignment")
-            .help("Use numerically-stable (logspace) pair HMM forward algorithm. Is significantly slower but may be more accurate. Tests have shown this not to be necessary.")
+            .help("Use numerically-stable (logspace) pair HMM forward algorithm. Is significantly slower but may be more accurate. Tests have shown this not to be necessary for highly error prone reads (PacBio CLR).")
             .display_order(161))
         .arg(Arg::with_name("Force overwrite")
             .short("F")
@@ -241,9 +247,9 @@ fn main() {
         .arg(Arg::with_name("ts/tv Ratio")
             .long("ts_tv_ratio")
             .value_name("float")
-            .help("Specify the transition/transversion rate (rate of transition vs a single one of the two transversion events, NOT either) for Genotype Prior estimation")
+            .help("Specify the transition/transversion rate for genotype grior estimation")
             .display_order(182)
-            .default_value(&"4.0"))
+            .default_value(&"2.0"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -390,6 +396,16 @@ fn main() {
 
     let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(min_allele_qual));
 
+    let ll_delta: f64 = input_args.value_of("Haplotype Convergence Delta")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument hap_converge_delta must be a positive float!");
+
+    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(input_args.value_of("Potential SNV Cutoff")
+        .unwrap()
+        .parse::<f64>()
+        .expect("Argument potential_snv_cutoff must be a positive float!")));
+
     let hom_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous SNV Rate")
         .unwrap()
         .parse::<f64>()
@@ -410,7 +426,9 @@ fn main() {
         .parse::<f64>()
         .expect("Argument het_indel_rate must be a positive float!")));
 
-    let ts_tv_ratio = input_args.value_of("ts/tv Ratio")
+    // multiply by 2.0 because internally we use this value as the probability of transition to
+    // a single transversion base, not the combined probability of transversion to either one
+    let ts_tv_ratio = 2.0 * input_args.value_of("ts/tv Ratio")
         .unwrap()
         .parse::<f64>()
         .expect("Argument ts_tv_ratio must be a positive float!");
@@ -489,43 +507,40 @@ fn main() {
         }
     };*/
 
-    if input_args.occurrences_of("Max coverage") > 0 && input_args.occurrences_of("Max coverage fraction") > 0 {
-        eprintln!("{} ERROR: -c and -C options cannot be used at the same time.",print_time());
+
+    let (min_cov, max_cov): (u32, u32) = match input_args.occurrences_of("Auto min/max coverage") {
+        0 => {
+            if !(input_args.occurrences_of("Min coverage") == 1 && input_args.occurrences_of("Max coverage") == 1) {
+                eprintln!("{} ERROR: Must specify either automatic min/max coverage (-A) OR min/max coverage values (-c and -C)", print_time());
+                return;
+            }
+            // manually assigned coverage cutoffs from user
+            (input_args.value_of("Min coverage").unwrap().parse::<u32>().expect("Argument min_cov must be a positive integer!"),
+             input_args.value_of("Max coverage").unwrap().parse::<u32>().expect("Argument max_cov must be a positive integer!"))
+        },
+        1 => {
+            eprintln!("{} Automatically determining min and max read coverage.",print_time());
+            eprintln!("{} Estimating mean read coverage...",print_time());
+            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval, min_mapq);
+            let calculated_min_cov = (mean_coverage as f64 - 5.0 * (mean_coverage as f64).sqrt()) as u32;
+            let calculated_max_cov = (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
+
+            eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
+
+            (calculated_min_cov, calculated_max_cov)
+        },
+        _ => {
+            panic!("auto_min_max_cov specified multiple times");
+        }
+    };
+
+    if max_cov > 0 {
+        eprintln!("{} Min read coverage set to {}.", print_time(), min_cov);
+        eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
+    } else {
+        eprintln!("{} ERROR: Max read coverage set to 0.",print_time());
         return;
     }
-
-    let min_cov: u32 = input_args.value_of("Min coverage")
-        .unwrap()
-        .parse::<u32>()
-        .expect("Argument min_cov must be a positive integer!");
-
-    let max_cov: Option<u32> = match input_args.value_of("Max coverage") {
-        Some(cov) => {
-            Some(cov.parse::<u32>().expect("Argument max_cov must be a positive integer!"))
-        }
-        None => match input_args.value_of("Max coverage fraction") {
-            Some(f) => {
-                let frac = f.parse::<f64>().expect("Argument max_cov_frac must be a floating point value!");
-                if frac <= 1.0 {
-                    eprintln!("{} ERROR: Argument max_cov_frac should not be less than 1.0. This would filter out the majority of positions!", print_time());
-                    return;
-                }
-                eprintln!("{} Estimating mean read coverage...",print_time());
-                let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval, min_mapq);
-                let calculated_cov = (mean_coverage as f64 * frac) as u32;
-
-                eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
-                if calculated_cov > 0 {
-                    eprintln!("{} Max read coverage set to {}.",print_time(), calculated_cov);
-                } else {
-                    eprintln!("{} ERROR: Max read coverage set to 0.",print_time());
-                    return;
-                }
-                Some(calculated_cov)
-            }
-            None => None,
-        },
-    };
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq: min_mapq,
@@ -591,7 +606,8 @@ fn main() {
                                              max_cov,
                                              min_mapq,
                                              max_p_miscall,
-                                             alignment_parameters.ln());
+                                             alignment_parameters.ln(),
+                                             potential_snv_cutoff);
 
     // back up the variant indices
     // they will be needed later when we try to re-use fragment alleles that don't change
@@ -692,7 +708,7 @@ fn main() {
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, &density_params, max_p_miscall,
-                                   &sample_name);
+                                   &sample_name, ll_delta);
 
     /*
     if use_poa {
@@ -741,7 +757,7 @@ fn main() {
 
         eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
         call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-            &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name);
+            &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name, ll_delta);
 
         /***********************************************************************************************/
         // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF

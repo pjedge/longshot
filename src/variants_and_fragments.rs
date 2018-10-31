@@ -103,13 +103,13 @@ pub struct VarList {
     ix: HashMap<String, Vec<usize>>,
 }
 
-pub fn parse_VCF_potential_variants (vcffile_name: &String, bamfile_name: &String) -> VarList {
+pub fn parse_vcf_potential_variants(vcffile_name: &String, bamfile_name: &String) -> VarList {
 
     // must assert that the VCF file is sorted correctly
     // can we just read it in and then check that it's sorted using the check_sorted function vs the bam's tlist?
 
     let mut vcf = bcf::Reader::from_path(vcffile_name).unwrap();
-    let mut vcfh = bcf::Reader::from_path(vcffile_name).unwrap();
+    let vcfh = bcf::Reader::from_path(vcffile_name).unwrap();
 
     let bam = bam::Reader::from_path(bamfile_name).unwrap();
     let mut chrom2tid: HashMap<String, usize> = HashMap::new();
@@ -499,7 +499,7 @@ impl VarList {
     }
 }
 
-pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: Option<u32>) {
+pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize, density_count: usize, max_depth: u32) {
 
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].qual < density_qual { continue; }
@@ -518,19 +518,15 @@ pub fn var_filter(varlist: &mut VarList, density_qual: f64, density_dist: usize,
             }
         }
     }
-    match max_depth {
-        Some(dp) => {
-            for i in 0..varlist.lst.len() {
-                if varlist.lst[i].dp > dp as usize {
-                    if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
-                        varlist.lst[i].filter = "dp".to_string();
-                    } else {
-                        varlist.lst[i].filter.push_str(";dp");
-                    }
-                }
+
+    for i in 0..varlist.lst.len() {
+        if varlist.lst[i].dp > max_depth as usize {
+            if varlist.lst[i].filter == ".".to_string() || varlist.lst[i].filter == "PASS".to_string() {
+                varlist.lst[i].filter = "dp".to_string();
+            } else {
+                varlist.lst[i].filter.push_str(";dp");
             }
         }
-        None => {}
     }
 }
 
