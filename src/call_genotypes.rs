@@ -120,13 +120,13 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       genotype_priors: &GenotypePriors,
                                       variant_debug_directory: &Option<String>,
                                       program_step: usize,
-                                      max_cov: Option<u32>,
+                                      max_cov: u32,
                                       density_params: &DensityParameters,
                                       max_p_miscall: f64,
-                                      sample_name: &String) {
+                                      sample_name: &String,
+                                      ll_delta: f64) {
 
     let min_hap_gq: f64 = 1.0;
-    let max_iters_since_improvement: usize = 1;
 
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -152,9 +152,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
     let mut haps: Vec<Vec<u8>> = vec![vec![0u8; n_var]; 2];
-    let mut prev_best_likelihood = LogProb::ln_zero();
-    let mut best_varlist_bak = (*varlist).clone();
-    let mut iters_since_improvement = 0;
+    let mut prev_likelihood = LogProb::ln_zero();
 
     // for all basic biallelic heterozygous variants
     // randomly shuffle the phase of the variant
@@ -368,8 +366,6 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                 }
             }
         }
-
-        //eprintln!("{}    Refining genotypes using round {} haplotypes...",print_time(), hapcut2_iter+1);
 
         for _ in 0..max_iterations {
             let mut changed = false;
@@ -593,89 +589,13 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         eprintln!("{}    (After Greedy)   Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
-        if total_likelihood > prev_best_likelihood { // if num_phased >= prev_num_phased { //
-            iters_since_improvement = 0;
-            prev_best_likelihood = total_likelihood;
-            best_varlist_bak = (*varlist).clone();
+        // convert logprob value to base 10
+        let b10 = |x: LogProb| (*PHREDProb::from(x) / -10.0) as f64;
 
-        } else { // { //
-
-            iters_since_improvement += 1;
-
-            // restore the previous varlist
-            for i in 0..varlist.lst.len() {
-                varlist.lst[i] = best_varlist_bak.lst[i].clone();
-            }
-
-            if iters_since_improvement > max_iters_since_improvement {
-
-                break;
-            }
+        if ((b10(total_likelihood) - b10(prev_likelihood)) / b10(prev_likelihood)).abs() < ll_delta {
+            break;
         }
-        //prev_num_phased = num_phased;
+
+        prev_likelihood = total_likelihood;
     }
 }
-/*
-pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList) {
-
-    let hap_ixs = vec![0, 1];
-    let ln_max_p_miscall = LogProb::from(Prob(MAX_P_MISCALL_F64));
-
-    for mut var in &mut varlist.lst {
-        var.mec = 0;
-        var.mec_frac = 0.0;
-    }
-
-    for f in 0..flist.len() {
-
-        let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
-
-        for &hap_ix in &hap_ixs {
-            for call in &flist[f].calls {
-                if call.qual < ln_max_p_miscall {
-                    let mut chs = varlist.lst[call.var_ix].genotype.chars();
-                    let g1 = chs.next();
-                    let sep = chs.next();
-                    let g2 = chs.next();
-                    let g = vec![g1.unwrap(),g2.unwrap()];
-                    if sep.unwrap() != '|' {
-                        continue; // only care about phased variants.
-                    }
-                    // read allele matches haplotype allele
-                    if call.allele != g[hap_ix] {
-                        mismatched_vars[hap_ix].push(call.var_ix);
-                    }
-                }
-            }
-        }
-
-        let min_error_hap = if mismatched_vars[0].len() < mismatched_vars[1].len() { 0 } else { 1 };
-
-        for &ix in &mismatched_vars[min_error_hap] {
-            varlist.lst[ix].mec += 1;
-        }
-    }
-
-    let mut block_mec: HashMap<usize, usize> = HashMap::new();
-    let mut block_total: HashMap<usize, usize> = HashMap::new();
-
-    for mut var in &mut varlist.lst {
-        match var.phase_set {
-            Some(ps) => {
-                *block_mec.entry(ps).or_insert(0) += var.mec;
-                *block_total.entry(ps).or_insert(0) += var.ra + var.aa;
-            }
-            None => {}
-        }
-    }
-
-    for mut var in &mut varlist.lst {
-        match var.phase_set {
-            Some(ps) => {
-                var.mec_frac = *block_mec.get(&ps).unwrap() as f64 / *block_total.get(&ps).unwrap() as f64;
-            }
-            None => {}
-        }
-    }
-}
-*/

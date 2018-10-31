@@ -10,7 +10,7 @@ use std::path::Path;
 
 
 pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String,
-                 print_reference_genotype: bool, max_cov: Option<u32>, density_params: &DensityParameters,
+                 print_reference_genotype: bool, max_cov: u32, density_params: &DensityParameters,
                  sample_name: &String, print_outside_region: bool) {
 
     // first, add filter flags for variant density
@@ -150,7 +150,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 
 pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>,
                            variant_debug_directory: &Option<String>, debug_filename: &str,
-                           max_cov: Option<u32>, density_params: &DensityParameters, sample_name: &String){
+                           max_cov: u32, density_params: &DensityParameters, sample_name: &String){
     match variant_debug_directory {
         &Some(ref dir) => {
             let outfile = match Path::new(&dir).join(&debug_filename).to_str() {

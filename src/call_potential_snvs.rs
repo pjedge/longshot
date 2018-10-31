@@ -9,7 +9,7 @@ use util::*; // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterva
 use variants_and_fragments::*;
 use rust_htslib::bam::pileup::Indel;
 use std::collections::{HashMap}; //,HashSet};
-use bio::stats::{LogProb, Prob};
+use bio::stats::{LogProb};
 use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
 //use spoa::poa_multiple_sequence_alignment;
 use realignment::{LnAlignmentParameters};
@@ -29,13 +29,13 @@ pub fn call_potential_snvs(bam_file: &String,
                            interval: &Option<GenomicInterval>,
                            genotype_priors: &GenotypePriors,
                            min_coverage: u32,
-                           max_coverage: Option<u32>,
+                           max_coverage: u32,
                            min_mapq: u8,
                            max_p_miscall: f64,
-                           ln_align_params: LnAlignmentParameters)
+                           ln_align_params: LnAlignmentParameters,
+                           potential_snv_cutoff: LogProb)
                            -> VarList {
 
-    let potential_snv_qual = LogProb::from(Prob(POTENTIAL_SNV_MIN_PROB));
     let target_names = parse_target_names(&bam_file);
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
@@ -197,9 +197,8 @@ pub fn call_potential_snvs(bam_file: &String,
                 continue;
             }
 
-            match max_coverage {
-                Some(cov) if depth > cov as usize => { continue; }
-                _ => {}
+            if depth > max_coverage as usize {
+                continue;
             }
 
             let mut snv_max_count: u32 = 0;
@@ -261,7 +260,7 @@ pub fn call_potential_snvs(bam_file: &String,
 
             next_valid_pos = (pos + 1) as u32;
 
-            if qual > potential_snv_qual &&
+            if qual > potential_snv_cutoff &&
                 !ref_allele.contains("N") && !var_allele.contains("N") &&
                 (ref_allele.clone(), var_allele.clone()) !=
                     (ref_base_str.clone(), ref_base_str.clone()) {
