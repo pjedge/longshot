@@ -22,7 +22,6 @@ use genotype_probs::*;
 
 pub static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
-static POTENTIAL_SNV_MIN_PROB: f64 = 0.001;
 
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
