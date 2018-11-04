@@ -33,7 +33,7 @@ use std::path::Path;
 
 use call_genotypes::*;
 use util::*;
-use estimate_read_coverage::calculate_mean_coverage;
+//use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use bio::stats::{LogProb,Prob, PHREDProb};
 //use haplotype_assembly::separate_reads_by_haplotype;
@@ -103,23 +103,25 @@ fn main() {
             .value_name("BAM")
             .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
             .display_order(50))
-        .arg(Arg::with_name("Auto min/max coverage")
-            .short("A")
-            .long("auto_min_max_cov")
-            .help("Automatically set min and max coverage to mean_coverage +- 5*sqrt(mean_coverage). (SLOWER)")
-            .display_order(77))
+        //.arg(Arg::with_name("Auto max coverage")
+        //    .short("A")
+        //    .long("auto_min_max_cov")
+        //    .help("Automatically set max coverage to 2*mean_coverage. (SLOWER)")
+        //    .display_order(77))
         .arg(Arg::with_name("Min coverage")
             .short("c")
             .long("min_cov")
             .value_name("int")
             .help("Minimum coverage (of reads passing filters) to consider position as a potential SNV.")
-            .display_order(78))
+            .display_order(78)
+            .default_value("0"))
         .arg(Arg::with_name("Max coverage")
                 .short("C")
                 .long("max_cov")
                 .value_name("int")
                 .help("Maximum coverage (of reads passing filters) to consider position as a potential SNV.")
-                .display_order(80))
+                .display_order(80)
+                .default_value("8000"))
         .arg(Arg::with_name("Min mapq")
                 .short("q")
                 .long("min_mapq")
@@ -507,7 +509,10 @@ fn main() {
         }
     };*/
 
+    let min_cov: u32 = input_args.value_of("Min coverage").unwrap().parse::<u32>().expect("Argument min_cov must be a positive integer!");
+    let max_cov: u32 = input_args.value_of("Max coverage").unwrap().parse::<u32>().expect("Argument max_cov must be a positive integer!");
 
+    /*
     let (min_cov, max_cov): (u32, u32) = match input_args.occurrences_of("Auto min/max coverage") {
         0 => {
             if !(input_args.occurrences_of("Min coverage") == 1 && input_args.occurrences_of("Max coverage") == 1) {
@@ -522,8 +527,8 @@ fn main() {
             eprintln!("{} Automatically determining min and max read coverage.",print_time());
             eprintln!("{} Estimating mean read coverage...",print_time());
             let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval, min_mapq);
-            let calculated_min_cov = (mean_coverage as f64 - 5.0 * (mean_coverage as f64).sqrt()) as u32;
-            let calculated_max_cov = (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
+            let calculated_min_cov = 0 //(mean_coverage as f64 - 5.0 * (mean_coverage as f64).sqrt()) as u32;
+            let calculated_max_cov = (2*mean_coverage) as u32; //(mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
 
             eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
 
@@ -540,7 +545,7 @@ fn main() {
     } else {
         eprintln!("{} ERROR: Max read coverage set to 0.",print_time());
         return;
-    }
+    }*/
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq: min_mapq,
