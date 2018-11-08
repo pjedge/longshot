@@ -136,7 +136,8 @@ quick_error! {
 
 pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                               ref_seq: &Vec<char>,
-                              read_seq: &Vec<char>)
+                              read_seq: &Vec<char>,
+                              max_cigar_indel: u32)
                               -> Result<(TransitionCounts, EmissionCounts), CigarError>{
 
     // key is a state transition
@@ -194,6 +195,10 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
             }
             Cigar::Ins(l) => {
 
+                if l > max_cigar_indel {
+                    continue;
+                }
+
                 let mut ref_pos = cigarpos.ref_pos as usize;
                 let mut read_pos = cigarpos.read_pos as usize;
 
@@ -222,6 +227,10 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
             }
             Cigar::Del(l) |
             Cigar::RefSkip(l) => {
+
+                if l > max_cigar_indel {
+                    continue;
+                }
 
                 let mut ref_pos = cigarpos.ref_pos as usize;
                 let mut read_pos = cigarpos.read_pos as usize;
@@ -271,7 +280,8 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
 pub fn estimate_alignment_parameters(bam_file: &String,
                                      fasta_file: &String,
                                      interval: &Option<GenomicInterval>,
-                                     min_mapq: u8)
+                                     min_mapq: u8,
+                                     max_cigar_indel: u32)
                                      -> AlignmentParameters {
 
     let t_names = parse_target_names(&bam_file);
@@ -329,7 +339,7 @@ pub fn estimate_alignment_parameters(bam_file: &String,
                 create_augmented_cigarlist(record.pos() as u32, &bam_cig).expect("Error creating augmented cigarlist.");
 
             let (read_transition_counts, read_emission_counts) =
-                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq).expect("Error counting cigar alignment events.");
+                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, max_cigar_indel).expect("Error counting cigar alignment events.");
 
             transition_counts.add(read_transition_counts);
             emission_counts.add(read_emission_counts);

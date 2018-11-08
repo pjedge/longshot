@@ -5,8 +5,7 @@ use rust_htslib::prelude::*;
 use util::{print_time, GenomicInterval, get_interval_lst};
 
 pub fn calculate_mean_coverage(bam_file: &String,
-                           interval: &Option<GenomicInterval>,
-                           min_mapq: u8)
+                           interval: &Option<GenomicInterval>)
                            -> f64 {
 
     // there is a really weird bug going on here,
@@ -53,7 +52,7 @@ pub fn calculate_mean_coverage(bam_file: &String,
                 let record = alignment.record();
 
                 // may be faster to implement this as bitwise operation on raw flag in the future?
-                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
+                if record.is_unmapped() || record.is_secondary() ||
                     record.is_quality_check_failed() ||
                     record.is_duplicate() || record.is_supplementary() {
                     continue;

@@ -110,6 +110,10 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
             var.gq = MAX_VCF_QUAL;
         }
 
+        if var.unphased_gq > MAX_VCF_QUAL {
+            var.unphased_gq = MAX_VCF_QUAL;
+        }
+
         var.phase_set = None;
     }
 }
