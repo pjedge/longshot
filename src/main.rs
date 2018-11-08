@@ -33,7 +33,7 @@ use std::path::Path;
 
 use call_genotypes::*;
 use util::*;
-//use estimate_read_coverage::calculate_mean_coverage;
+use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use bio::stats::{LogProb,Prob, PHREDProb};
 //use haplotype_assembly::separate_reads_by_haplotype;
@@ -103,11 +103,11 @@ fn main() {
             .value_name("BAM")
             .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
             .display_order(50))
-        //.arg(Arg::with_name("Auto max coverage")
-        //    .short("A")
-        //    .long("auto_min_max_cov")
-        //    .help("Automatically set max coverage to 2*mean_coverage. (SLOWER)")
-        //    .display_order(77))
+        .arg(Arg::with_name("Auto max coverage")
+            .short("A")
+            .long("auto_min_max_cov")
+            .help("Automatically calculate mean coverage for region and set max coverage to mean_coverage + 5*sqrt(mean_coverage). (SLOWER)")
+            .display_order(77))
         .arg(Arg::with_name("Min coverage")
             .short("c")
             .long("min_cov")
@@ -239,19 +239,21 @@ fn main() {
             .value_name("float")
             .help("Specify the homozygous Indel Rate for genotype prior estimation")
             .display_order(180)
-            .default_value(&"0.00005"))
+            .hidden(true)
+            .default_value(&"0.0"))
         .arg(Arg::with_name("Heterozygous Indel Rate")
             .long("het_indel_rate")
             .value_name("float")
             .help("Specify the heterozygous Indel Rate for genotype prior estimation")
             .display_order(181)
-            .default_value(&"0.0001"))
+            .hidden(true)
+            .default_value(&"0.0"))
         .arg(Arg::with_name("ts/tv Ratio")
             .long("ts_tv_ratio")
             .value_name("float")
             .help("Specify the transition/transversion rate for genotype grior estimation")
             .display_order(182)
-            .default_value(&"2.0"))
+            .default_value(&"0.5"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -274,13 +276,6 @@ fn main() {
             .value_name("path")
             .help("write out current information about variants at each step of algorithm to files in this directory")
             .display_order(210))
-        .arg(Arg::with_name("Fragment file")
-            .short("t")
-            .long("fragment_file")
-            .value_name("string")
-            .help("Do not genotype/haplotype at all, just write a fragment file describing the haplotype fragments to this file. Homozygous variants are included, so DO NOT use this file with HapCUT2!")
-            .hidden(true)
-            .display_order(220))
         .get_matches();
 
     // should be safe just to unwrap these because they're required options for clap
@@ -349,7 +344,6 @@ fn main() {
         None => None,
     };
 
-    let fragment_filename: Option<&str> = input_args.value_of("Fragment file");
 
     let min_mapq: u8 = input_args.value_of("Min mapq")
         .unwrap()
@@ -510,29 +504,21 @@ fn main() {
     };*/
 
     let min_cov: u32 = input_args.value_of("Min coverage").unwrap().parse::<u32>().expect("Argument min_cov must be a positive integer!");
-    let max_cov: u32 = input_args.value_of("Max coverage").unwrap().parse::<u32>().expect("Argument max_cov must be a positive integer!");
 
-    /*
-    let (min_cov, max_cov): (u32, u32) = match input_args.occurrences_of("Auto min/max coverage") {
+    let max_cov: u32 = match input_args.occurrences_of("Auto max coverage") {
         0 => {
-            if !(input_args.occurrences_of("Min coverage") == 1 && input_args.occurrences_of("Max coverage") == 1) {
-                eprintln!("{} ERROR: Must specify either automatic min/max coverage (-A) OR min/max coverage values (-c and -C)", print_time());
-                return;
-            }
-            // manually assigned coverage cutoffs from user
-            (input_args.value_of("Min coverage").unwrap().parse::<u32>().expect("Argument min_cov must be a positive integer!"),
-             input_args.value_of("Max coverage").unwrap().parse::<u32>().expect("Argument max_cov must be a positive integer!"))
+            // manually assigned coverage cutoff from user
+             input_args.value_of("Max coverage").unwrap().parse::<u32>().expect("Argument max_cov must be a positive integer!")
         },
         1 => {
-            eprintln!("{} Automatically determining min and max read coverage.",print_time());
+            eprintln!("{} Automatically determining max read coverage.",print_time());
             eprintln!("{} Estimating mean read coverage...",print_time());
-            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval, min_mapq);
-            let calculated_min_cov = 0 //(mean_coverage as f64 - 5.0 * (mean_coverage as f64).sqrt()) as u32;
-            let calculated_max_cov = (2*mean_coverage) as u32; //(mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
+            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval);
+            let calculated_max_cov = (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
 
             eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
 
-            (calculated_min_cov, calculated_max_cov)
+            calculated_max_cov
         },
         _ => {
             panic!("auto_min_max_cov specified multiple times");
@@ -545,7 +531,7 @@ fn main() {
     } else {
         eprintln!("{} ERROR: Max read coverage set to 0.",print_time());
         return;
-    }*/
+    }
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq: min_mapq,
@@ -558,7 +544,7 @@ fn main() {
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());
-    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq);
+    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq, max_cigar_indel as u32);
     /*let alignment_parameters = AlignmentParameters{
         transition_probs: TransitionProbs {
             match_from_match: 0.879,
@@ -663,15 +649,20 @@ fn main() {
     //}
     //return;
 
-    match fragment_filename {
-        Some(ffn) => {
+    // if we're printing out variant "debug" information, print out a fragment file to that debug directory
+    match &variant_debug_directory {
+        &Some(ref debug_dir) => {
             // normally phase_variant is used to select which variants are heterozygous, so that
             // we only pass to HapCUT2 heterozygous variants
             // in this case, we set them all to 1 so we generate fragments for all variants
+            let ffn = match Path::new(&debug_dir).join(&"fragments.txt").to_str() {
+                Some(s) => {s.to_owned()},
+                None => {panic!("Invalid unicode provided for variant debug directory");}
+            };
             let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
             let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall);
 
-            let fragment_file_path = Path::new(ffn);
+            let fragment_file_path = Path::new(&ffn);
             let fragment_file_display = fragment_file_path.display();
             let mut fragment_file = match File::create(&fragment_file_path) {
                 Err(why) => panic!("couldn't create {}: {}", fragment_file_display, why.description()),
@@ -684,13 +675,8 @@ fn main() {
                     Ok(_) => {}
                 }
             }
-            print_vcf(&mut varlist, &interval,&output_vcf_file, true, max_cov, &density_params, &sample_name, true);
-
-            eprintln!("{} Finished generating haplotype fragment file. Exiting...",print_time());
-
-            return;
         },
-        None => {}
+        &None => {}
     }
 
     /***********************************************************************************************/
