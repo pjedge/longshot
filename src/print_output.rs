@@ -114,7 +114,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype) as usize;
 
         match writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2},MQ20={:.2},MQ30={:.2},MQ40={:.2},MQ50={:.2},PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
