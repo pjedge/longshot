@@ -2,6 +2,8 @@
 
 Longshot is a diploid SNV caller for long error prone reads such as Pacific Biosciences SMRT.
 
+THIS README IS A WORK IN PROGRESS AND MORE DETAILED DOCUMENTATION WILL BE AVAILABLE SOON
+
 ## dependencies
 * rust 1.26.2 (see installation)
 * various rust dependencies (automatically managed by cargo)
