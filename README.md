@@ -135,8 +135,8 @@ Call variants in a 500 kb region and then separate the reads into ```reads.hap1.
 ```
 
 ## important considerations
-- It is highly recommended to have at least 30x PacBio read coverage.
-- Longshot has only been tested using data from humans. Organisms with significantly higher or lower SNV rate than human may be less accurate (dense groups of many SNVs could pose a challenge for Longshot's windowed allelotyping, while very low heterozygosity could result in less accurate haplotype assembly).
+- It is highly recommended to use reads with at least 30x coverage.
+- Longshot has only been tested using data from humans. Results may vary with organisms with significantly higher or lower SNV rate.
 - It is important to set a reasonable max read coverage cutoff (```-C``` option) to filter out sites coinciding with genomic features such as CNVs which can be problematic for variant calling. If the ```-A``` option is used, Longshot will estimate the mean read coverage and set the max coverage to ```mean_cov+5*sqrt(mean_cov)```, which we have found to be a reasonable filter in practice for humans.
 - CNVs and mapping issues can result in dense clusters of false positive SNVs. Longshot will attempt to find clusters like this and mark them as "dn" in the FILTER field. The ```--density_params``` option is used to control which variants are flagged as "dn". The default parameters have been found to be effective for human sequencing data, but this option may need to be tweaked for other organisms with SNV rates significantly different from human.
 - Longshot is likely to work with PacBio CCS reads but at this time only CLR reads have been tested.
