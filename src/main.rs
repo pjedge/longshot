@@ -105,7 +105,7 @@ fn main() {
             .display_order(50))
         .arg(Arg::with_name("Auto max coverage")
             .short("A")
-            .long("auto_min_max_cov")
+            .long("auto_max_cov")
             .help("Automatically calculate mean coverage for region and set max coverage to mean_coverage + 5*sqrt(mean_coverage). (SLOWER)")
             .display_order(77))
         .arg(Arg::with_name("Min coverage")
