@@ -39,7 +39,7 @@ $ ./target/release/longshot --help
 ## execution on an example dataset
 The directory ```example_data``` contains a simulated toy dataset that can be used to test out Longshot:
 - Reference genome containing 3 contigs each with length 200 kb (```example_data/genome.fa```)
-- 30x coverage simulated pacbio reads (```example_data/pacbio_reads_30x.bam```)
+- 30x coverage simulated pacbio reads generated using [SimLoRD](https://bitbucket.org/genomeinformatics/simlord/) (```example_data/pacbio_reads_30x.bam```)
 - The 714 "true" variants for validation (```example_data/ground_truth_variants.vcf```)
 
 Run Longshot on the example data as so:
