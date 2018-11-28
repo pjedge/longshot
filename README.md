@@ -2,12 +2,19 @@
 
 Longshot is a diploid SNV caller for long error prone reads such as Pacific Biosciences SMRT.
 
+THIS README IS A WORK IN PROGRESS AND MORE DETAILED DOCUMENTATION WILL BE AVAILABLE SOON
+
+## supported operating systems
+Longshot has been tested using Ubuntu 16.04, CentOS 6.6, and Manjaro Linux 17.1.11.
+It should work on any linux-based system that has Rust and Cargo installed. 
+
 ## dependencies
+
 * rust 1.26.2 (see installation)
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
-First, install the Rust programming language. Longshot requires Rust 1.26.2 which comes with the cargo package manager. You can install rust with the following command:
+First, install the Rust programming language. Longshot requires Rust 1.26.2 or higher which comes with the cargo package manager. You can install rust with the following command:
 ```
 curl https://sh.rustup.rs -sSf | sh
 ```
@@ -17,7 +24,7 @@ cargo build --release
 ```
 This will compile the code with optimizations in release mode, and the binary will be
 in ```target/release/longshot```. It will automatically install Rust dependencies for reaper,
-such rust-bio and rust-htslib.
+such rust-bio and rust-htslib. The build process should take around 3 minutes on a typical desktop computer.
 
 To run unit tests, type:
 ```
@@ -30,7 +37,7 @@ $ ./target/release/longshot --help
 ```
 
 
-## troubleshooting
+## installation troubleshooting
 ### linker errors
 For example:
 ```

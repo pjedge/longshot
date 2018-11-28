@@ -147,7 +147,7 @@ fn main() {
             .long("potential_snv_cutoff")
             .short("Q")
             .value_name("float")
-            .help("Consider a site as a potential SNV if the original PHRED-scaled QUAL score for 0/0 genotype is above this amount (a larger value considers more potential SNV sites).")
+            .help("Consider a site as a potential SNV if the original PHRED-scaled QUAL score for 0/0 genotype is below this amount (a larger value considers more potential SNV sites).")
             .display_order(91)
             .default_value("30.0"))
         .arg(Arg::with_name("Haplotype Convergence Delta")
