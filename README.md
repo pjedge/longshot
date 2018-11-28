@@ -33,7 +33,7 @@ cargo test
 
 Usage:
 ```
-$ ./target/release/longshot --help
+$ ./target/release/longshot
 ```
 
 ## execution on an example dataset
@@ -48,6 +48,99 @@ Run Longshot on the example data as so:
 ```
 
 Execution should take around 30 seconds on a typical desktop machine. The output can be compared to ```ground_truth_variants.vcf``` for accuracy.
+
+## command line options
+```
+$ ./target/release/longshot --help
+
+Longshot 0.2.0
+Peter Edge <edge.peterj@gmail.com>
+SNV caller for Third-Generation Sequencing reads
+
+USAGE:
+    longshot [FLAGS] [OPTIONS] --bam <BAM> --ref <FASTA> --out <VCF>
+
+FLAGS:
+    -A, --auto_max_cov        Automatically calculate mean coverage for region and set max coverage to mean_coverage +
+                              5*sqrt(mean_coverage). (SLOWER)
+    -S, --stable_alignment    Use numerically-stable (logspace) pair HMM forward algorithm. Is significantly slower but
+                              may be more accurate. Tests have shown this not to be necessary for highly error prone
+                              reads (PacBio CLR).
+    -F, --force_overwrite     If output files (VCF or variant debug directory) exist, delete and overwrite them.
+    -x, --max_alignment       Use max scoring alignment algorithm rather than pair HMM forward algorithm.
+    -n, --no_haps             Don't call HapCUT2 to phase variants.
+    -h, --help                Prints help information
+    -V, --version             Prints version information
+
+OPTIONS:
+    -b, --bam <BAM>                       sorted, indexed BAM file with error-prone reads
+    -f, --ref <FASTA>                     indexed fasta reference that BAM file is aligned to
+    -o, --out <VCF>                       output VCF file with called variants.
+    -r, --region <string>                 Region in format <chrom> or <chrom:start-stop> in which to call variants (1-
+                                          based, inclusive).
+    -p, --hap_bam_prefix <BAM>            Write haplotype-separated reads to 3 bam files using this prefix:
+                                          <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam
+    -c, --min_cov <int>                   Minimum coverage (of reads passing filters) to consider position as a
+                                          potential SNV. [default: 0]
+    -C, --max_cov <int>                   Maximum coverage (of reads passing filters) to consider position as a
+                                          potential SNV. [default: 8000]
+    -y, --hap_assignment_qual <float>     Minimum quality (Phred-scaled) of read->haplotype assignment (for read
+                                          separation). [default: 20.0]
+    -a, --min_allele_qual <float>         Minimum estimated quality (Phred-scaled) of allele observation on read to use
+                                          for genotyping/haplotyping. [default: 7.0]
+    -q, --min_mapq <int>                  Minimum mapping quality to use a read. [default: 30]
+    -Q, --potential_snv_cutoff <float>    Consider a site as a potential SNV if the original PHRED-scaled QUAL score for
+                                          0/0 genotype is below this amount (a larger value considers more potential SNV
+                                          sites). [default: 30.0]
+    -L, --hap_converge_delta <float>      Terminate the haplotype/genotype iteration when the relative change in log-
+                                          likelihood falls below this amount. Setting a larger value results in
+                                          faster termination but potentially less accurate results. [default: 0.0001]
+    -l, --anchor_length <int>             Length of indel-free anchor sequence on the left and right side of read
+                                          realignment window. [default: 6]
+    -m, --max_snvs <int>                  Cut off short haplotypes after this many SNVs. 2^m haplotypes must be aligned
+                                          against per read for a variant cluster of size m. [default: 3]
+    -W, --max_window <int>                Maximum "padding" bases on either side of variant realignment window [default:
+                                          50]
+    -I, --max_cigar_indel <int>           Throw away a read-variant during allelotyping if there is a CIGAR indel
+                                          (I/D/N) longer than this amount in its window. [default: 20]
+    -B, --band_width <Band width>         Minimum width of alignment band. Band will increase in size if sequences are
+                                          different lengths. [default: 20]
+    -D, --density_params <string>         Parameters to flag a variant as part of a "dense cluster". Format
+                                          <n>:<l>:<gq>. If there are at least n variants within l base pairs with
+                                          genotype quality >=gq, then these variants are flagged as "dn" [default:
+                                          10:500:50]
+    -s, --sample_id <string>              Specify a sample ID to write to the output VCF [default: SAMPLE]
+        --hom_snv_rate <float>            Specify the homozygous SNV Rate for genotype prior estimation [default:
+                                          0.0005]
+        --het_snv_rate <float>            Specify the heterozygous SNV Rate for genotype prior estimation [default:
+                                          0.001]
+        --ts_tv_ratio <float>             Specify the transition/transversion rate for genotype grior estimation
+                                          [default: 0.5]
+    -d, --variant_debug_dir <path>        write out current information about variants at each step of algorithm to
+                                          files in this directory
+```
+
+## usage examples
+Call variants with default parameters:
+```
+./target/release/longshot --bam pacbio.bam --ref ref.fa --out output.vcf
+```
+Call variants for chromosome 1 only using the automatic max coverage cutoff:
+```
+./target/release/longshot -A -r chr1 --bam pacbio.bam --ref ref.fa --out output.vcf
+```
+Call variants in a 500 kb region and then separate the reads into ```reads.hap1.bam```,```reads.hap2.bam```, ```reads.unassigned.bam``` using a haplotype assignment threshold of 30:
+```
+./target/release/longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --out output.vcf
+```
+
+## important considerations
+- It is highly recommended to have at least 30x PacBio read coverage.
+- Longshot has only been tested using data from humans. Organisms with significantly higher or lower SNV rate than human may be less accurate (dense groups of many SNVs could pose a challenge for Longshot's windowed allelotyping, while very low heterozygosity could result in less accurate haplotype assembly).
+- It is important to set a reasonable max read coverage cutoff (```-C``` option) to filter out sites coinciding with genomic features such as CNVs which can be problematic for variant calling. If the ```-A``` option is used, Longshot will estimate the mean read coverage and set the max coverage to ```mean_cov+5*sqrt(mean_cov)```, which we have found to be a reasonable filter in practice for humans.
+- CNVs and mapping issues can result in dense clusters of false positive SNVs. Longshot will attempt to find clusters like this and mark them as "dn" in the FILTER field. The ```--density_params``` option is used to control which variants are flagged as "dn". The default parameters have been found to be effective for human sequencing data, but this option may need to be tweaked for other organisms with SNV rates significantly different from human.
+- Longshot is likely to work with PacBio CCS reads but at this time only CLR reads have been tested.
+- Oxford Nanopore SMS reads are not officially supported at this time.
 
 ## installation troubleshooting
 ### linker errors
