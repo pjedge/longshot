@@ -47,7 +47,7 @@ Run Longshot on the example data as so:
 ./target/release/longshot --bam example_data/pacbio_reads_30x.bam --ref example_data/genome.fa --out example_data/longshot_output.vcf
 ```
 
-The output can be compared to ```ground_truth_variants.vcf``` for accuracy.
+Execution should take around 30 seconds on a typical desktop machine. The output can be compared to ```ground_truth_variants.vcf``` for accuracy.
 
 ## installation troubleshooting
 ### linker errors
