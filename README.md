@@ -1,8 +1,7 @@
 # longshot
 
-Longshot is a diploid SNV caller for long error prone reads such as Pacific Biosciences SMRT.
+Longshot is a variant calling tool for diploid genomes using long error prone reads such as Pacific Biosciences SMRT. It takes as input an aligned BAM file and outputs a phased VCF file with variants and haplotype information. It can also output haplotype-separated BAM files that can be used for downstream analysis. Currently, it only calls single nucleotide variants (SNVs). 
 
-THIS README IS A WORK IN PROGRESS AND MORE DETAILED DOCUMENTATION WILL BE AVAILABLE SOON
 
 ## supported operating systems
 Longshot has been tested using Ubuntu 16.04, CentOS 6.6, and Manjaro Linux 17.1.11.
