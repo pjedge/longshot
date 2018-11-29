@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+
 extern crate bio;
 extern crate clap;
 extern crate rust_htslib;
@@ -8,7 +9,17 @@ extern crate quick_error;
 extern crate core;
 extern crate chrono;
 extern crate rand;
-extern crate petgraph;
+#[macro_use]
+extern crate error_chain;
+
+/*
+Longshot
+
+Longshot is a diploid SNV caller for single molecule sequencing (SMS) reads such as PacBio
+Author: Peter Edge
+Contact: edge.peterj at gmail.com
+*/
+
 
 mod haplotype_assembly;
 mod call_potential_snvs;
@@ -26,10 +37,11 @@ mod genotype_probs;
 use clap::{Arg, App};
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
-use std::error::Error;
+//use std::error::Error;
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
+use errors::*;
 
 use call_genotypes::*;
 use util::*;
@@ -45,8 +57,25 @@ use extract_fragments::ExtractFragmentParameters;
 use haplotype_assembly::*;
 //use variants_and_fragments::parse_VCF_potential_variants;
 
+mod errors {
+    error_chain!{
+    }
+}
 
 fn main() {
+    if let Err(ref e) = run() {
+        println!("error: {}", e);
+        for e in e.iter().skip(1) {
+            println!("caused by: {}", e);
+        }
+        if let Some(backtrace) = e.backtrace() {
+            println!("backtrace: {:?}", backtrace);
+        }
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
 
     /***********************************************************************************************/
     // READ STANDARD INPUT
@@ -293,7 +322,7 @@ fn main() {
         0 => false,
         1 => true,
         _ => {
-            panic!("force_overwrite specified multiple times");
+            bail!("force_overwrite specified multiple times");
         }
     };
 
@@ -301,22 +330,20 @@ fn main() {
         0 => false,
         1 => true,
         _ => {
-            panic!("no_haps specified multiple times");
+            bail!("no_haps specified multiple times");
         }
     };
 
     let vcf = Path::new(&output_vcf_file);
     if vcf.is_file() {
         if !force {
-            eprintln!("{} ERROR: Variant output file already exists. Rerun with -F option to force overwrite.", print_time());
-            return;
+            bail!("Variant output file already exists. Rerun with -F option to force overwrite.");
         }
     }
 
     let bai_str = bamfile_name.clone() + ".bai";
     if !Path::new(&bai_str).is_file() {
-        eprintln!("{} ERROR: BAM file must be indexed with samtools index. Index file should have same name with .bai appended.",print_time());
-        return;
+        bail!("BAM file must be indexed with samtools index. Index file should have same name with .bai appended.");
     }
 
     let sample_name: String = input_args.value_of(&"Sample ID").unwrap().to_string();
@@ -326,19 +353,12 @@ fn main() {
             let p = Path::new(&dir);
             if p.exists() {
                 if force {
-                    match remove_dir_all(p) {
-                        Ok(_) => {},
-                        Err(_) => {panic!("{} Error removing variant debug directory.", print_time())}
-                    }
+                    remove_dir_all(p).chain_err(|| "Error removing variant debug directory.")?;
                 } else {
-                    eprintln!("{} ERROR: Variant debug directory already exists. Rerun with -F option to force overwrite.",print_time());
-                    return;
+                    bail!("Variant debug directory already exists. Rerun with -F option to force overwrite.");
                 }
             }
-            match create_dir(&dir) {
-                Ok(_) => {},
-                Err(_) => {panic!("{} Error creating variant debug directory.",print_time());}
-            }
+            create_dir(&dir).chain_err(|| "Error creating variant debug directory.")?;
             Some(dir.to_string())
         }
         None => None,
@@ -376,7 +396,7 @@ fn main() {
         .expect("Argument max_mec_frac must be a positive float!");
 
     if min_allele_qual <= 0.0 {
-        panic!("Min allele quality must be a positive float.");
+        bail!("Min allele quality must be a positive float.");
     }
 
     let hap_assignment_qual: f64 = input_args.value_of("Haplotype Assignment Quality")
@@ -385,7 +405,7 @@ fn main() {
         .expect("Argument max_mec_frac must be a positive float!");
 
     if hap_assignment_qual <= 0.0 {
-        panic!("Haplotype assignment quality must be a positive float.");
+        bail!("Haplotype assignment quality must be a positive float.");
     }
 
     let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
@@ -432,7 +452,7 @@ fn main() {
     let dn_params = input_args.value_of("Density parameters").unwrap().split(":").collect::<Vec<&str>>();
 
     if dn_params.len() != 3 {
-        panic!("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
+        bail!("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
     }
 
     let dn_count = dn_params[0].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
@@ -440,25 +460,6 @@ fn main() {
     let dn_gq = dn_params[2].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
 
     let density_params = DensityParameters{n: dn_count, len: dn_len, gq: dn_gq as f64};
-    /*
-    let max_mec_frac = match input_args.occurrences_of("Max MEC Fraction") {
-        0 => None,
-        1 => {
-            let frac:f64 = input_args.value_of("Max MEC Fraction")
-                .unwrap()
-                .parse::<f64>()
-                .expect("Argument max_mec_frac must be a positive float!");
-
-            if !(frac >= 0.0 && frac <= 1.0) {
-                panic!("Max MEC Fraction must be a float between 0.0 and 1.0.");
-            }
-
-            Some(frac)
-        },
-        _ => {
-            panic!("max_mec_frac specified multiple times");
-        }
-    };*/
 
     let mut alignment_type = AlignmentType::FastAllAlignment;
 
@@ -466,27 +467,27 @@ fn main() {
         0 => {},
         1 => {alignment_type = AlignmentType::NumericallyStableAllAlignment;},
         _ => {
-            panic!("stable_alignment specified multiple times");
+            bail!("stable_alignment specified multiple times");
         }
     };
 
     match input_args.occurrences_of("Max alignment") {
         0 => {},
         1 => {
-            if alignment_type == AlignmentType::FastAllAlignment {
-                panic!("Fast alignment and max alignment options are incompatible. The max alignment uses sums rather than pows/logs so it is already fast compared to default.");
+            if alignment_type == AlignmentType::NumericallyStableAllAlignment {
+                bail!("Numerically stable alignment option and max alignment options are incompatible. The max alignment algorihm is by design numerically stable.");
             }
             alignment_type = AlignmentType::MaxAlignment;
         },
         _ => {
-            panic!("max_alignment specified multiple times");
+            bail!("max_alignment specified multiple times");
         }
     };
 
     let debug_allele_realignment: bool = match input_args.occurrences_of("Debug Allele Realignment") {
         0 => {false},
         1 => {true},
-        _ => {panic!("debug_allele_realignment specified multiple times");}
+        _ => {bail!("debug_allele_realignment specified multiple times");}
     };
 
     let band_width: usize = input_args.value_of("Band width")
@@ -499,7 +500,7 @@ fn main() {
         0 => false,
         1 => true,
         _ => {
-            panic!("Use POA specified multiple times");
+            bail!("Use POA specified multiple times");
         }
     };*/
 
@@ -521,7 +522,7 @@ fn main() {
             calculated_max_cov
         },
         _ => {
-            panic!("auto_min_max_cov specified multiple times");
+            bail!("auto_max_cov specified multiple times");
         }
     };
 
@@ -529,8 +530,7 @@ fn main() {
         eprintln!("{} Min read coverage set to {}.", print_time(), min_cov);
         eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
     } else {
-        eprintln!("{} ERROR: Max read coverage set to 0.",print_time());
-        return;
+        bail!("{} ERROR: Max read coverage set to 0.");
     }
 
     let extract_fragment_parameters = ExtractFragmentParameters {
@@ -544,24 +544,7 @@ fn main() {
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());
-    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq, max_cigar_indel as u32);
-    /*let alignment_parameters = AlignmentParameters{
-        transition_probs: TransitionProbs {
-            match_from_match: 0.879,
-            insertion_from_match: 0.080,
-            deletion_from_match: 0.041,
-            insertion_from_insertion: 0.240,
-            match_from_insertion: 0.760,
-            deletion_from_deletion: 0.113,
-            match_from_deletion: 0.887,
-        },
-        emission_probs: EmissionProbs {
-            equal: 0.982,
-            not_equal: 0.006,
-            insertion: 1.0,
-            deletion: 1.0
-        }
-    };*/
+    let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq, max_cigar_indel as u32).chain_err(|| "Error estimating alignment parameters.")?;
 
     /***********************************************************************************************/
     // GET HUMAN GENOTYPE PRIORS
@@ -610,7 +593,7 @@ fn main() {
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
     if varlist.lst.len() == 0 {
-        return;
+        return Ok(());
     }
 
     if debug_allele_realignment {
@@ -623,8 +606,7 @@ fn main() {
                                              alignment_parameters,
                                              None);
 
-        eprintln!("{} Allele realignment debugging complete. Exiting...",print_time());
-        return;
+        bail!("{} Allele realignment debugging complete. Exiting...");
     }
     /***********************************************************************************************/
     // EXTRACT FRAGMENT INFORMATION FROM READS
@@ -657,23 +639,16 @@ fn main() {
             // in this case, we set them all to 1 so we generate fragments for all variants
             let ffn = match Path::new(&debug_dir).join(&"fragments.txt").to_str() {
                 Some(s) => {s.to_owned()},
-                None => {panic!("Invalid unicode provided for variant debug directory");}
+                None => {bail!("Invalid unicode provided for variant debug directory");}
             };
             let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
             let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall);
 
             let fragment_file_path = Path::new(&ffn);
-            let fragment_file_display = fragment_file_path.display();
-            let mut fragment_file = match File::create(&fragment_file_path) {
-                Err(why) => panic!("couldn't create {}: {}", fragment_file_display, why.description()),
-                Ok(file) => file,
-            };
+            let mut fragment_file = File::create(&fragment_file_path).chain_err(|| "Could not open fragment file for writing.")?;
             for mut line_u8 in fragment_buffer {
                 line_u8.pop();
-                match writeln!(fragment_file, "{}", u8_to_string(&line_u8)) {
-                    Err(why) => panic!("couldn't write to {}: {}", fragment_file_display, why.description()),
-                    Ok(_) => {}
-                }
+                writeln!(fragment_file, "{}", u8_to_string(&line_u8)).chain_err(|| "Error writing to fragment file.")?;
             }
         },
         &None => {}
@@ -694,7 +669,7 @@ fn main() {
     /***********************************************************************************************/
     if no_haps {
         print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false);
-        return;
+        return Ok(());
     }
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
@@ -783,4 +758,6 @@ fn main() {
     eprintln!("{} Printing VCF file...",print_time());
     print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &density_params, &sample_name);
     print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false);
+
+    Ok(())
 }
