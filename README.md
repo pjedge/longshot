@@ -18,6 +18,11 @@ First, install the Rust programming language. Longshot requires Rust 1.26.2 or h
 ```
 curl https://sh.rustup.rs -sSf | sh
 ```
+download the git repository and change to the longshot directory: 
+```
+git clone --recursive https://github.com/pjedge/longshot.git
+cd longshot
+```
 To build Longshot, type:
 ```
 cargo build --release
@@ -143,6 +148,18 @@ Call variants in a 500 kb region and then separate the reads into ```reads.hap1.
 - Oxford Nanopore SMS reads are not officially supported at this time.
 
 ## installation troubleshooting
+
+### older version of Rust
+Check that the Rust version is 1.26.2 or higher: 
+```
+rustc --version
+```
+If not, update Rust using this command: 
+```
+rustup update
+```
+
+
 ### linker errors
 For example:
 ```
