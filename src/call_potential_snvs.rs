@@ -13,6 +13,8 @@ use bio::stats::{LogProb};
 use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
 //use spoa::poa_multiple_sequence_alignment;
 use realignment::{LnAlignmentParameters};
+use errors::*;
+
 
 //use std::str;
 //use bio::alignment::Alignment;
@@ -33,11 +35,11 @@ pub fn call_potential_snvs(bam_file: &String,
                            max_p_miscall: f64,
                            ln_align_params: LnAlignmentParameters,
                            potential_snv_cutoff: LogProb)
-                           -> VarList {
+                           -> Result<VarList> {
 
     let target_names = parse_target_names(&bam_file);
 
-    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
+    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
@@ -57,23 +59,23 @@ pub fn call_potential_snvs(bam_file: &String,
     // or a totally separate pileup from the unindexed file if not.
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(||ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).chain_err(||ErrorKind::IndexedBamFetchError)?;
         let bam_pileup = bam_ix.pileup();
         //bam_pileup.set_max_depth(100000000);
         let mut next_valid_pos = 0;
 
         for p in bam_pileup {
-            let pileup = p.unwrap();
+            let pileup = p.chain_err(||ErrorKind::IndexedBamPileupReadError)?;
 
             let tid: usize = pileup.tid() as usize;
             let chrom: String = target_names[tid].clone();
 
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
                 next_valid_pos = 0;
             }
@@ -141,16 +143,15 @@ pub fn call_potential_snvs(bam_file: &String,
 
                     match alignment.indel() {
                         Indel::None => {
-                            // unwrapping a None value here
                             ref_allele =
                                 (ref_seq[pos] as char).to_string().to_uppercase();
 
-                            let base: char = alignment.record().seq()[alignment.qpos().unwrap()] as char;
+                            let base: char = alignment.record().seq()[alignment.qpos().chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?] as char;
 
                             var_allele = base.to_string().to_uppercase();
                         },
                         Indel::Ins(l) => {
-                            let start = alignment.qpos().unwrap();
+                            let start = alignment.qpos().chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?;
                             let end = start + l as usize + 1;
                             // don't want to convert whole seq to bytes...
                             let mut var_char: Vec<char> = vec![];
@@ -304,7 +305,7 @@ pub fn call_potential_snvs(bam_file: &String,
             }
         }
     }
-    VarList::new(varlist)
+    Ok(VarList::new(varlist))
 }
 
 // alignment: a rust-bio alignment object where x is a read consensus window, and y is the window from the reference
@@ -318,7 +319,7 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                                    tid: usize,
                                    chrom: String,
                                    depth: usize,
-                                   boundary: usize) -> Vec<Var>{
+                                   boundary: usize) -> Result<Vec<Var>> {
 
     let mut ref_pos = alignment.ystart;
     let mut read_pos = alignment.xstart;
@@ -481,7 +482,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
     let target_names = parse_target_names(&bam_file);
 
     //let genotype_priors = estimate_genotype_priors();
-    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).unwrap();
+    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
@@ -496,7 +497,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
     // or a totally separate pileup from the unindexed file if not.
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
 
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     let alignment_type: i32 = 0;
     let match_score: i32 = 5;
@@ -506,18 +507,18 @@ pub fn call_potential_variants_poa(bam_file: &String,
     let d: usize = 50;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).chain_err(|| ErrorKind::IndexedBamFetchError)?;
         let bam_pileup = bam_ix.pileup();
 
         for p in bam_pileup {
-            let pileup = p.unwrap();
+            let pileup = p.chain_err(||ErrorKind::IndexedBamPileupReadError)?;
 
             let tid: usize = pileup.tid() as usize;
             let chrom: String = target_names[tid].clone();
 
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
@@ -599,20 +600,20 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 println!("All read seqs:", );
                 for (i, seq) in all_read_seqs.iter().enumerate() {
                     println!(">seq{}", i);
-                    println!("{}", str::from_utf8(&seq.clone()).unwrap());
+                    println!("{}", str::from_utf8(&seq.clone()).chain_err(|| "Error converting read sequences to valid UTF8")?);
                 }
                 println!("-------");
                 println!("H1 read seqs:", );
                 for (i, seq) in h1_read_seqs.iter().enumerate() {
                     println!(">seq{}", i);
-                    println!("{}", str::from_utf8(&seq.clone()).unwrap());
+                    println!("{}", str::from_utf8(&seq.clone()).chain_err(|| "Error converting read sequences to valid UTF8")?);
                 }
 
                 println!("-------");
                 println!("H2 read seqs:", );
                 for (i, seq) in h2_read_seqs.iter().enumerate() {
                     println!(">seq{}", i);
-                    println!("{}", str::from_utf8(&seq.clone()).unwrap());
+                    println!("{}", str::from_utf8(&seq.clone()).chain_err(|| "Error converting read sequences to valid UTF8")?);
                 }
                 println!("-------");
             }
@@ -738,6 +739,6 @@ pub fn call_potential_variants_poa(bam_file: &String,
             prev_tid = tid;
         }
     }
-    VarList::new(varlist)
+    Ok(VarList::new(varlist))
 }
 */

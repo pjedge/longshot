@@ -2,7 +2,7 @@ use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
-use std::error::Error;
+use errors::*;
 use util::*;
 use realignment::*;
 use bio::io::fasta;
@@ -120,25 +120,11 @@ impl AlignmentCounts {
 
 //THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-quick_error! {
-    #[derive(Debug)]
-    pub enum CigarError {
-        UnsupportedOperation(msg: String) {
-            description("Unsupported CIGAR operation")
-            display(x) -> ("{}: {}", x.description(), msg)
-        }
-        UnexpectedOperation(msg: String) {
-            description("CIGAR operation not allowed at this point")
-            display(x) -> ("{}: {}", x.description(), msg)
-        }
-    }
-}
-
 pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                               ref_seq: &Vec<char>,
                               read_seq: &Vec<char>,
                               max_cigar_indel: u32)
-                              -> Result<(TransitionCounts, EmissionCounts), CigarError>{
+                              -> Result<(TransitionCounts, EmissionCounts)> {
 
     // key is a state transition
     // value is the number of times that transition was observed
@@ -216,7 +202,6 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                             // we will just add an implicit deletion -> match -> insertion
                             transition_counts.match_from_deletion += 1;
                             transition_counts.insertion_from_match += 1;
-                            //panic!("Unexpected DELETION alignment state transition observed during INSERTION in bam file.");
                         }
                     }
 
@@ -249,7 +234,6 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
                             // we will just add an implicit Insertion -> match -> deletion
                             transition_counts.match_from_insertion += 1;
                             transition_counts.deletion_from_match += 1;
-                            //panic!("Unexpected INSERTION alignment state transition observed during DELETION in bam file.");
                         }
                     }
 
@@ -262,9 +246,7 @@ pub fn count_alignment_events(cigarpos_list: &Vec<CigarPos>,
             Cigar::Back(_) |
             Cigar::SoftClip(_) |
             Cigar::HardClip(_) => {
-                return Err(CigarError::UnexpectedOperation(
-                    "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
-                ));
+                bail!("CIGAR operation found in cigarpos_list that should have been removed already.");
             }
         }
     }
@@ -282,12 +264,12 @@ pub fn estimate_alignment_parameters(bam_file: &String,
                                      interval: &Option<GenomicInterval>,
                                      min_mapq: u8,
                                      max_cigar_indel: u32)
-                                     -> AlignmentParameters {
+                                     -> Result<AlignmentParameters> {
 
     let t_names = parse_target_names(&bam_file);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
-    let mut fasta = fasta::IndexedReader::from_file(fasta_file).unwrap();
+    let mut fasta = fasta::IndexedReader::from_file(fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
     let mut ref_seq: Vec<char> = vec![];
 
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
@@ -309,13 +291,13 @@ pub fn estimate_alignment_parameters(bam_file: &String,
     };
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).chain_err(|| "Error seeking BAM file while estimating alignment parameters.")?;
 
         for r in bam_ix.records() {
-            let record = r.unwrap();
+            let record = r.chain_err(|| "Error reading BAM record while estimating alignment parameters.")?;
 
             // may be faster to implement this as bitwise operation on raw flag in the future?
             if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
@@ -329,17 +311,17 @@ pub fn estimate_alignment_parameters(bam_file: &String,
             //println!("{}",u8_to_string(record.qname()));
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| "Failed to read fasta sequence record.")?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
             let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
             let bam_cig: CigarStringView = record.cigar();
             let cigarpos_list: Vec<CigarPos> =
-                create_augmented_cigarlist(record.pos() as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+                create_augmented_cigarlist(record.pos() as u32, &bam_cig).chain_err(|| "Error creating augmented cigarlist.")?;
 
             let (read_transition_counts, read_emission_counts) =
-                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, max_cigar_indel).expect("Error counting cigar alignment events.");
+                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, max_cigar_indel).chain_err(|| "Error counting cigar alignment events.")?;
 
             transition_counts.add(read_transition_counts);
             emission_counts.add(read_emission_counts);
@@ -375,5 +357,5 @@ pub fn estimate_alignment_parameters(bam_file: &String,
     eprintln!("{} deletion:                {:.3}", SPACER, params.emission_probs.deletion);
     eprintln!("");
 
-    params
+    Ok(params)
 }

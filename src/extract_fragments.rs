@@ -11,6 +11,7 @@ use bio::stats::{LogProb, Prob, PHREDProb};
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use realignment::*;
+use errors::*;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -80,7 +81,7 @@ quick_error! {
 ///
 pub fn create_augmented_cigarlist(refpos: u32,
                                   cigar_string_view: &CigarStringView)
-                                  -> Result<Vec<CigarPos>, CigarOrAnchorError> {
+                                  -> Result<Vec<CigarPos>> {
     let mut rpos = refpos;
     let mut qpos = 0u32; // position within read
     let mut j = 0; // index into cigar operation vector
@@ -104,22 +105,22 @@ pub fn create_augmented_cigarlist(refpos: u32,
                 break;
             }
             &Cigar::Del(_) => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "'deletion' (D) found before any operation describing read sequence".to_owned()
                 ));
             }
             &Cigar::Back(_) => {
-                return Err(CigarOrAnchorError::UnsupportedOperation(
+                bail!(ErrorKind::UnsupportedCigarOperation(
                     "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
                 ));
             }
             &Cigar::RefSkip(_) => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "'reference skip' (N) found before any operation describing read sequence".to_owned()
                 ));
             }
             &Cigar::HardClip(_) if i > 0 && i < cigar_string_view.len() - 1 => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "'hard clip' (H) found in between operations, contradicting SAMv1 spec that hard clips can only be at the ends of reads".to_owned()
                 ));
             }
@@ -176,7 +177,7 @@ pub fn create_augmented_cigarlist(refpos: u32,
                 j += 1;
             }
             &Cigar::HardClip(_) if j < cigar_string_view.len() - 1 => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "'hard clip' (H) found in between operations, contradicting SAMv1 spec that hard clips can only be at the ends of reads".to_owned()
                 ));
             }
@@ -184,7 +185,7 @@ pub fn create_augmented_cigarlist(refpos: u32,
                 j += 1;
             }
             &Cigar::Back(_) => {
-                return Err(CigarOrAnchorError::UnsupportedOperation(
+                bail!(ErrorKind::UnsupportedCigarOperation(
                     "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
                 ));
             }
@@ -208,7 +209,7 @@ pub fn find_anchors(bam_record: &Record,
                     read_seq: &Vec<char>,
                     target_names: &Vec<String>,
                     extract_params: ExtractFragmentParameters)
-                    -> Result<Option<AnchorPositions>, CigarOrAnchorError> {
+                    -> Result<Option<AnchorPositions>> {
 
     //let min_window_length = extract_params.min_window_length;
     let max_window_padding = extract_params.max_window_padding;
@@ -244,9 +245,7 @@ pub fn find_anchors(bam_record: &Record,
         eprintln!("var_interval: {}\t{}\t{}",var_interval.chrom, var_interval.start_pos, var_interval.end_pos);
         eprintln!("bam_record:   {}\t{}\t{}",target_names[bam_record.tid() as usize], bam_record.pos(), bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position"));
 
-        return Err(CigarOrAnchorError::AnchorRangeOutsideRead(
-            "Attempted to find sequence anchors for a range completely outside of the sequence.".to_owned()
-        ));
+        bail!(ErrorKind::AnchorRangeOutsideRead);
     }
 
     let mut left_anchor_ref: u32 = 0;
@@ -287,7 +286,7 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Back(_) |
             Cigar::SoftClip(_) |
             Cigar::HardClip(_) => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
                 ));
             }
@@ -364,14 +363,6 @@ pub fn find_anchors(bam_record: &Record,
                         let bndm = bndm::BNDM::new(&pattern);
                         let occ: Vec<usize> = bndm.find_all(&ref_seq_max_window).collect();
 
-                        //println!("ref_seq_max_window: {}", String::from_utf8(ref_seq_max_window.clone()).unwrap());
-                        //println!("anchor_on_ref: {}", String::from_utf8(pattern.clone()).unwrap());
-                        //let s: String = anchor_on_read.into_iter().collect();
-                        //println!("anchor_on_read: {}", s);
-                        //println!("pattern: {}", String::from_utf8(pattern.clone()).unwrap());
-                        //println!("anchor_match: {} occ.len(): {} l_anc <= l_max: {}", anchor_match, occ.len(), l_anc <= l_max);
-                        //println!("***************");
-
                         if (anchor_match && occ.len() == 1) || l_anc <= l_max {
                             found_anchor_left = true;
                             break;
@@ -403,7 +394,7 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Back(_) |
             Cigar::SoftClip(_) |
             Cigar::HardClip(_) => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
                 ));
             }
@@ -484,14 +475,6 @@ pub fn find_anchors(bam_record: &Record,
                         let bndm = bndm::BNDM::new(&pattern);
                         let occ: Vec<usize> = bndm.find_all(&ref_seq_max_window).collect();
 
-                        //println!("ref_seq_max_window: {}", String::from_utf8(ref_seq_max_window.clone()).unwrap());
-                        //println!("anchor_on_ref: {}", String::from_utf8(pattern.clone()).unwrap());
-                        //let s: String = anchor_on_read.into_iter().collect();
-                        //println!("anchor_on_read: {}", s);
-                        //println!("pattern: {}", String::from_utf8(pattern.clone()).unwrap());
-                        //println!("anchor_match: {} occ.len(): {} r_anc >= r_max: {}", anchor_match, occ.len(), r_anc >= r_max);
-                        //println!("***************");
-
                         if (anchor_match && occ.len() == 1) || r_anc >= r_max {
                             found_anchor_right = true;
                             break;
@@ -521,7 +504,7 @@ pub fn find_anchors(bam_record: &Record,
             Cigar::Back(_) |
             Cigar::SoftClip(_) |
             Cigar::HardClip(_) => {
-                return Err(CigarOrAnchorError::UnexpectedOperation(
+                bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
                 ));
             }
@@ -955,12 +938,12 @@ pub fn extract_fragments(bam_file: &String,
                          extract_params: ExtractFragmentParameters,
                          align_params: AlignmentParameters,
                          old_flist: Option<Vec<Fragment>>)
-                         -> Vec<Fragment> {
+                         -> Result<Vec<Fragment>> {
 
     let t_names = parse_target_names(&bam_file);
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
-    let mut fasta = fasta::IndexedReader::from_file(fastafile_name).unwrap();
+    let mut fasta = fasta::IndexedReader::from_file(fastafile_name).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
     let mut ref_seq: Vec<char> = vec![];
 
     let mut flist: Vec<Fragment> = vec![];
@@ -969,13 +952,13 @@ pub fn extract_fragments(bam_file: &String,
     let mut complete = 0;
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).expect("Error seeking BAM file while extracting fragments.");
 
         for (i, r) in bam_ix.records().enumerate() {
-            let record = r.unwrap();
+            let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
             if record.is_quality_check_failed() || record.is_duplicate() ||
                 record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
@@ -1076,7 +1059,7 @@ pub fn extract_fragments(bam_file: &String,
         var.mean_allele_qual = *PHREDProb::from(q);
     }
 
-    flist
+    Ok(flist)
 }
 
 //************************************************************************************************

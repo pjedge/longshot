@@ -3,18 +3,13 @@ extern crate rust_htslib;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use util::{print_time, GenomicInterval, get_interval_lst};
+use errors::*;
 
 pub fn calculate_mean_coverage(bam_file: &String,
                            interval: &Option<GenomicInterval>)
-                           -> f64 {
+                           -> Result<f64> {
 
-    // there is a really weird bug going on here,
-    // hence the duplicate file handles to the bam file.
-    // if an indexed reader is used, and fetch is never called, pileup() hangs.
-    // so we need to iterate over the fetched indexed pileup if there's a region,
-    // or a totally separate pileup from the unindexed file if not.
-
-    let bam = bam::Reader::from_path(bam_file).unwrap();
+    let bam = bam::Reader::from_path(bam_file).chain_err(|| ErrorKind::BamOpenError)?;
 
     let mut prev_tid = 4294967295;
     let mut bam_covered_positions = 0;
@@ -23,19 +18,19 @@ pub fn calculate_mean_coverage(bam_file: &String,
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
 
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for p in bam_ix.pileup() {
 
-            let pileup = p.unwrap();
+            let pileup = p.chain_err(|| ErrorKind::IndexedBamPileupReadError)?;
 
             let tid: u32 = pileup.tid();
 
             if tid != prev_tid {
-                total_bam_ref_positions += bam.header().target_len(tid).unwrap();
+                total_bam_ref_positions += bam.header().target_len(tid).chain_err(|| ErrorKind::BamHeaderTargetLenAccessError)?;
             }
 
             if tid != iv.tid ||
@@ -68,9 +63,6 @@ pub fn calculate_mean_coverage(bam_file: &String,
         }
     }
 
-
-
-
     let total_ref_positions: usize = match interval {
         &Some(ref iv) => {
             (iv.end_pos - iv.start_pos + 1) as usize
@@ -93,6 +85,6 @@ pub fn calculate_mean_coverage(bam_file: &String,
     eprintln!("{} Total reference positions: {}",print_time(), total_ref_positions);
     eprintln!("{} Total bases in bam: {}",print_time(), total_read_bases);
 
-    total_read_bases as f64 / total_ref_positions as f64
+    Ok(total_read_bases as f64 / total_ref_positions as f64)
 
 }
