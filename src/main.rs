@@ -23,7 +23,7 @@ Contact: edge.peterj at gmail.com
 
 mod haplotype_assembly;
 mod call_potential_snvs;
-mod extract_fragments; mod extract_fragments_debug;
+mod extract_fragments; //mod extract_fragments_debug;
 mod call_genotypes;
 mod realignment;
 mod util;
@@ -59,6 +59,65 @@ use haplotype_assembly::*;
 
 mod errors {
     error_chain!{
+        errors {
+            // BAM errors
+            BamOpenError {
+                description("Error opening indexed BAM file.")
+            }
+            BamHeaderTargetLenAccessError {
+                description("Error accessing target len for a contig in bam header.")
+            }
+            // Indexed BAM errors
+            IndexedBamOpenError {
+                description("Error opening indexed BAM file.")
+            }
+            IndexedBamReadError {
+                description("Error reading indexed BAM file.")
+            }
+            IndexedBamFetchError {
+                description("Error fetching region from indexed BAM file.")
+            }
+            IndexedBamRecordReadError {
+                description("Error reading BAM pileup.")
+            }
+            IndexedBamPileupReadError {
+                description("Error reading BAM pileup.")
+            }
+            IndexedBamPileupQueryPositionError {
+                description("Error accessing query position for alignment in BAM pileup.")
+            }
+            // Indexed Fasta errors
+            IndexedFastaOpenError {
+                description("Error reading indexed FASTA file.")
+            }
+            IndexedFastaReadError {
+                description("Error reading indexed FASTA file.")
+            }
+            // CIGAR errors
+            // derived from Rust-htslib errors defined with quick-error... https://github.com/rust-bio/rust-htslib/blob/master/src/bam/record.rs
+            UnexpectedCigarOperation(msg: String) {
+                description("Unexpected CIGAR operation")
+                display(x) -> ("{}: {}", x.description(), msg)
+            }
+            UnsupportedCigarOperation(msg: String) {
+                description("Unsupported CIGAR operation")
+                display(x) -> ("{}: {}", x.description(), msg)
+            }
+            // Read realignment errors
+            AnchorRangeOutsideRead {
+                description("Attempted to find sequence anchors for a range completely outside of the sequence.")
+            }
+            // Gentotype priors errors
+            InvalidTransitionBase(base: String) {
+                description("Invalid base accessed from base transition hashmap")
+                display(x) -> ("{}: {}", x.description(), base)
+            }
+            // Gentotype priors errors
+            InvalidHaploidGenotype(refbase: char, altbase: char) {
+                description("Invalid base accessed from base transition hashmap")
+                display(x) -> ("{}: ref {}, alt {}", x.description(), refbase, altbase)
+            }
+        }
     }
 }
 
@@ -293,12 +352,12 @@ fn run() -> Result<()> {
             .long("max_alignment")
             .help("Use max scoring alignment algorithm rather than pair HMM forward algorithm.")
             .display_order(165))
-        .arg(Arg::with_name("Debug Allele Realignment")
-            .short("u")
-            .long("debug_allele_realignment")
-            .hidden(true)
-            .help("Do NOT call variants, only print out meta-stats (number of expected operations etc) for allele realignment.")
-            .display_order(165))
+        //.arg(Arg::with_name("Debug Allele Realignment")
+        //    .short("u")
+        //    .long("debug_allele_realignment")
+        //    .hidden(true)
+        //    .help("Do NOT call variants, only print out meta-stats (number of expected operations etc) for allele realignment.")
+        //    .display_order(165))
         .arg(Arg::with_name("Variant debug directory")
             .short("d")
             .long("variant_debug_dir")
@@ -484,11 +543,11 @@ fn run() -> Result<()> {
         }
     };
 
-    let debug_allele_realignment: bool = match input_args.occurrences_of("Debug Allele Realignment") {
+    /*let debug_allele_realignment: bool = match input_args.occurrences_of("Debug Allele Realignment") {
         0 => {false},
         1 => {true},
         _ => {bail!("debug_allele_realignment specified multiple times");}
-    };
+    };*/
 
     let band_width: usize = input_args.value_of("Band width")
         .unwrap()
@@ -514,7 +573,7 @@ fn run() -> Result<()> {
         1 => {
             eprintln!("{} Automatically determining max read coverage.",print_time());
             eprintln!("{} Estimating mean read coverage...",print_time());
-            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval);
+            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval).chain_err(|| "Error calculating mean coverage for BAM file.")?;
             let calculated_max_cov = (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
 
             eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
@@ -552,7 +611,7 @@ fn run() -> Result<()> {
 
     let genotype_priors = GenotypePriors::new(hom_snv_rate, het_snv_rate,
                                                             hom_indel_rate, het_indel_rate,
-                                                            ts_tv_ratio);
+                                                            ts_tv_ratio).chain_err(|| "Error estimating genotype priors.")?;
 
     /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
@@ -581,7 +640,7 @@ fn run() -> Result<()> {
                                              min_mapq,
                                              max_p_miscall,
                                              alignment_parameters.ln(),
-                                             potential_snv_cutoff);
+                                             potential_snv_cutoff).chain_err(|| "Error calling potential SNVs.")?;
 
     // back up the variant indices
     // they will be needed later when we try to re-use fragment alleles that don't change
@@ -596,7 +655,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    if debug_allele_realignment {
+    /*if debug_allele_realignment {
 
         extract_fragments_debug::extract_fragments_debug(&bamfile_name,
                                              &fasta_file,
@@ -607,29 +666,20 @@ fn run() -> Result<()> {
                                              None);
 
         bail!("{} Allele realignment debugging complete. Exiting...");
-    }
+    }*/
+
     /***********************************************************************************************/
     // EXTRACT FRAGMENT INFORMATION FROM READS
     /***********************************************************************************************/
 
-    eprintln!("{} Generating condensed read data for SNVs...",print_time());
+    eprintln!("{} Generating haplotype fragments from reads...",print_time());
     let mut flist = extract_fragments::extract_fragments(&bamfile_name,
                                                          &fasta_file,
                                                          &mut varlist,
                                                          &interval,
                                                          extract_fragment_parameters,
                                                          alignment_parameters,
-                                                          None);
-
-
-    //for f in 0..flist.len() {
-    //    for call in &flist[f].calls {
-    //        if varlist.lst[call.var_ix].chrom == "chr1".to_string() && varlist.lst[call.var_ix].pos0 == 12067043 {
-    //            println!("{}\t{}\t{:.2}", &flist[f].id, varlist.lst[call.var_ix].alleles[call.allele as usize], *PHREDProb::from(call.qual));
-    //        }
-    //    }
-    //}
-    //return;
+                                                          None).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
     // if we're printing out variant "debug" information, print out a fragment file to that debug directory
     match &variant_debug_directory {

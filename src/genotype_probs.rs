@@ -1,7 +1,7 @@
 
 use std::collections::HashMap;
 use bio::stats::*;
-
+use errors::*;
 use util::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -198,7 +198,7 @@ impl GenotypePriors {
     // these represent short insertions and short deletions.
     pub fn new(hom_snv_rate: LogProb, het_snv_rate: LogProb,
                hom_indel_rate: LogProb, het_indel_rate: LogProb,
-               ts_tv_ratio: f64) -> GenotypePriors {
+               ts_tv_ratio: f64) -> Result<GenotypePriors> {
 
         //let hom_snv_rate = LogProb::from(Prob(0.0005));
         //let het_snv_rate = LogProb::from(Prob(0.001));
@@ -237,8 +237,9 @@ impl GenotypePriors {
         for aref in &alleles {
             let allele = *aref;
             // priors on haploid alleles
+
             haploid_genotype_priors.insert((allele, allele), LogProb::ln_one_minus_exp(&(het_snv_rate + het_indel_rate)));
-            haploid_genotype_priors.insert((allele, *transition.get(&allele).unwrap()), het_snv_rate + ts);
+            haploid_genotype_priors.insert((allele, *transition.get(&allele).chain_err(|| ErrorKind::InvalidTransitionBase(allele.to_string()))?), het_snv_rate + ts);
 
             for tref in &alleles {
                 let transversion = *tref;
@@ -265,7 +266,7 @@ impl GenotypePriors {
                     // this could be multiple indels, must handle indel case first
                     if g2 == 'D' || g2 == 'I' {
                         diploid_genotype_priors.insert((allele, *gt), hom_indel_rate + LogProb::from(Prob(0.5)) + LogProb::from(Prob(1.0 / 4.0)));
-                    } else if g1 == *transition.get(&allele).unwrap() { // otherwise it is a homozygous SNV
+                    } else if g1 == *transition.get(&allele).chain_err(|| ErrorKind::InvalidTransitionBase(allele.to_string()))? { // otherwise it is a homozygous SNV
                         // transitions are 4 times as likely as transversions
                         diploid_genotype_priors.insert((allele, *gt), hom_snv_rate + ts);
                     } else {
@@ -286,7 +287,7 @@ impl GenotypePriors {
             eprintln!("{} {} {}/{} {}", SPACER, ra, g1, g2, *Prob::from(p));
         }
 
-        GenotypePriors{priors_dict: diploid_genotype_priors}
+        Ok(GenotypePriors{priors_dict: diploid_genotype_priors})
     }
 
     // takes a vector of strings representing alleles (i.e. from Var.alleles), with the 0-th allele being reference

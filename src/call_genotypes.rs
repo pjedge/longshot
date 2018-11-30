@@ -3,7 +3,6 @@ use util::{MAX_VCF_QUAL, GenomicInterval, DensityParameters};
 use variants_and_fragments::*;
 use print_output::*;
 use genotype_probs::*;
-
 use haplotype_assembly::{generate_flist_buffer, call_hapcut2};
 use chrono::prelude::*;
 
@@ -15,9 +14,9 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 
     for fragment in flist {
         for call in fragment.clone().calls {
-            //if call.qual < LogProb::from(Prob(MAX_P_MISCALL_F64)) {
+
             pileup_lst[call.var_ix].push(call);
-           // }
+
         }
     }
     pileup_lst
