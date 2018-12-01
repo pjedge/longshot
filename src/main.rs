@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+// `error_chain!` can recurse deeply
+#![recursion_limit = "1024"]
 
 extern crate bio;
 extern crate clap;
@@ -62,7 +64,15 @@ mod errors {
         errors {
             // BAM errors
             BamOpenError {
-                description("Error opening indexed BAM file.")
+                description("Error opening BAM file.")
+            }
+            BamWriterOpenError(f: String) {
+                description("Error opening BAM file for writing")
+                display(x) -> ("{}: {}", x.description(), f)
+            }
+            BamRecordWriteError(qname: String) {
+                description("Error writing record to bam file")
+                display(x) -> ("{}: qname {}", x.description(), qname)
             }
             BamHeaderTargetLenAccessError {
                 description("Error accessing target len for a contig in bam header.")
@@ -112,10 +122,13 @@ mod errors {
                 description("Invalid base accessed from base transition hashmap")
                 display(x) -> ("{}: {}", x.description(), base)
             }
-            // Gentotype priors errors
             InvalidHaploidGenotype(refbase: char, altbase: char) {
                 description("Invalid base accessed from base transition hashmap")
                 display(x) -> ("{}: ref {}, alt {}", x.description(), refbase, altbase)
+            }
+            GenotypeNotInGenotypePriorsError(refbase: char, g0: char, g1: char) {
+                description("Genotype not in genotype priors.")
+                display(x) -> ("{}: ref {}, genotype ({},{})", x.description(), refbase, g0, g1)
             }
         }
     }
@@ -224,7 +237,7 @@ fn run() -> Result<()> {
             .help("Minimum estimated quality (Phred-scaled) of allele observation on read to use for genotyping/haplotyping.")
             .display_order(90)
             .default_value("7.0"))
-        .arg(Arg::with_name("Haplotype Assignment Quality")
+        .arg(Arg::with_name("Haplotype assignment quality")
             .short("y")
             .long("hap_assignment_qual")
             .value_name("float")
@@ -366,10 +379,9 @@ fn run() -> Result<()> {
             .display_order(210))
         .get_matches();
 
-    // should be safe just to unwrap these because they're required options for clap
-    let bamfile_name = input_args.value_of("Input BAM").unwrap().to_string();
-    let fasta_file = input_args.value_of("Input FASTA").unwrap().to_string();
-    let output_vcf_file = input_args.value_of("Output VCF").unwrap().to_string();
+    let bamfile_name = input_args.value_of("Input BAM").chain_err(|| "Input BAM file not defined.")?.to_string();
+    let fasta_file = input_args.value_of("Input FASTA").chain_err(|| "Input FASTA file not defined.")?.to_string();
+    let output_vcf_file = input_args.value_of("Output VCF").chain_err(|| "Output VCF file not defined.")?.to_string();
 
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name);
@@ -405,7 +417,7 @@ fn run() -> Result<()> {
         bail!("BAM file must be indexed with samtools index. Index file should have same name with .bai appended.");
     }
 
-    let sample_name: String = input_args.value_of(&"Sample ID").unwrap().to_string();
+    let sample_name: String = input_args.value_of(&"Sample ID").chain_err(|| "Sample ID not defined.")?.to_string();
 
     let variant_debug_directory: Option<String> = match input_args.value_of("Variant debug directory") {
         Some(dir) => {
@@ -425,43 +437,43 @@ fn run() -> Result<()> {
 
 
     let min_mapq: u8 = input_args.value_of("Min mapq")
-        .unwrap()
+        .chain_err(|| "Min mapq not defined.")?
         .parse::<u8>()
-        .expect("Argument min_mapq must be an integer between 0 and 255!");
+        .chain_err(|| "Argument min_mapq must be an integer between 0 and 255!")?;
 
     let anchor_length: usize = input_args.value_of("Anchor length")
-        .unwrap()
+        .chain_err(|| "Anchor length not defined.")?
         .parse::<usize>()
-        .expect("Argument anchor must be a positive integer!");
+        .chain_err(|| "Argument anchor must be a positive integer!")?;
 
     let short_hap_max_snvs: usize = input_args.value_of("Short haplotype max SNVs")
-        .unwrap()
+        .chain_err(|| "Short haplotype max SNVs not defined.")?
         .parse::<usize>()
-        .expect("Argument max_snvs must be a positive integer!");
+        .chain_err(|| "Argument max_snvs must be a positive integer!")?;
 
     let max_window_padding: usize = input_args.value_of("Max window padding")
-        .unwrap()
+        .chain_err(|| "Max window padding not defined.")?
         .parse::<usize>()
-        .expect("Argument max_window must be a positive integer!");
+        .chain_err(|| "Argument max_window must be a positive integer!")?;
 
     let max_cigar_indel: usize = input_args.value_of("Max CIGAR indel")
-        .unwrap()
+        .chain_err(|| "Max CIGAR indel not defined.")?
         .parse::<usize>()
-        .expect("Argument max_cigar_indel must be a positive integer!");
+        .chain_err(|| "Argument max_cigar_indel must be a positive integer!")?;
 
     let min_allele_qual: f64 = input_args.value_of("Min allele quality")
-        .unwrap()
+        .chain_err(|| "Min allele quality not defined.")?
         .parse::<f64>()
-        .expect("Argument max_mec_frac must be a positive float!");
+        .chain_err(|| "Argument max_mec_frac must be a positive float!")?;
 
     if min_allele_qual <= 0.0 {
         bail!("Min allele quality must be a positive float.");
     }
 
-    let hap_assignment_qual: f64 = input_args.value_of("Haplotype Assignment Quality")
-        .unwrap()
+    let hap_assignment_qual: f64 = input_args.value_of("Haplotype assignment quality")
+        .chain_err(|| "Haplotype assignment quality not defined.")?
         .parse::<f64>()
-        .expect("Argument max_mec_frac must be a positive float!");
+        .chain_err(|| "Argument hap_assignment_qual must be a positive float!")?;
 
     if hap_assignment_qual <= 0.0 {
         bail!("Haplotype assignment quality must be a positive float.");
@@ -472,51 +484,53 @@ fn run() -> Result<()> {
     let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(min_allele_qual));
 
     let ll_delta: f64 = input_args.value_of("Haplotype Convergence Delta")
-        .unwrap()
+        .chain_err(|| "Haplotype convergence delta not defined.")?
         .parse::<f64>()
-        .expect("Argument hap_converge_delta must be a positive float!");
+        .chain_err(|| "Argument hap_converge_delta must be a positive float!")?;
 
     let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(input_args.value_of("Potential SNV Cutoff")
-        .unwrap()
+        .chain_err(|| "Potential SNV Cutoff not defined.")?
         .parse::<f64>()
-        .expect("Argument potential_snv_cutoff must be a positive float!")));
+        .chain_err(|| "Argument potential_snv_cutoff must be a positive float!")?));
 
     let hom_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous SNV Rate")
-        .unwrap()
+        .chain_err(|| "Homozygous SNV rate not defined.")?
         .parse::<f64>()
-        .expect("Argument hom_snv_rate must be a positive float!")));
+        .chain_err(|| "Argument hom_snv_rate must be a positive float!")?));
 
     let het_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Heterozygous SNV Rate")
-        .unwrap()
+        .chain_err(|| "Heterozygous SNV rate not defined.")?
         .parse::<f64>()
-        .expect("Argument het_snv_rate must be a positive float!")));
+        .chain_err(|| "Argument het_snv_rate must be a positive float!")?));
 
     let hom_indel_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous Indel Rate")
-        .unwrap()
+        .chain_err(|| "Homozygous Indel Rate not defined.")?
         .parse::<f64>()
-        .expect("Argument hom_indel_rate must be a positive float!")));
+        .chain_err(|| "Argument hom_indel_rate must be a positive float!")?));
 
     let het_indel_rate: LogProb = LogProb::from(Prob(input_args.value_of("Heterozygous Indel Rate")
-        .unwrap()
+        .chain_err(|| "Heterozygous Indel rate not defined.")?
         .parse::<f64>()
-        .expect("Argument het_indel_rate must be a positive float!")));
+        .chain_err(|| "Argument het_indel_rate must be a positive float!")?));
 
     // multiply by 2.0 because internally we use this value as the probability of transition to
     // a single transversion base, not the combined probability of transversion to either one
     let ts_tv_ratio = 2.0 * input_args.value_of("ts/tv Ratio")
-        .unwrap()
+        .chain_err(|| "Ts/tv ratio not defined.")?
         .parse::<f64>()
-        .expect("Argument ts_tv_ratio must be a positive float!");
+        .chain_err(|| "Argument ts_tv_ratio must be a positive float!")?;
 
-    let dn_params = input_args.value_of("Density parameters").unwrap().split(":").collect::<Vec<&str>>();
+    let dn_params = input_args.value_of("Density parameters")
+        .chain_err(|| "Density parameters not defined.")?
+        .split(":").collect::<Vec<&str>>();
 
     if dn_params.len() != 3 {
         bail!("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
     }
 
-    let dn_count = dn_params[0].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
-    let dn_len = dn_params[1].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
-    let dn_gq = dn_params[2].parse::<usize>().expect("Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.");
+    let dn_count = dn_params[0].parse::<usize>().chain_err(|| "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.")?;
+    let dn_len = dn_params[1].parse::<usize>().chain_err(|| "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.")?;
+    let dn_gq = dn_params[2].parse::<usize>().chain_err(|| "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers.")?;
 
     let density_params = DensityParameters{n: dn_count, len: dn_len, gq: dn_gq as f64};
 
@@ -550,9 +564,9 @@ fn run() -> Result<()> {
     };*/
 
     let band_width: usize = input_args.value_of("Band width")
-        .unwrap()
+        .chain_err(|| "Band width not defined.")?
         .parse::<usize>()
-        .expect("Argument band_width must be a positive integer!");
+        .chain_err(|| "Argument band_width must be a positive integer!")?;
 
     /*
     let use_poa = match input_args.occurrences_of("Use POA") {
@@ -563,12 +577,18 @@ fn run() -> Result<()> {
         }
     };*/
 
-    let min_cov: u32 = input_args.value_of("Min coverage").unwrap().parse::<u32>().expect("Argument min_cov must be a positive integer!");
+    let min_cov: u32 = input_args.value_of("Min coverage")
+        .chain_err(|| "Min coverage not defined.")?
+        .parse::<u32>()
+        .chain_err(|| "Argument min_cov must be a positive integer!")?;
 
     let max_cov: u32 = match input_args.occurrences_of("Auto max coverage") {
         0 => {
             // manually assigned coverage cutoff from user
-             input_args.value_of("Max coverage").unwrap().parse::<u32>().expect("Argument max_cov must be a positive integer!")
+             input_args.value_of("Max coverage")
+                 .chain_err(|| "Max coverage not defined.")?
+                 .parse::<u32>()
+                 .chain_err(|| "Argument max_cov must be a positive integer!")?
         },
         1 => {
             eprintln!("{} Automatically determining max read coverage.",print_time());
@@ -692,7 +712,7 @@ fn run() -> Result<()> {
                 None => {bail!("Invalid unicode provided for variant debug directory");}
             };
             let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
-            let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall);
+            let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall).chain_err(|| "Error generating fragment list buffer.")?;
 
             let fragment_file_path = Path::new(&ffn);
             let mut fragment_file = File::create(&fragment_file_path).chain_err(|| "Could not open fragment file for writing.")?;
@@ -709,7 +729,7 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
 
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
-    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall);
+    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall).chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
 
     print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &density_params, &sample_name);
 
@@ -724,7 +744,7 @@ fn run() -> Result<()> {
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, &density_params, max_p_miscall,
-                                   &sample_name, ll_delta);
+                                   &sample_name, ll_delta).chain_err(|| "Error duing haplotype/genotype iteration procedure.")?;
 
     /*
     if use_poa {
@@ -789,7 +809,7 @@ fn run() -> Result<()> {
     };
     */
 
-    calculate_mec(&flist, &mut varlist, max_p_miscall);
+    calculate_mec(&flist, &mut varlist, max_p_miscall).chain_err(|| "Error calculating MEC for haplotype blocks.")?;
 
     let debug_filename = "4.0.final_genotypes.vcf";
 
@@ -799,7 +819,7 @@ fn run() -> Result<()> {
     match hap_bam_prefix {
         Some(p) => {
             eprintln!("{} Writing haplotype-assigned reads to bam files...",print_time());
-            separate_bam_reads_by_haplotype(&bamfile_name, &interval, p.to_string(), &h1, &h2, min_mapq);
+            separate_bam_reads_by_haplotype(&bamfile_name, &interval, p.to_string(), &h1, &h2, min_mapq).chain_err(|| "Error separating BAM reads by haplotype.")?;
         },
         None => {}
     }

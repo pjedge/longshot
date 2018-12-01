@@ -5,7 +5,7 @@ use print_output::*;
 use genotype_probs::*;
 use haplotype_assembly::{generate_flist_buffer, call_hapcut2};
 use chrono::prelude::*;
-
+use errors::*;
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
 
@@ -42,13 +42,13 @@ fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64)
 pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
                                                    genotype_priors: &GenotypePriors,
                                                    alleles: &Vec<String>,
-                                                   max_p_miscall: f64) -> GenotypeProbs {
+                                                   max_p_miscall: f64) -> Result<GenotypeProbs> {
 
     let ln_max_p_miscall: LogProb = LogProb::from(Prob(max_p_miscall));
     let ln_half: LogProb = LogProb::from(Prob(0.5));
 
     // this matrix holds P(data | g) * p(g)
-    let mut probs: GenotypeProbs = genotype_priors.get_all_priors(alleles);
+    let mut probs: GenotypeProbs = genotype_priors.get_all_priors(alleles).chain_err(|| "Error getting all genotype priors while calculating genotypes.")?;
 
     for &call in pileup {
 
@@ -76,10 +76,10 @@ pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
     // posterior probabilities
     let posts = probs.normalize();
 
-    posts
+    Ok(posts)
 }
 
-pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) {
+pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) -> Result<()> {
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
 
     assert_eq!(pileup_lst.len(), varlist.lst.len());
@@ -91,7 +91,7 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
         let posts: GenotypeProbs = calculate_genotype_posteriors_no_haplotypes(&pileup,
                                                                                &genotype_priors,
                                                                                &var.alleles,
-                                                                               max_p_miscall);
+                                                                               max_p_miscall).chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
 
         let (max_g, max_post) = posts.max_genotype(false, false);
 
@@ -115,6 +115,7 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
 
         var.phase_set = None;
     }
+    Ok(())
 }
 
 pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
@@ -127,7 +128,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       density_params: &DensityParameters,
                                       max_p_miscall: f64,
                                       sample_name: &String,
-                                      ll_delta: f64) {
+                                      ll_delta: f64) -> Result<()> {
 
     let min_hap_gq: f64 = 1.0;
 
@@ -192,7 +193,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
-            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g);
+            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
         }
 
         for f in 0..flist.len() {
@@ -258,7 +259,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             vcf_buffer.push(vcf_line);
         }
 
-        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall);
+        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall).chain_err(|| "Error generating fragment list buffer.")?;
         let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
 
         call_hapcut2(&frag_buffer,
@@ -327,7 +328,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
-            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g);
+            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
         }
 
         for f in 0..flist.len() {
@@ -385,7 +386,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
                 assert_eq!(v, var.ix);
 
-                let mut p_reads: GenotypeProbs = genotype_priors.get_all_priors(&var.alleles);
+                let mut p_reads: GenotypeProbs = genotype_priors.get_all_priors(&var.alleles).chain_err(|| "Error getting all genotype priors while calculating haplotype-informed genotypes")?;
 
                 // let (g1,g2) be the current genotype being considered to switch to
                 // then p_read_g[g1][g2] contains a vector of tuples (frag_ix, p_read_h0, p_read_h1
@@ -518,7 +519,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
-            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g);
+            total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
         }
 
         for f in 0..flist.len() {
@@ -601,4 +602,5 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         prev_likelihood = total_likelihood;
     }
+    Ok(())
 }
