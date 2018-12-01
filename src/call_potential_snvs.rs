@@ -250,7 +250,7 @@ pub fn call_potential_snvs(bam_file: &String,
             // use a basic genotype likelihood calculation to call SNVs
             let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
             let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
-                let snv_post = calculate_genotype_posteriors_no_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles, max_p_miscall);
+                let snv_post = calculate_genotype_posteriors_no_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles, max_p_miscall).chain_err(|| "Error getting genotype posteriors for calling potential SNVs.")?;
                 LogProb::ln_one_minus_exp(&snv_post.get(Genotype(0, 0)))
             } else {
                 LogProb::ln_zero()

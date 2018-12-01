@@ -274,8 +274,8 @@ impl GenotypePriors {
                         diploid_genotype_priors.insert((allele, *gt), hom_snv_rate + tv);
                     }
                 } else { // else it's the product of the haploid priors
-                    diploid_genotype_priors.insert((allele, *gt), *haploid_genotype_priors.get(&(allele, g1)).unwrap() +
-                        *(haploid_genotype_priors.get(&(allele, g2))).unwrap());
+                    diploid_genotype_priors.insert((allele, *gt), *haploid_genotype_priors.get(&(allele, g1)).chain_err(|| "Invalid haploid genotype accessed from haploid genotype priors.")? +
+                        *(haploid_genotype_priors.get(&(allele, g2))).chain_err(|| "Invalid haploid genotype accessed from haploid genotype priors.")?);
                 }
             }
         }
@@ -297,12 +297,15 @@ impl GenotypePriors {
 
     // TODO: currently MNPs are going to be assigned the prior of the first SNV in the MNP
     // not ideal, but should suffice for the time being
-    pub fn get_prior(&self, alleles: &Vec<String>, genotype: Genotype) -> LogProb {
+    pub fn get_prior(&self, alleles: &Vec<String>, genotype: Genotype) -> Result<LogProb> {
 
-        let mut ra = alleles[0].chars().nth(0).unwrap();
+        let nth_char: fn(&String, usize) -> Result<char> = |s: &String, i: usize| s.chars().nth(i).chain_err(|| "Error accessing nth character of String");
+        //let first_char: fn(&String) -> Result<char> = |s: &String| nth_char(s, 0);
+        let mut ra = nth_char(&alleles[0], 0)?;
+
 
         let mut g0 = if alleles[genotype.0 as usize].len() == alleles[0].len() {
-            alleles[genotype.0 as usize].chars().nth(0).unwrap()
+            nth_char(&alleles[genotype.0 as usize],0)?
         } else if alleles[genotype.0 as usize].len() > alleles[0].len() {
             'I'
         } else {
@@ -311,8 +314,8 @@ impl GenotypePriors {
 
         if ra == g0 {
             for i in 0..alleles[genotype.0 as usize].len() {
-                ra = alleles[0].chars().nth(i).unwrap();
-                g0 = alleles[genotype.0 as usize].chars().nth(i).unwrap();
+                ra = nth_char(&alleles[0], i)?;
+                g0 = nth_char(&alleles[genotype.0 as usize], i)?;
                 if ra != g0 {
                     break;
                 }
@@ -320,7 +323,7 @@ impl GenotypePriors {
         }
 
         let mut g1 = if alleles[genotype.1 as usize].len() == alleles[0].len() {
-            alleles[genotype.1 as usize].chars().nth(0).unwrap()
+            nth_char(&alleles[genotype.1 as usize], 0)?
         } else if alleles[genotype.1 as usize].len() > alleles[0].len() {
             'I'
         } else {
@@ -329,8 +332,8 @@ impl GenotypePriors {
 
         if ra == g1 {
             for i in 0..alleles[genotype.1 as usize].len() {
-                ra = alleles[0].chars().nth(i).unwrap();
-                g1 = alleles[genotype.1 as usize].chars().nth(i).unwrap();
+                ra = nth_char(&alleles[0], i)?;
+                g1 = nth_char(&alleles[genotype.1 as usize],i)?;
                 if ra != g1 {
                     break;
                 }
@@ -341,30 +344,30 @@ impl GenotypePriors {
 
         match self.priors_dict.get(&(ra, (g0, g1))) {
             Some(p) => {
-                if g0 != g1 {return ln_half+*p;} else {return *p;}
+                if g0 != g1 {return Ok(ln_half+*p);} else {return Ok(*p);}
             },
             None => {
                 match self.priors_dict.get(&(ra, (g1, g0))) {
                     Some(p) => {
-                        if g0 != g1 {return ln_half+*p;} else {return *p;}
+                        if g0 != g1 {return Ok(ln_half+*p);} else {return Ok(*p);}
                     },
-                    None => { println!("{} ({},{})",ra,g1,g0); panic!("Genotype not in genotype priors."); }
+                    None => { bail!(ErrorKind::GenotypeNotInGenotypePriorsError(ra, g0, g1)) }
                 };
             }
         }
     }
 
-    pub fn get_all_priors(&self, alleles: &Vec<String>) -> GenotypeProbs {
+    pub fn get_all_priors(&self, alleles: &Vec<String>) -> Result<GenotypeProbs> {
 
         let mut priors = GenotypeProbs::zeros(alleles.len());
 
         for g0 in 0..alleles.len() {
             for g1 in 0..alleles.len() {
-                priors.tab[g0][g1] = self.get_prior(alleles, Genotype(g0 as u8, g1 as u8));
+                priors.tab[g0][g1] = self.get_prior(alleles, Genotype(g0 as u8, g1 as u8)).chain_err(|| "Error while accessing genotype prior in get_all_priors()")?;
             }
         }
 
-        priors
+        Ok(priors)
     }
 }
 

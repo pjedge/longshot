@@ -6,6 +6,7 @@ use std::char::from_digit;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use util::*;
+use errors::*;
 
 pub fn separate_fragments_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
 
@@ -47,26 +48,26 @@ pub fn separate_fragments_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb
 
 pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<GenomicInterval>,
                                        hap_bam_prefix: String, h1: &HashSet<String>, h2: &HashSet<String>,
-                                       min_mapq: u8){
+                                       min_mapq: u8) -> Result<()> {
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval);
 
-    let mut bam_ix = bam::IndexedReader::from_path(bamfile_name).unwrap();
+    let mut bam_ix = bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     let h1_bam_file = format!("{}.hap1.bam", &hap_bam_prefix);
     let h2_bam_file = format!("{}.hap2.bam", &hap_bam_prefix);
     let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
 
     let header = bam::Header::from_template(&bam_ix.header);
-    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header).unwrap();
-    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header).unwrap();
-    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header).unwrap();
+    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header).chain_err(|| ErrorKind::BamWriterOpenError(h1_bam_file))?;
+    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header).chain_err(|| ErrorKind::BamWriterOpenError(h2_bam_file))?;
+    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header).chain_err(|| ErrorKind::BamWriterOpenError(unassigned_bam_file))?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() {
-            let record = r.unwrap();
+            let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
             if record.is_quality_check_failed() || record.is_duplicate() ||
                 record.is_secondary() || record.is_unmapped() || record.mapq() < min_mapq
@@ -77,17 +78,19 @@ pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<
             let read_id = u8_to_string(record.qname());
 
             if h1.contains(&read_id) {
-                h1_bam.write(&record).unwrap();
+                h1_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(u8_to_string(record.qname())))?;
             } else if h2.contains(&read_id) {
-                h2_bam.write(&record).unwrap();
+                h2_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(u8_to_string(record.qname())))?;
             } else {
-                unassigned_bam.write(&record).unwrap();
+                unassigned_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(u8_to_string(record.qname())))?;
             }
         }
     }
+
+    Ok(())
 }
 
-pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Vec<Vec<u8>> {
+pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
@@ -124,14 +127,16 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
         for c in frag.clone().calls {
             if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)){
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
-                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
+                    ensure!(c.allele == 0 as u8 || c.allele == 1 as u8, "Allele is not valid for incorporation into fragment file.");
+                    line.push(from_digit(c.allele as u32, 10).chain_err(|| "Error converting allele digit to char.")? as u8)
                 } else {
                     line.push(' ' as u8);
                     for u in (c.var_ix + 1).to_string().into_bytes() {
                         line.push(u as u8);
                     }
                     line.push(' ' as u8);
-                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
+                    ensure!(c.allele == 0 as u8 || c.allele == 1 as u8, "Allele is not valid for incorporation into fragment file.");
+                    line.push(from_digit(c.allele as u32, 10).chain_err(|| "Error converting allele digit to char.")? as u8)
                 }
                 let mut qint = *PHREDProb::from(c.qual) as u32 + 33;
                 if qint > 126 {
@@ -155,7 +160,7 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
 
         buffer.push(line);
     }
-    buffer
+    Ok(buffer)
 }
 
 extern "C" {
@@ -195,7 +200,7 @@ pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,
     }
 }
 
-pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall: f64) {
+pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall: f64) -> Result<()> {
 
     let hap_ixs = vec![0, 1];
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
@@ -252,10 +257,13 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall
     for mut var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
-                var.mec_frac_block = *block_mec.get(&ps).unwrap() as f64 / *block_total.get(&ps).unwrap() as f64;
+                var.mec_frac_block = *block_mec.get(&ps).chain_err(|| "Error retrieving MEC for phase set.")? as f64
+                                   / *block_total.get(&ps).chain_err(|| "Error retrieving MEC for phase set.")? as f64;
                 var.mec_frac_variant = var.mec as f64 / var.allele_counts.iter().sum::<usize>() as f64;
             }
             None => {}
         }
     }
+
+    Ok(())
 }
