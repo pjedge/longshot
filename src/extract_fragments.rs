@@ -240,10 +240,10 @@ pub fn find_anchors(bam_record: &Record,
 
     if var_interval.chrom != target_names[bam_record.tid() as usize] ||
         (var_interval.start_pos as i32) >=
-            bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position") ||
+            bam_record.cigar().end_pos().chain_err(||"Error while accessing CIGAR end position")? ||
         (var_interval.end_pos as i32) < bam_record.pos() {
         eprintln!("var_interval: {}\t{}\t{}",var_interval.chrom, var_interval.start_pos, var_interval.end_pos);
-        eprintln!("bam_record:   {}\t{}\t{}",target_names[bam_record.tid() as usize], bam_record.pos(), bam_record.cigar().end_pos().expect("Error while accessing CIGAR end position"));
+        eprintln!("bam_record:   {}\t{}\t{}",target_names[bam_record.tid() as usize], bam_record.pos(), bam_record.cigar().end_pos().chain_err(|| "Error while accessing CIGAR end position")?);
 
         bail!(ErrorKind::AnchorRangeOutsideRead);
     }
@@ -733,10 +733,10 @@ pub fn extract_fragment(bam_record: &Record,
                         extract_params: ExtractFragmentParameters,
                         align_params: AlignmentParameters,
                         old_frag: Option<Fragment>)
-                        -> Option<Fragment> {
+                        -> Result<Option<Fragment>> {
 
     // TODO assert that every single variant in vars is on the same chromosome
-    let id: String = u8_to_string(bam_record.qname());
+    let id: String = u8_to_string(bam_record.qname())?;
 
     if VERBOSE {eprintln!("Extracting fragment for read {}...", id);}
 
@@ -749,7 +749,7 @@ pub fn extract_fragment(bam_record: &Record,
     if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
         bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
         || bam_record.is_supplementary(){
-        return None;
+        return Ok(None);
     }
 
     let read_seq: Vec<char> = dna_vec(&bam_record.seq().as_bytes());
@@ -770,7 +770,7 @@ pub fn extract_fragment(bam_record: &Record,
                                    &ref_seq,
                                    &read_seq,
                                    &target_names,
-                                   extract_params).expect("CIGAR or Anchor Error while finding anchor sequences.") {
+                                   extract_params).chain_err(|| "Error while finding anchor sequences.")? {
             Some(anchors) => {var_anchor_lst.push((var.clone(), anchors));},
             _ => {}
         };
@@ -928,7 +928,7 @@ pub fn extract_fragment(bam_record: &Record,
         }
     }
 
-    Some(fragment)
+    Ok(Some(fragment))
 }
 
 pub fn extract_fragments(bam_file: &String,
@@ -940,7 +940,7 @@ pub fn extract_fragments(bam_file: &String,
                          old_flist: Option<Vec<Fragment>>)
                          -> Result<Vec<Fragment>> {
 
-    let t_names = parse_target_names(&bam_file);
+    let t_names = parse_target_names(&bam_file)?;
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
     let mut fasta = fasta::IndexedReader::from_file(fastafile_name).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
@@ -951,11 +951,11 @@ pub fn extract_fragments(bam_file: &String,
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
     let mut complete = 0;
 
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
     let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).expect("Error seeking BAM file while extracting fragments.");
+        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).chain_err(|| "Error seeking BAM file while extracting fragments.")?;
 
         for (i, r) in bam_ix.records().enumerate() {
             let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
@@ -968,7 +968,7 @@ pub fn extract_fragments(bam_file: &String,
 
             let old_frag: Option<Fragment> = match &old_flist {
                 &Some(ref fl) => {
-                    assert_eq!(fl[i].id, u8_to_string(record.qname()));
+                    assert_eq!(fl[i].id, u8_to_string(record.qname())?);
                     Some(fl[i].clone())
                 }
                 &None => { None }
@@ -979,17 +979,17 @@ pub fn extract_fragments(bam_file: &String,
 
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
+                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| "Failed to read fasta sequence record.")?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
             let start_pos = record.pos();
             let end_pos =
-                record.cigar().end_pos().expect("Error while accessing CIGAR end position") - 1;
+                record.cigar().end_pos().chain_err(|| "Error while accessing CIGAR end position")? - 1;
 
             let bam_cig: CigarStringView = record.cigar();
             let cigarpos_list: Vec<CigarPos> =
-                create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
+                create_augmented_cigarlist(start_pos as u32, &bam_cig).chain_err(|| "Error creating augmented cigarlist.")?;
 
 
             let interval = GenomicInterval {
@@ -1000,7 +1000,7 @@ pub fn extract_fragments(bam_file: &String,
             };
 
             // get the list of variants that overlap this read
-            let read_vars = varlist.get_variants_range(interval);
+            let read_vars = varlist.get_variants_range(interval).chain_err(|| "Error getting variants in range.")?;
 
             // print the percentage of variants processed every 10%
             if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
@@ -1017,7 +1017,7 @@ pub fn extract_fragments(bam_file: &String,
                                         &t_names,
                                         extract_params,
                                         align_params,
-                                        old_frag);
+                                        old_frag).chain_err(|| "Error extracting fragment from read.")?;
 
             match frag {
                 Some(some_frag) => {flist.push(some_frag);},

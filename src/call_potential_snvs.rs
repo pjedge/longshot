@@ -37,7 +37,7 @@ pub fn call_potential_snvs(bam_file: &String,
                            potential_snv_cutoff: LogProb)
                            -> Result<VarList> {
 
-    let target_names = parse_target_names(&bam_file);
+    let target_names = parse_target_names(&bam_file)?;
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
 
@@ -58,7 +58,7 @@ pub fn call_potential_snvs(bam_file: &String,
     // so we need to iterate over the fetched indexed pileup if there's a region,
     // or a totally separate pileup from the unindexed file if not.
 
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
     let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(||ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
@@ -305,7 +305,7 @@ pub fn call_potential_snvs(bam_file: &String,
             }
         }
     }
-    Ok(VarList::new(varlist))
+    Ok(VarList::new(varlist)?)
 }
 
 // alignment: a rust-bio alignment object where x is a read consensus window, and y is the window from the reference

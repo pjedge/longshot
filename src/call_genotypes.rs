@@ -589,7 +589,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
 
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
-        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, density_params, sample_name);
+        print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, density_params, sample_name)?;
 
         eprintln!("{}    (After Greedy)   Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
