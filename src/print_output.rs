@@ -3,7 +3,7 @@ use bio::stats::{PHREDProb};
 use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
 use variants_and_fragments::{VarList, var_filter};
 use genotype_probs::Genotype;
-use std::error::Error;
+use errors::*;
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
@@ -11,7 +11,7 @@ use std::path::Path;
 
 pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String,
                  print_reference_genotype: bool, max_cov: u32, density_params: &DensityParameters,
-                 sample_name: &String, print_outside_region: bool) {
+                 sample_name: &String, print_outside_region: bool) -> Result<()> {
 
     // first, add filter flags for variant density
     var_filter(varlist, density_params.gq, density_params.len, density_params.n, max_cov);
@@ -19,10 +19,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
     let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
     // Open a file in write-only mode, returns `io::Result<File>`
-    let mut file = match File::create(&vcf_path) {
-        Err(why) => panic!("couldn't create {}: {}", vcf_display, why.description()),
-        Ok(file) => file,
-    };
+    let mut file = File::create(&vcf_path).chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
     let headerstr = format!("##fileformat=VCFv4.2
 ##source=ReaperV0.1
@@ -52,11 +49,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
     //"##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
     //##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
     //##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">"
-    match writeln!(file, "{}", headerstr) {
-        Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
-        Ok(_) => {}
-    }
-
+    writeln!(file, "{}", headerstr).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
 
     for var in &varlist.lst {
 
@@ -113,7 +106,7 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
         let genotypes_match: usize = (var.genotype == var.unphased_genotype
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype) as usize;
 
-        match writeln!(file,
+        writeln!(file,
                        "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
@@ -141,24 +134,23 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
                        var.gq,
                        ps,
                        unphased_genotype_str,
-                       var.unphased_gq) {
-            Err(why) => panic!("couldn't write to {}: {}", vcf_display, why.description()),
-            Ok(_) => {}
-        }
+                       var.unphased_gq).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
     }
+    Ok(())
 }
 
 pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>,
                            variant_debug_directory: &Option<String>, debug_filename: &str,
-                           max_cov: u32, density_params: &DensityParameters, sample_name: &String){
+                           max_cov: u32, density_params: &DensityParameters, sample_name: &String) -> Result<()> {
     match variant_debug_directory {
         &Some(ref dir) => {
             let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
                 Some(s) => {s.to_owned()},
-                None => {panic!("Invalid unicode provided for variant debug directory");}
+                None => {bail!("Invalid unicode provided for variant debug directory");}
             };
-            print_vcf(varlist, &interval,&outfile, true, max_cov, density_params, sample_name, true);
+            print_vcf(varlist, &interval,&outfile, true, max_cov, density_params, sample_name, true).chain_err(|| "Error printing debug VCF file.")?;
         }
         &None => {}
     };
+    Ok(())
 }

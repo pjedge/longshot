@@ -50,7 +50,7 @@ pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<
                                        hap_bam_prefix: String, h1: &HashSet<String>, h2: &HashSet<String>,
                                        min_mapq: u8) -> Result<()> {
 
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval);
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval).chain_err(|| "Error getting genomic interval list.")?;
 
     let mut bam_ix = bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
@@ -75,14 +75,14 @@ pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<
                 continue;
             }
 
-            let read_id = u8_to_string(record.qname());
+            let qname = u8_to_string(record.qname())?;
 
-            if h1.contains(&read_id) {
-                h1_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(u8_to_string(record.qname())))?;
-            } else if h2.contains(&read_id) {
-                h2_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(u8_to_string(record.qname())))?;
+            if h1.contains(&qname) {
+                h1_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
+            } else if h2.contains(&qname) {
+                h2_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
             } else {
-                unassigned_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(u8_to_string(record.qname())))?;
+                unassigned_bam.write(&record).chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
             }
         }
     }

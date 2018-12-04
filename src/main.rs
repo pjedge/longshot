@@ -22,7 +22,7 @@ Author: Peter Edge
 Contact: edge.peterj at gmail.com
 */
 
-
+// import modules
 mod haplotype_assembly;
 mod call_potential_snvs;
 mod extract_fragments; //mod extract_fragments_debug;
@@ -39,26 +39,25 @@ mod genotype_probs;
 use clap::{Arg, App};
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
-//use std::error::Error;
 use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
 use errors::*;
-
 use call_genotypes::*;
 use util::*;
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use bio::stats::{LogProb,Prob, PHREDProb};
-//use haplotype_assembly::separate_reads_by_haplotype;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType};
-//use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 use genotype_probs::GenotypePriors;
 use extract_fragments::ExtractFragmentParameters;
 use haplotype_assembly::*;
 //use variants_and_fragments::parse_VCF_potential_variants;
+//use haplotype_assembly::separate_reads_by_haplotype;
+//use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 
+// define some custom errors
 mod errors {
     error_chain!{
         errors {
@@ -103,6 +102,13 @@ mod errors {
             IndexedFastaReadError {
                 description("Error reading indexed FASTA file.")
             }
+            // Indexed BAM errors
+            BCFOpenError {
+                description("Error opening BCF file.")
+            }
+            BCFReadError {
+                description("Error reading BCF file.")
+            }
             // CIGAR errors
             // derived from Rust-htslib errors defined with quick-error... https://github.com/rust-bio/rust-htslib/blob/master/src/bam/record.rs
             UnexpectedCigarOperation(msg: String) {
@@ -130,10 +136,27 @@ mod errors {
                 description("Genotype not in genotype priors.")
                 display(x) -> ("{}: ref {}, genotype ({},{})", x.description(), refbase, g0, g1)
             }
+            // File IO errors
+            FileWriteError (filename: String){
+                description("Couldn't write to file")
+                display(x) -> ("{}: {}", x.description(), filename)
+            }
+            CreateFileError (filename: String){
+                description("Couldn't create file")
+                display(x) -> ("{}: {}", x.description(), filename)
+            }
+            // File IO errors
+            NoneError {
+                description("Option was None.")
+            }
         }
     }
 }
 
+// the main function using error-chain recommended practice
+// http://brson.github.io/2016/11/30/starting-with-error-chain
+// execute the run() function (which contains the whole program)
+// if program fails grab the chain of errors incurred and print them with nonzero exit code (and any backtrace)
 fn main() {
     if let Err(ref e) = run() {
         println!("error: {}", e);
@@ -147,6 +170,7 @@ fn main() {
     }
 }
 
+// this function effectively contains the entire Longshot program
 fn run() -> Result<()> {
 
     /***********************************************************************************************/
@@ -159,6 +183,11 @@ fn run() -> Result<()> {
         .version("0.2.0")
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
+        .arg(Arg::with_name("Auto max coverage")
+            .short("A")
+            .long("auto_max_cov")
+            .help("Automatically calculate mean coverage for region and set max coverage to mean_coverage + 5*sqrt(mean_coverage). (SLOWER)")
+            .display_order(3))
         .arg(Arg::with_name("Input BAM")
                 .short("b")
                 .long("bam")
@@ -204,11 +233,6 @@ fn run() -> Result<()> {
             .value_name("BAM")
             .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
             .display_order(50))
-        .arg(Arg::with_name("Auto max coverage")
-            .short("A")
-            .long("auto_max_cov")
-            .help("Automatically calculate mean coverage for region and set max coverage to mean_coverage + 5*sqrt(mean_coverage). (SLOWER)")
-            .display_order(77))
         .arg(Arg::with_name("Min coverage")
             .short("c")
             .long("min_cov")
@@ -235,28 +259,28 @@ fn run() -> Result<()> {
             .long("min_allele_qual")
             .value_name("float")
             .help("Minimum estimated quality (Phred-scaled) of allele observation on read to use for genotyping/haplotyping.")
-            .display_order(90)
+            .display_order(92)
             .default_value("7.0"))
         .arg(Arg::with_name("Haplotype assignment quality")
             .short("y")
             .long("hap_assignment_qual")
             .value_name("float")
             .help("Minimum quality (Phred-scaled) of read->haplotype assignment (for read separation).")
-            .display_order(90)
+            .display_order(94)
             .default_value("20.0"))
         .arg(Arg::with_name("Potential SNV Cutoff")
             .long("potential_snv_cutoff")
             .short("Q")
             .value_name("float")
             .help("Consider a site as a potential SNV if the original PHRED-scaled QUAL score for 0/0 genotype is below this amount (a larger value considers more potential SNV sites).")
-            .display_order(91)
+            .display_order(96)
             .default_value("30.0"))
         .arg(Arg::with_name("Haplotype Convergence Delta")
             .long("hap_converge_delta")
             .short("L")
             .value_name("float")
             .help("Terminate the haplotype/genotype iteration when the relative change in log-likelihood falls below this amount. Setting a larger value results in faster termination but potentially less accurate results.")
-            .display_order(92)
+            .display_order(98)
             .default_value(&"0.0001"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
@@ -301,6 +325,11 @@ fn run() -> Result<()> {
             .long("force_overwrite")
             .help("If output files (VCF or variant debug directory) exist, delete and overwrite them.")
             .display_order(164))
+        .arg(Arg::with_name("Max alignment")
+            .short("x")
+            .long("max_alignment")
+            .help("Use max scoring alignment algorithm rather than pair HMM forward algorithm.")
+            .display_order(166))
         .arg(Arg::with_name("Band width")
                 .short("B")
                 .long("band_width")
@@ -314,26 +343,26 @@ fn run() -> Result<()> {
             .help("Parameters to flag a variant as part of a \"dense cluster\". Format <n>:<l>:<gq>. \
                      If there are at least n variants within l base pairs with genotype quality >=gq, \
                      then these variants are flagged as \"dn\"")
-            .display_order(175)
+            .display_order(172)
             .default_value("10:500:50"))
         .arg(Arg::with_name("Sample ID")
             .short("s")
             .long("sample_id")
             .value_name("string")
             .help("Specify a sample ID to write to the output VCF")
-            .display_order(177)
+            .display_order(174)
             .default_value(&"SAMPLE"))
         .arg(Arg::with_name("Homozygous SNV Rate")
             .long("hom_snv_rate")
             .value_name("float")
             .help("Specify the homozygous SNV Rate for genotype prior estimation")
-            .display_order(178)
+            .display_order(176)
             .default_value(&"0.0005"))
         .arg(Arg::with_name("Heterozygous SNV Rate")
             .long("het_snv_rate")
             .value_name("float")
             .help("Specify the heterozygous SNV Rate for genotype prior estimation")
-            .display_order(179)
+            .display_order(178)
             .default_value(&"0.001"))
         .arg(Arg::with_name("Homozygous Indel Rate")
             .long("hom_indel_rate")
@@ -346,31 +375,20 @@ fn run() -> Result<()> {
             .long("het_indel_rate")
             .value_name("float")
             .help("Specify the heterozygous Indel Rate for genotype prior estimation")
-            .display_order(181)
+            .display_order(182)
             .hidden(true)
             .default_value(&"0.0"))
         .arg(Arg::with_name("ts/tv Ratio")
             .long("ts_tv_ratio")
             .value_name("float")
             .help("Specify the transition/transversion rate for genotype grior estimation")
-            .display_order(182)
+            .display_order(184)
             .default_value(&"0.5"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
                 .help("Don't call HapCUT2 to phase variants.")
                 .display_order(190))
-        .arg(Arg::with_name("Max alignment")
-            .short("x")
-            .long("max_alignment")
-            .help("Use max scoring alignment algorithm rather than pair HMM forward algorithm.")
-            .display_order(165))
-        //.arg(Arg::with_name("Debug Allele Realignment")
-        //    .short("u")
-        //    .long("debug_allele_realignment")
-        //    .hidden(true)
-        //    .help("Do NOT call variants, only print out meta-stats (number of expected operations etc) for allele realignment.")
-        //    .display_order(165))
         .arg(Arg::with_name("Variant debug directory")
             .short("d")
             .long("variant_debug_dir")
@@ -384,7 +402,7 @@ fn run() -> Result<()> {
     let output_vcf_file = input_args.value_of("Output VCF").chain_err(|| "Output VCF file not defined.")?.to_string();
 
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
-                                                                &bamfile_name);
+                                                                &bamfile_name)?;
 
     //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
@@ -435,7 +453,6 @@ fn run() -> Result<()> {
         None => None,
     };
 
-
     let min_mapq: u8 = input_args.value_of("Min mapq")
         .chain_err(|| "Min mapq not defined.")?
         .parse::<u8>()
@@ -444,7 +461,7 @@ fn run() -> Result<()> {
     let anchor_length: usize = input_args.value_of("Anchor length")
         .chain_err(|| "Anchor length not defined.")?
         .parse::<usize>()
-        .chain_err(|| "Argument anchor must be a positive integer!")?;
+        .chain_err(|| "Argument anchor_length must be a positive integer!")?;
 
     let short_hap_max_snvs: usize = input_args.value_of("Short haplotype max SNVs")
         .chain_err(|| "Short haplotype max SNVs not defined.")?
@@ -667,7 +684,7 @@ fn run() -> Result<()> {
     // as the variant list expands
     varlist.backup_indices();
 
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov, &density_params, &sample_name);
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"1.0.potential_SNVs.vcf", max_cov, &density_params, &sample_name)?;
 
     eprintln!("{} {} potential SNVs identified.", print_time(),varlist.lst.len());
 
@@ -718,7 +735,7 @@ fn run() -> Result<()> {
             let mut fragment_file = File::create(&fragment_file_path).chain_err(|| "Could not open fragment file for writing.")?;
             for mut line_u8 in fragment_buffer {
                 line_u8.pop();
-                writeln!(fragment_file, "{}", u8_to_string(&line_u8)).chain_err(|| "Error writing to fragment file.")?;
+                writeln!(fragment_file, "{}", u8_to_string(&line_u8)?).chain_err(|| "Error writing to fragment file.")?;
             }
         },
         &None => {}
@@ -731,20 +748,20 @@ fn run() -> Result<()> {
     eprintln!("{} Calling initial genotypes using pair-HMM realignment...", print_time());
     call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall).chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
 
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &density_params, &sample_name);
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &density_params, &sample_name)?;
 
 
     /***********************************************************************************************/
     // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
     /***********************************************************************************************/
     if no_haps {
-        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false);
+        print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false).chain_err(|| "Error printing VCF output.")?;
         return Ok(());
     }
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, &density_params, max_p_miscall,
-                                   &sample_name, ll_delta).chain_err(|| "Error duing haplotype/genotype iteration procedure.")?;
+                                   &sample_name, ll_delta).chain_err(|| "Error during haplotype/genotype iteration procedure.")?;
 
     /*
     if use_poa {
@@ -826,8 +843,8 @@ fn run() -> Result<()> {
 
 
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &density_params, &sample_name);
-    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false);
+    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &density_params, &sample_name)?;
+    print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false).chain_err(|| "Error printing VCF output.")?;
 
     Ok(())
 }

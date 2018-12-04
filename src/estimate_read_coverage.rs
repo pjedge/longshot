@@ -16,7 +16,7 @@ pub fn calculate_mean_coverage(bam_file: &String,
     let mut total_read_bases = 0;
     let mut total_bam_ref_positions = 0;
 
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
 
     let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 

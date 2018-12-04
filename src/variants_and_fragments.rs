@@ -8,6 +8,7 @@ use rust_htslib::bcf;
 use call_potential_snvs::VARLIST_CAPACITY;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
+use errors::*;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
@@ -64,8 +65,8 @@ pub struct Var {
 }
 
 impl Var {
-    fn longest_allele_len(&self) -> usize {
-        self.alleles.iter().map(|x| x.len()).max().unwrap()
+    fn longest_allele_len(&self) -> Result<usize> {
+        Ok(self.alleles.iter().map(|x| x.len()).max().chain_err(|| "Error obtaining max allele length.")?)
     }
 
     pub fn possible_genotypes(&self) -> Vec<Genotype> {
@@ -103,45 +104,50 @@ pub struct VarList {
     ix: HashMap<String, Vec<usize>>,
 }
 
-pub fn parse_vcf_potential_variants(vcffile_name: &String, bamfile_name: &String) -> VarList {
+pub fn parse_vcf_potential_variants(vcffile_name: &String, bamfile_name: &String) -> Result<VarList> {
 
     // must assert that the VCF file is sorted correctly
     // can we just read it in and then check that it's sorted using the check_sorted function vs the bam's tlist?
 
-    let mut vcf = bcf::Reader::from_path(vcffile_name).unwrap();
-    let vcfh = bcf::Reader::from_path(vcffile_name).unwrap();
+    let mut vcf = bcf::Reader::from_path(vcffile_name).chain_err(|| ErrorKind::BCFOpenError)?;
+    let vcfh = bcf::Reader::from_path(vcffile_name).chain_err(|| ErrorKind::BCFOpenError)?;
 
-    let bam = bam::Reader::from_path(bamfile_name).unwrap();
+    let bam = bam::Reader::from_path(bamfile_name).chain_err(|| ErrorKind::BamOpenError)?;
     let mut chrom2tid: HashMap<String, usize> = HashMap::new();
 
     for (t, name) in bam.header().target_names().iter().enumerate() {
-        chrom2tid.insert(u8_to_string(name),t);
+        let s: String = u8_to_string(name)?;
+        chrom2tid.insert(s,t);
     }
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
     for r in vcf.records(){
-        let record = r.unwrap();
+        let record = r.chain_err(|| ErrorKind::BCFReadError)?;
         // map the VCF rid to chrom name
         // use BAM header to map this to TID
         // fill in the tid, chrom, and pos
         // get the alleles from the vcf record as well
 
-        let rid = record.rid().unwrap();
-        let chrom: String = u8_to_string(vcfh.header.rid2name(rid));
+        let rid = record.rid().chain_err(|| "Error accessing vcf RID")?;
+        let chrom: String = u8_to_string(vcfh.header.rid2name(rid))?;
 
         if !chrom2tid.contains_key(&chrom) {
-            println!("Potential variant VCF contains contig {} not found in BAM contigs.", chrom);
+            eprintln!("WARNING: Potential variant VCF contains contig {} not found in BAM contigs.", chrom);
         }
 
 
-        let alleles: Vec<String> = record.alleles().iter().map(|x| u8_to_string(x)).collect::<Vec<String>>();
+        let mut alleles: Vec<String> = vec![];
+        for a in record.alleles().iter() {
+            let s = u8_to_string(a)?;
+            alleles.push(s);
+        }
 
         let new_var = Var {
             ix: 0,
             old_ix: None,
             // these will be set automatically,
-            tid: *chrom2tid.get(&chrom).unwrap(),
+            tid: *chrom2tid.get(&chrom).chain_err(|| "Error accessing tid from chrom2tid data structure")?,
             chrom: chrom.clone(),
             pos0: record.pos() as usize,
             alleles: alleles.clone(),
@@ -172,26 +178,28 @@ pub fn parse_vcf_potential_variants(vcffile_name: &String, bamfile_name: &String
         varlist.push(new_var);
     }
 
-    let vlst = VarList::new(varlist);
+    let vlst = VarList::new(varlist)?;
     vlst.assert_sorted();
-    return vlst
+
+    Ok(vlst)
 }
 
 impl VarList {
-    pub fn new(lst: Vec<Var>) -> VarList {
+    pub fn new(lst: Vec<Var>) -> Result<VarList> {
         let mut v = VarList {
             lst: lst,
             ix: HashMap::new(),
         };
-        v.sort();
-        v
+        v.sort()?;
+        Ok(v)
     }
 
-    pub fn sort(&mut self) {
+    pub fn sort(&mut self) -> Result<()> {
         self.lst.sort();
         self.add_ix();
         self.ix.clear();
-        self.index_lst();
+        self.index_lst()?;
+        Ok(())
     }
 
     pub fn assert_sorted(&self) {
@@ -212,7 +220,7 @@ impl VarList {
         }
     }
 
-    fn index_lst(&mut self) {
+    fn index_lst(&mut self) -> Result<()> {
         // need to throw error if list isn't sorted
         self.assert_sorted();
         // for every chromosome, get the position of the last variant
@@ -237,7 +245,7 @@ impl VarList {
             let e = match first_ix.get(chrom) {
                 Some(x) => *x,
                 None => {
-                    panic!("This dictionary is missing a chromosome!");
+                    bail!("This dictionary is missing a chromosome!");
                 }
             };
             v.push(e);
@@ -261,9 +269,10 @@ impl VarList {
             }
             self.ix.insert(chrom.clone(), v); // insert the index vector into the ix dictionary
         }
+        Ok(())
     }
 
-    pub fn get_variants_range(&self, interval: GenomicInterval) -> (Vec<Var>) {
+    pub fn get_variants_range(&self, interval: GenomicInterval) -> Result<Vec<Var>> {
 
         // vector of variants to fill and return
         let mut vlst: Vec<Var> = vec![];
@@ -274,15 +283,15 @@ impl VarList {
         if index_pos >=
             self.ix
                 .get(&interval.chrom)
-                .unwrap()
+                .chain_err(|| format!("Error accessing chromosome {} from variant list index.", &interval.chrom))?
                 .len() {
-            return vlst;
+            return Ok(vlst);
         }
 
-        let mut i = self.ix.get(&interval.chrom).unwrap()[index_pos];
+        let mut i = self.ix.get(&interval.chrom).chain_err(|| format!("Error accessing chromosome {} from variant list index.", &interval.chrom))?[index_pos];
 
         while i < self.lst.len() && self.lst[i].tid == interval.tid as usize &&
-            self.lst[i].pos0 + self.lst[i].longest_allele_len() <= interval.end_pos as usize {
+            self.lst[i].pos0 + self.lst[i].longest_allele_len()? <= interval.end_pos as usize {
             if self.lst[i].pos0 >= interval.start_pos as usize {
                 vlst.push(self.lst[i].clone());
             }
@@ -295,7 +304,7 @@ impl VarList {
             assert!(var.pos0 <= interval.end_pos as usize);
         }
 
-        vlst
+        Ok(vlst)
     }
 
     pub fn backup_indices(&mut self) {
@@ -448,7 +457,7 @@ impl VarList {
         new_v
     }
 
-    pub fn combine (&mut self, other: &mut VarList) {
+    pub fn combine (&mut self, other: &mut VarList) -> Result<()> {
         other.lst.append(&mut self.lst);
         other.lst.sort();
 
@@ -490,12 +499,13 @@ impl VarList {
         // set the list to the new merged list and re-index it
         self.lst = new_vlst;
 
-        self.sort();
+        self.sort()?;
         self.assert_sorted();
 
         // clear out the other VarList since we've mutated it beyond saving
         other.lst.clear();
         other.ix.clear();
+        Ok(())
     }
 }
 
@@ -604,7 +614,7 @@ mod tests {
         lst.push( generate_var1(13, 2, "chr3".to_string(), 25100, "A".to_string(), "C".to_string()));
         lst.push( generate_var1(14, 2, "chr3".to_string(), 30400, "C".to_string(), "A".to_string()));
 
-        VarList::new(lst)
+        VarList::new(lst).unwrap()
     }
 
     #[test]
@@ -620,7 +630,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let mut exp: Vec<Var> = vec![];
         exp.push( generate_var1(3, 0, "chr1".to_string(), 2900, "C".to_string(), "G".to_string()));
@@ -642,7 +652,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let mut exp: Vec<Var> = vec![];
         exp.push( generate_var1(6, 1, "chr2".to_string(), 5, "A".to_string(), "G".to_string()));
@@ -666,7 +676,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let mut exp: Vec<Var> = vec![];
         exp.push( generate_var1(10, 1, "chr2".to_string(), 6000, "C".to_string(), "A".to_string()));
@@ -688,7 +698,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let mut exp: Vec<Var> = vec![];
         exp.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
@@ -709,7 +719,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let mut exp: Vec<Var> = vec![];
         exp.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
@@ -731,7 +741,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let mut exp: Vec<Var> = vec![];
 
@@ -754,7 +764,7 @@ mod tests {
             start_pos: p1,
             end_pos: p2,
         };
-        let vars = vlst.get_variants_range(interval);
+        let vars = vlst.get_variants_range(interval).unwrap();
 
         let exp: Vec<Var> = vec![];
         assert!(pos_alleles_eq(vars, exp));
@@ -784,7 +794,7 @@ mod tests {
         lst.push( generate_var1(2, 0, "chr1".to_string(), 1000, "T".to_string(), "A".to_string()));
         lst.push( generate_var1(12, 2, "chr3".to_string(), 20200, "C".to_string(), "G".to_string()));
 
-        VarList::new(lst)
+        VarList::new(lst).unwrap()
     }
 
     // generate another unsorted version of test_lst1, with meaningless indices. for testing sorting.
@@ -807,7 +817,7 @@ mod tests {
         lst.push( generate_var1(50, 2, "chr3".to_string(), 30400, "C".to_string(), "A".to_string()));
         lst.push( generate_var1(3, 1, "chr2".to_string(), 10000, "C".to_string(), "A".to_string()));
 
-        VarList::new(lst)
+        VarList::new(lst).unwrap()
     }
 
     #[test]
@@ -872,7 +882,7 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let vlst1_bak = vlst1.clone();
 
@@ -880,9 +890,9 @@ mod tests {
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert!(varlist_pos_alleles_eq(vlst1, vlst1_bak));
     }
 
@@ -893,20 +903,20 @@ mod tests {
         let mut lst1: Vec<Var> = vec![];
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "A".to_string()]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
 
@@ -918,21 +928,21 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 101, vec!["T".to_string(), "C".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string(), "TCT".to_string(),]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
@@ -945,21 +955,21 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "C".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "TAAAA".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "C".to_string(), "TAAAA".to_string(),]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
@@ -972,22 +982,22 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 101, vec!["T".to_string(), "C".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "TAAAA".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "TAAAA".to_string(),]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 101, vec!["T".to_string(), "C".to_string()]));
         lst3.push( generate_var2(3, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert_eq!(vlst1.lst[2].alleles, exp.lst[2].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
@@ -1001,22 +1011,22 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "C".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 102, vec!["T".to_string(), "C".to_string()]));
         lst2.push( generate_var2(3, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "CTT".to_string(), "T".to_string(), "TTC".to_string()]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
@@ -1029,21 +1039,21 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 102, vec!["TCC".to_string(), "T".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTTCC".to_string(), "TCC".to_string(),"TTT".to_string()]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
@@ -1056,21 +1066,21 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 101, vec!["T".to_string(), "TCCC".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string(), "TTCCCT".to_string()]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
@@ -1082,22 +1092,22 @@ mod tests {
         lst1.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "T".to_string()]));
         lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string()]));
         lst2.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["T".to_string(), "G".to_string(), "C".to_string()]));
         lst2.push( generate_var2(2, 0, "chr1".to_string(), 101, vec!["T".to_string(), "TCCC".to_string()]));
         lst2.push( generate_var2(3, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 0, "chr1".to_string(), 5, vec!["A".to_string(), "G".to_string(),]));
         lst3.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["TTT".to_string(), "CTT".to_string(), "GTT".to_string(), "T".to_string(), "TTCCCT".to_string()]));
         lst3.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));
     }
@@ -1109,18 +1119,18 @@ mod tests {
         lst1.push( generate_var2(0, 19, "chr20".to_string(), 5898747, vec!["GAA".to_string(), "G".to_string()]));
         lst1.push( generate_var2(1, 19, "chr20".to_string(), 5898749, vec!["ACT".to_string(), "A".to_string()]));
         lst1.push( generate_var2(2, 19, "chr20".to_string(), 5898751, vec!["T".to_string(), "A".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push( generate_var2(0, 19, "chr20".to_string(), 5898748, vec!["A".to_string(), "C".to_string()]));
         lst2.push( generate_var2(1, 19, "chr20".to_string(), 5898751, vec!["T".to_string(), "A".to_string()]));
-        let mut vlst2 = VarList::new(lst2);
+        let mut vlst2 = VarList::new(lst2).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 19, "chr20".to_string(), 5898747, vec!["GAACT".to_string(), "GAA".to_string(), "GAACA".to_string(), "GCACT".to_string(), "GCT".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
 
 
         assert_ne!(vlst1.lst.len(), 0);
@@ -1135,15 +1145,15 @@ mod tests {
         lst1.push( generate_var2(0, 19, "chr20".to_string(), 42449920, vec!["AAAGCTT".to_string(), "A".to_string()]));
         lst1.push( generate_var2(1, 19, "chr20".to_string(), 42449926, vec!["T".to_string(), "TAA".to_string()]));
         lst1.push( generate_var2(2, 19, "chr20".to_string(), 42449926, vec!["T".to_string(), "TAA".to_string()]));
-        let mut vlst1 = VarList::new(lst1);
+        let mut vlst1 = VarList::new(lst1).unwrap();
 
-        let mut vlst2 = VarList::new(vec![]);
+        let mut vlst2 = VarList::new(vec![]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push( generate_var2(0, 19, "chr20".to_string(), 42449920, vec!["AAAGCTT".to_string(), "A".to_string(), "AAAGCTTAA".to_string()]));
-        let exp = VarList::new(lst3);
+        let exp = VarList::new(lst3).unwrap();
 
-        vlst1.combine(&mut vlst2);
+        vlst1.combine(&mut vlst2).unwrap();
         assert_ne!(vlst1.lst.len(), 0);
         assert_eq!(vlst1.lst[0].alleles, exp.lst[0].alleles);
         assert!(varlist_pos_alleles_eq(vlst1, exp));

@@ -266,7 +266,7 @@ pub fn estimate_alignment_parameters(bam_file: &String,
                                      max_cigar_indel: u32)
                                      -> Result<AlignmentParameters> {
 
-    let t_names = parse_target_names(&bam_file);
+    let t_names = parse_target_names(&bam_file)?;
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
     let mut fasta = fasta::IndexedReader::from_file(fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
@@ -290,7 +290,7 @@ pub fn estimate_alignment_parameters(bam_file: &String,
         not_equal: 1
     };
 
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
     let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
