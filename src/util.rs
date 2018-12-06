@@ -2,6 +2,9 @@ use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use chrono::prelude::*;
 use errors::*;
+use clap::ArgMatches;
+use bio::stats::{LogProb,Prob};
+
 
 pub static INDEX_FREQ: usize = 1000;
 pub static MAX_VCF_QUAL: f64 = 500.0;
@@ -13,6 +16,60 @@ pub fn print_time() -> String {
 // use this spacer instead of calling print_time() to have the spaces match up with
 // lines that document the time
 pub static SPACER: &str = "                   ";
+
+
+pub fn parse_u8(argmatch: &ArgMatches, arg_name: &str) -> Result<u8> {
+    let parse_result: u8 = argmatch.value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<u8>()
+        .chain_err(|| format!("{} must be an integer between 0 and 255!", arg_name))?;
+    Ok(parse_result)
+}
+
+pub fn parse_u32(argmatch: &ArgMatches, arg_name: &str) -> Result<u32> {
+    let parse_result: u32 = argmatch.value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<u32>()
+        .chain_err(|| format!("{} must be a positive integer!", arg_name))?;
+    Ok(parse_result)
+}
+
+pub fn parse_usize(argmatch: &ArgMatches, arg_name: &str) -> Result<usize> {
+    let parse_result: usize = argmatch.value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<usize>()
+        .chain_err(|| format!("{} must be a positive integer!", arg_name))?;
+    Ok(parse_result)
+}
+
+pub fn parse_positive_f64(argmatch: &ArgMatches, arg_name: &str) -> Result<f64> {
+    let parse_result: f64 = argmatch.value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<f64>()
+        .chain_err(|| format!("{} must be a positive float!", arg_name))?;
+    ensure!(parse_result > 0.0, format!("{} must be a positive float!", arg_name));
+    Ok(parse_result)
+}
+
+pub fn parse_prob_into_logprob(argmatch: &ArgMatches, arg_name: &str) -> Result<LogProb> {
+    let parse_result: f64 = argmatch.value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<f64>()
+        .chain_err(|| format!("{} must be a float between 0.0 and 1.0!", arg_name))?;
+    ensure!(parse_result >= 0.0 && parse_result <= 1.0, format!("{} must be a float between 0.0 and 1.0!", arg_name));
+    Ok(LogProb::from(Prob(parse_result)))
+}
+
+pub fn parse_flag(argmatch: &ArgMatches, arg_name: &str) -> Result<bool> {
+    let is_flag_set = match argmatch.occurrences_of(arg_name) {
+        0 => false,
+        1 => true,
+        _ => {
+            bail!(format!("{} cannot be specified multiple times.", arg_name));
+        }
+    };
+    Ok(is_flag_set)
+}
 
 // this is really ugly. TODO a less verbose implementation
 pub fn parse_region_string(region_string: Option<&str>,

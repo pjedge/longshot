@@ -259,7 +259,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             vcf_buffer.push(vcf_line);
         }
 
-        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall).chain_err(|| "Error generating fragment list buffer.")?;
+        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall, false).chain_err(|| "Error generating fragment list buffer.")?;
         let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
 
         call_hapcut2(&frag_buffer,

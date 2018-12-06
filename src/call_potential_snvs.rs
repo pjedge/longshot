@@ -25,6 +25,7 @@ use genotype_probs::*;
 pub static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
 
+/// Calls potential SNV sites using pileup-based approach
 pub fn call_potential_snvs(bam_file: &String,
                            fasta_file: &String,
                            interval: &Option<GenomicInterval>,

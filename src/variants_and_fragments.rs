@@ -824,7 +824,7 @@ mod tests {
     fn test_varlist_sort1() {
         let mut vlst_unsorted = generate_test_lst1_unsorted1();
 
-        vlst_unsorted.sort();
+        vlst_unsorted.sort().unwrap();
         vlst_unsorted.assert_sorted();
     }
 
@@ -832,7 +832,7 @@ mod tests {
     fn test_varlist_sort2() {
         let mut vlst_unsorted = generate_test_lst1_unsorted2();
 
-        vlst_unsorted.sort();
+        vlst_unsorted.sort().unwrap();
         vlst_unsorted.assert_sorted();
     }
 
