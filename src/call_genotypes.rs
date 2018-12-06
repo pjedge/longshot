@@ -97,11 +97,21 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
 
         let genotype_qual:f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
+        let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
+        let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
+
+        if var.dp < allele_total {
+            var.dp = allele_total;
+        }
+
         var.qual = *PHREDProb::from(posts.get(Genotype(0,0)));
         if var.qual > MAX_VCF_QUAL {
             var.qual = MAX_VCF_QUAL;
         }
+
         var.genotype = max_g;
+        var.allele_counts = allele_counts;
+        var.ambiguous_count = ambig_count;
         var.unphased_genotype = max_g;
         var.gq = genotype_qual;
         var.unphased_gq = genotype_qual;
