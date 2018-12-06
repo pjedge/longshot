@@ -326,15 +326,11 @@ fn run() -> Result<()> {
 
 
     // parse the input arguments and throw errors if inputs are invalid
-
     let bamfile_name = input_args.value_of("Input BAM").chain_err(|| "Input BAM file not defined.")?.to_string();
     let fasta_file = input_args.value_of("Input FASTA").chain_err(|| "Input FASTA file not defined.")?.to_string();
     let output_vcf_file = input_args.value_of("Output VCF").chain_err(|| "Output VCF file not defined.")?.to_string();
-
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name)?;
-
-    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
     let force = parse_flag(&input_args, "Force overwrite")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
@@ -343,47 +339,37 @@ fn run() -> Result<()> {
     let short_hap_max_snvs: usize = parse_usize(&input_args,"Short haplotype max SNVs")?;
     let max_window_padding: usize = parse_usize(&input_args,"Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args,"Max CIGAR indel")?;
-
     let min_allele_qual: f64 = parse_positive_f64(&input_args,"Min allele quality")?;
-    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
-
     let hap_assignment_qual: f64 = parse_positive_f64(&input_args,"Haplotype assignment quality")?;
-    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(hap_assignment_qual));
-
     let ll_delta: f64 = parse_positive_f64(&input_args,"Haplotype Convergence Delta")?;
-    ensure!(ll_delta < 1.0, format!("Haplotype Convergence Delta must be less than 1.0!"));
-
     let potential_snv_cutoff_phred = parse_positive_f64(&input_args,"Haplotype assignment quality")?;
-    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(potential_snv_cutoff_phred));
-
     let hom_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous SNV Rate")?;
     let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
     let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
     let het_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous Indel Rate")?;
-
     let sample_name: String = input_args.value_of(&"Sample ID").chain_err(|| "Sample ID not defined.")?.to_string();
+    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
 
-    // check if the output VCF file exists
-    // if it does, and the --force_overwrite option is set, then delete and overwrite it
-    // otherwise throw an error complaining that file exists
+    // sanity checks on values that aren't covered by parsing functions
+    ensure!(ll_delta < 1.0, format!("Haplotype Convergence Delta must be less than 1.0!"));
+
+    // manipulations to get some of the option values into forms we want
+    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
+    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(hap_assignment_qual));
+    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(potential_snv_cutoff_phred));
+
+    // if VCF file exists, throw error unless --force_overwrite option is set
     let vcf = Path::new(&output_vcf_file);
-    if vcf.is_file() {
-        if !force {
-            bail!("Variant output file already exists. Rerun with -F option to force overwrite.");
-        }
-    }
+    ensure!(!vcf.is_file()||force, "Variant output file already exists. Rerun with -F option to force overwrite.");
 
     // ensure that BAM file is indexed
     let bai_str = bamfile_name.clone() + ".bai";
-    if !Path::new(&bai_str).is_file() {
-        bail!("BAM file must be indexed with samtools index. Index file should have same name as BAM file with .bai appended.");
-    }
+    ensure!(Path::new(&bai_str).is_file(), "BAM file must be indexed with samtools index. Index file should have same name as BAM file with .bai appended.");
 
     // ensure that FASTA file is indexed
     let fai_str = fasta_file.clone() + ".fai";
-    if !Path::new(&fai_str).is_file() {
-        bail!("FASTA reference file must be indexed with samtools faidx. Index file should have same name as FASTA file with .fai appended.");
-    }
+    ensure!(Path::new(&fai_str).is_file(), "FASTA reference file must be indexed with samtools faidx. Index file should have same name as FASTA file with .fai appended.");
+
 
     // check if variant debug directory exists
     // if it does, delete the directory if --force_overwrite option is set or throw an error
@@ -457,13 +443,13 @@ fn run() -> Result<()> {
     }
 
     let extract_fragment_parameters = ExtractFragmentParameters {
-        min_mapq: min_mapq,
-        alignment_type: alignment_type,
-        band_width: band_width,
-        anchor_length: anchor_length,
-        short_hap_max_snvs: short_hap_max_snvs,
-        max_window_padding: max_window_padding,
-        max_cigar_indel: max_cigar_indel
+        min_mapq,
+        alignment_type,
+        band_width,
+        anchor_length,
+        short_hap_max_snvs,
+        max_window_padding,
+        max_cigar_indel
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());
@@ -535,16 +521,20 @@ fn run() -> Result<()> {
     // if we're printing out variant "debug" information, print out a fragment file to that debug directory
     match &variant_debug_directory {
         &Some(ref debug_dir) => {
-            // normally phase_variant is used to select which variants are heterozygous, so that
-            // we only pass to HapCUT2 heterozygous variants
-            // in this case, we set them all to 1 so we generate fragments for all variants
+
             let ffn = match Path::new(&debug_dir).join(&"fragments.txt").to_str() {
                 Some(s) => {s.to_owned()},
                 None => {bail!("Invalid unicode provided for variant debug directory");}
             };
+            // normally phase_variant is used to select which variants are heterozygous, so that
+            // we only pass to HapCUT2 heterozygous variants
+            // in this case, we set them all to 1 so we generate fragments for all variants
             let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
+            // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
+            // together the lines represent the contents of a fragment file in HapCUT-like format
             let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true).chain_err(|| "Error generating fragment list buffer.")?;
 
+            // convert the buffer of u8s into strings and print them to the fragment file
             let fragment_file_path = Path::new(&ffn);
             let mut fragment_file = File::create(&fragment_file_path).chain_err(|| "Could not open fragment file for writing.")?;
             for mut line_u8 in fragment_buffer {
@@ -645,6 +635,7 @@ fn run() -> Result<()> {
     calculate_mec(&flist, &mut varlist, max_p_miscall).chain_err(|| "Error calculating MEC for haplotype blocks.")?;
 
     eprintln!("{} Calculating fraction of reads assigned to either haplotype...",print_time());
+    // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
     let (h1,h2) = separate_fragments_by_haplotype(&flist,
                                                   LogProb::from(Prob(1.0 - hap_max_p_misassign)));
 
