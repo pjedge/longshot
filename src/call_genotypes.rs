@@ -1,3 +1,10 @@
+//! This module contains functions for calling diploid genotypes.
+//!
+//! It has functions for calling genotypes without haplotype information (basic pileup-based
+//! calculation similar to samtools), as well as a function for refining genotypes by iteratively
+//! assembling haplotypes.
+
+// use declarations
 use bio::stats::{PHREDProb, LogProb, Prob};
 use util::{MAX_VCF_QUAL, GenomicInterval, DensityParameters};
 use variants_and_fragments::*;
@@ -6,26 +13,50 @@ use genotype_probs::*;
 use haplotype_assembly::{generate_flist_buffer, call_hapcut2};
 use chrono::prelude::*;
 use errors::*;
-//use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
 
+/// Takes a vector of fragments and returns a vector of "allele pileups"
+///
+/// The allele pileup of a variant site is the list of all allele observations (FragCalls) that occur at that site.
+///
+/// # Arguments
+/// - flist: a vector of Fragments
+/// - n_var: the total number of variants (e.g. the length of VarList)
+///
+/// # Returns
+/// Returns the allele pileups for all variant sites as a vector of vectors.
+/// The outer vector is indexed by variant index (same index as VarList) and contains the allele
+/// pileup for that variant, represented as a vector of of FragCalls.
+///
+/// # Example
+/// see ```call_genotypes::tests::test_generate_fragcall_pileup()```
 fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
-
     for fragment in flist {
         for call in fragment.clone().calls {
-
             pileup_lst[call.var_ix].push(call);
-
         }
     }
     pileup_lst
 }
 
+/// Counts the number of each allele in an allele pileup
+///
+/// # Arguments
+/// - pileup: an allele pileup for some variant site (represented as a vector of ```FragCalls```)
+/// - num_alleles: how many alleles does this variant site have (2 for biallelic, 3 for triallelic...)
+/// - max_p_miscall: the maximum probability of an allele miscall to count the allele (equivalent
+///                  to the minimum allowed allele quality, but represented as a normal probability
+///                  rather than PHRED-scaled)
+///
+/// # Returns
+/// Returns a tuple containing ```(counts, count_amb)``` where ```counts``` has length ```num_alleles```
+/// and contains the count for each allele (```counts[0]``` is the reference allele, etc).
+/// ```counts_amb``` is the number of ambiquous alleles that fell beneath the quality cutoff.
 fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64) -> (Vec<usize>, usize) {
     // compute probabilities of data given each genotype
-    let mut counts: Vec<usize> = vec![0; num_alleles];
-    let mut count_amb = 0; // ambiguous
+    let mut counts: Vec<usize> = vec![0; num_alleles]; // counts for each allele
+    let mut count_amb = 0; // ambiguous allele count
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
     for call in pileup {
@@ -39,6 +70,23 @@ fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64)
     (counts, count_amb)
 }
 
+/// Calculates the posterior probabilities for a pileup-based genotyping calculation (without using
+/// haplotype information)
+///
+/// # Arguments
+/// - pileup: an allele pileup for some variant site (represented as a vector of ```FragCalls```)
+/// - genotype_priors: a struct holding the genotype prior probabilities
+/// - alleles: a vector of the alleles (as Strings) for this variant site. ```alleles[0]``` should
+///            be the ref allele, and alleles must be in same order as the allele indices held in the
+///            pileup ```FragCalls```.
+///
+/// # Returns
+/// Returns a Result holding a ```GenotypeProbs``` struct.
+/// These ```GenotypeProbs``` hold the posterior genotype probabilities for each genotype
+/// calculated from the allele pileup
+///
+/// # Errors
+/// - Can throw an error if attempts to query ```genotype_priors``` using an invalid genotype
 pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
                                                    genotype_priors: &GenotypePriors,
                                                    alleles: &Vec<String>,
@@ -79,6 +127,12 @@ pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
     Ok(posts)
 }
 
+/// Calls genotypes for each variant in the ```VarList``` using a pileup-based genotyping calculation
+/// (without using haplotype information)
+///
+/// #Arguments
+/// -flist: a vector of Fragment structs
+/// - 
 pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) -> Result<()> {
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
 
@@ -613,4 +667,78 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         prev_likelihood = total_likelihood;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    //use rand::Rng;
+
+    #[test]
+    fn test_generate_fragcall_pileup() {
+
+        let fcall = |f_ix,v_ix,a| {
+            FragCall {
+                frag_ix: Some(f_ix), // index into fragment list
+                var_ix: v_ix, // index into variant list
+                allele: a, // allele call
+                qual: LogProb::from(Prob(0.01)), // LogProb probability the call is an error
+                one_minus_qual: LogProb::from(Prob(0.99)), // LogProb probability the call is correct
+            }
+        };
+        let p50 = LogProb::from(Prob(0.5));
+        // in this example assume the haplotype pair is (0000,1111)
+
+        // first fragment
+        let f0v0 = fcall(0,0,1);
+        let f0v1 = fcall(0,1,1);
+        let f0v2 = fcall(0,2,1);
+        let f0v3 = fcall(0,3,1);
+        let f0 = Fragment{id:"f0".to_string(),
+                          calls: vec![f0v0,f0v1,f0v2,f0v3],
+                          p_read_hap: [p50,p50]};
+        // second fragment
+        let f1v0 = fcall(1,0,0);
+        let f1v1 = fcall(1,1,0);
+        let f1v2 = fcall(1,2,0);
+        let f1 = Fragment{id:"f1".to_string(),
+            calls: vec![f1v0,f1v1,f1v2],
+            p_read_hap: [p50,p50]};
+        // third fragment
+        let f2v1 = fcall(2,1,1);
+        let f2v2 = fcall(2,2,1);
+        let f2v3 = fcall(2,3,1);
+        let f2 = Fragment{id:"f2".to_string(),
+            calls: vec![f2v1,f2v2,f2v3],
+            p_read_hap: [p50,p50]};
+
+        // the fragment list looks like this (rows are fragments and columns are variant sites)
+
+        // f0: 1111
+        // f1: 000-
+        // f2: -111
+
+        // so the pileups should look like this
+        // rows are variant sites containing alleles over that site and columns are not significant
+        // p0: 10
+        // p1: 101
+        // p2: 101
+        // p3: 11
+
+        let expected_pileups = vec![vec![f0v0,f1v0],
+                                                     vec![f0v1,f1v1,f2v1],
+                                                     vec![f0v2,f1v2,f2v2],
+                                                     vec![f0v3,f2v3]];
+
+        let pileups = generate_fragcall_pileup(&vec![f0,f1,f2], 4);
+
+        for i in 0..4 {
+            assert_eq!(pileups[i].len(), expected_pileups[i].len());
+            for j in 0..pileups[i].len() {
+                assert_eq!(pileups[i][j].frag_ix, expected_pileups[i][j].frag_ix);
+                assert_eq!(pileups[i][j].var_ix, expected_pileups[i][j].var_ix);
+                assert_eq!(pileups[i][j].allele, expected_pileups[i][j].allele);
+            }
+        }
+    }
 }
