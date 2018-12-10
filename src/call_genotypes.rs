@@ -9,6 +9,7 @@ use errors::*;
 //use std::ops::range;
 use rand::{Rng,StdRng,SeedableRng};
 
+//
 fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
 
