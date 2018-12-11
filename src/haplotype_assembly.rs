@@ -90,13 +90,13 @@ pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<
     Ok(())
 }
 
-pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Result<Vec<Vec<u8>>> {
+pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64, single_reads: bool) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
-        let mut blocks = 0;
-        let mut n_calls = 0;
+        let mut blocks: usize = 0;
+        let mut n_calls: usize = 0;
 
         for c in frag.clone().calls {
             if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
@@ -107,7 +107,10 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
                 prev_call = c.var_ix
             }
         }
-        if n_calls < 2 {
+        if !single_reads && n_calls == 1 {
+            continue;
+        }
+        if n_calls == 0 {
             continue;
         }
 

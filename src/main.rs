@@ -1,8 +1,17 @@
+//! Longshot
+//!
+//! Longshot is a diploid SNV caller for single molecule sequencing (SMS) reads such as PacBio
+//!
+//! Author: Peter Edge
+//!
+//! Contact: edge.peterj@gmail.com
+
 #![allow(dead_code)]
 
 // `error_chain!` can recurse deeply
 #![recursion_limit = "1024"]
 
+// external crates
 extern crate bio;
 extern crate clap;
 extern crate rust_htslib;
@@ -14,15 +23,8 @@ extern crate rand;
 #[macro_use]
 extern crate error_chain;
 
-/*
-Longshot
-
-Longshot is a diploid SNV caller for single molecule sequencing (SMS) reads such as PacBio
-Author: Peter Edge
-Contact: edge.peterj at gmail.com
-*/
-
 // import modules
+mod errors;
 mod haplotype_assembly;
 mod call_potential_snvs;
 mod extract_fragments; //mod extract_fragments_debug;
@@ -31,11 +33,12 @@ mod realignment;
 mod util;
 mod estimate_read_coverage;
 mod estimate_alignment_parameters;
-//mod spoa;
 mod variants_and_fragments;
 mod print_output;
 mod genotype_probs;
+//mod spoa;
 
+// use declarations
 use clap::{Arg, App};
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
@@ -44,6 +47,7 @@ use std::fs::File;
 use std::path::Path;
 use errors::*;
 use call_genotypes::*;
+use util::{parse_flag, parse_u8, parse_u32, parse_usize, parse_positive_f64, parse_prob_into_logprob};
 use util::*;
 use estimate_read_coverage::calculate_mean_coverage;
 use estimate_alignment_parameters::estimate_alignment_parameters;
@@ -57,106 +61,11 @@ use haplotype_assembly::*;
 //use haplotype_assembly::separate_reads_by_haplotype;
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 
-// define some custom errors
-mod errors {
-    error_chain!{
-        errors {
-            // BAM errors
-            BamOpenError {
-                description("Error opening BAM file.")
-            }
-            BamWriterOpenError(f: String) {
-                description("Error opening BAM file for writing")
-                display(x) -> ("{}: {}", x.description(), f)
-            }
-            BamRecordWriteError(qname: String) {
-                description("Error writing record to bam file")
-                display(x) -> ("{}: qname {}", x.description(), qname)
-            }
-            BamHeaderTargetLenAccessError {
-                description("Error accessing target len for a contig in bam header.")
-            }
-            // Indexed BAM errors
-            IndexedBamOpenError {
-                description("Error opening indexed BAM file.")
-            }
-            IndexedBamReadError {
-                description("Error reading indexed BAM file.")
-            }
-            IndexedBamFetchError {
-                description("Error fetching region from indexed BAM file.")
-            }
-            IndexedBamRecordReadError {
-                description("Error reading BAM pileup.")
-            }
-            IndexedBamPileupReadError {
-                description("Error reading BAM pileup.")
-            }
-            IndexedBamPileupQueryPositionError {
-                description("Error accessing query position for alignment in BAM pileup.")
-            }
-            // Indexed Fasta errors
-            IndexedFastaOpenError {
-                description("Error reading indexed FASTA file.")
-            }
-            IndexedFastaReadError {
-                description("Error reading indexed FASTA file.")
-            }
-            // Indexed BAM errors
-            BCFOpenError {
-                description("Error opening BCF file.")
-            }
-            BCFReadError {
-                description("Error reading BCF file.")
-            }
-            // CIGAR errors
-            // derived from Rust-htslib errors defined with quick-error... https://github.com/rust-bio/rust-htslib/blob/master/src/bam/record.rs
-            UnexpectedCigarOperation(msg: String) {
-                description("Unexpected CIGAR operation")
-                display(x) -> ("{}: {}", x.description(), msg)
-            }
-            UnsupportedCigarOperation(msg: String) {
-                description("Unsupported CIGAR operation")
-                display(x) -> ("{}: {}", x.description(), msg)
-            }
-            // Read realignment errors
-            AnchorRangeOutsideRead {
-                description("Attempted to find sequence anchors for a range completely outside of the sequence.")
-            }
-            // Gentotype priors errors
-            InvalidTransitionBase(base: String) {
-                description("Invalid base accessed from base transition hashmap")
-                display(x) -> ("{}: {}", x.description(), base)
-            }
-            InvalidHaploidGenotype(refbase: char, altbase: char) {
-                description("Invalid base accessed from base transition hashmap")
-                display(x) -> ("{}: ref {}, alt {}", x.description(), refbase, altbase)
-            }
-            GenotypeNotInGenotypePriorsError(refbase: char, g0: char, g1: char) {
-                description("Genotype not in genotype priors.")
-                display(x) -> ("{}: ref {}, genotype ({},{})", x.description(), refbase, g0, g1)
-            }
-            // File IO errors
-            FileWriteError (filename: String){
-                description("Couldn't write to file")
-                display(x) -> ("{}: {}", x.description(), filename)
-            }
-            CreateFileError (filename: String){
-                description("Couldn't create file")
-                display(x) -> ("{}: {}", x.description(), filename)
-            }
-            // File IO errors
-            NoneError {
-                description("Option was None.")
-            }
-        }
-    }
-}
-
-// the main function using error-chain recommended practice
-// http://brson.github.io/2016/11/30/starting-with-error-chain
-// execute the run() function (which contains the whole program)
-// if program fails grab the chain of errors incurred and print them with nonzero exit code (and any backtrace)
+/// The main function
+///
+/// The main function follows the [error-chain recommended practice](http://brson.github.io/2016/11/30/starting-with-error-chain)
+/// It execute the run() function (which contains the entirety of the program logic)
+/// If the program fails, grab the chain of errors incurred and print them with nonzero exit code (and any backtrace)
 fn main() {
     if let Err(ref e) = run() {
         println!("error: {}", e);
@@ -170,11 +79,29 @@ fn main() {
     }
 }
 
-// this function effectively contains the entire Longshot program
+/// The run function
+///
+/// The run function contains the whole program logic as per [error-chain recommended practice](http://brson.github.io/2016/11/30/starting-with-error-chain)
+///
+/// # Outline of steps performed
+/// 1. Retrieve and process command line arguments
+/// 2. If --auto_max_cov is set, calculate mean read coverage and use it to estimate max read coverage
+/// 3. Traverse the CIGARs in the bam file to estimate the HMM alignment parameters
+/// 4. Use pileup-based approach to call potential SNVs
+/// 5. Extract haplotype fragment information (alleles/qualities per site per read) from reads using Pair-HMM realignment
+/// 6. Calculate genotypes for each site using the estimated alleles/qualities without using haplotype information
+/// 7. Iteratively assemble haplotypes and refine genotypes
+/// 8. Print output VCF
+///
+/// # Errors
+/// - errors returned by any of the function calls deeper in the program
+/// - if various command-line arguments are specified multiple times or with invalid values
+/// - if a file/directory already exists and -F option isn't set (e.g. vcf output or vcf debug directory)
+/// - input bam file isn't indexed
 fn run() -> Result<()> {
 
     /***********************************************************************************************/
-    // READ STANDARD INPUT
+    // READ COMMAND LINE ARGUMENTS
     /***********************************************************************************************/
 
     eprintln!("");
@@ -183,11 +110,6 @@ fn run() -> Result<()> {
         .version("0.2.0")
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
-        .arg(Arg::with_name("Auto max coverage")
-            .short("A")
-            .long("auto_max_cov")
-            .help("Automatically calculate mean coverage for region and set max coverage to mean_coverage + 5*sqrt(mean_coverage). (SLOWER)")
-            .display_order(3))
         .arg(Arg::with_name("Input BAM")
                 .short("b")
                 .long("bam")
@@ -200,7 +122,7 @@ fn run() -> Result<()> {
                 .short("f")
                 .long("ref")
                 .value_name("FASTA")
-                .help("indexed fasta reference that BAM file is aligned to")
+                .help("indexed FASTA reference that BAM file is aligned to")
                 .display_order(20)
                 .required(true)
                 .takes_value(true))
@@ -233,6 +155,11 @@ fn run() -> Result<()> {
             .value_name("BAM")
             .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
             .display_order(50))
+        .arg(Arg::with_name("Auto max coverage")
+            .short("A")
+            .long("auto_max_cov")
+            .help("Automatically calculate mean coverage for region and set max coverage to mean_coverage + 5*sqrt(mean_coverage). (SLOWER)")
+            .display_order(75))
         .arg(Arg::with_name("Min coverage")
             .short("c")
             .long("min_cov")
@@ -397,46 +324,55 @@ fn run() -> Result<()> {
             .display_order(210))
         .get_matches();
 
+
+    // parse the input arguments and throw errors if inputs are invalid
     let bamfile_name = input_args.value_of("Input BAM").chain_err(|| "Input BAM file not defined.")?.to_string();
     let fasta_file = input_args.value_of("Input FASTA").chain_err(|| "Input FASTA file not defined.")?.to_string();
     let output_vcf_file = input_args.value_of("Output VCF").chain_err(|| "Output VCF file not defined.")?.to_string();
-
     let interval: Option<GenomicInterval> = parse_region_string(input_args.value_of("Region"),
                                                                 &bamfile_name)?;
-
-    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
-
-    let force = match input_args.occurrences_of("Force overwrite") {
-        0 => false,
-        1 => true,
-        _ => {
-            bail!("force_overwrite specified multiple times");
-        }
-    };
-
-    let no_haps = match input_args.occurrences_of("No haplotypes") {
-        0 => false,
-        1 => true,
-        _ => {
-            bail!("no_haps specified multiple times");
-        }
-    };
-
-    let vcf = Path::new(&output_vcf_file);
-    if vcf.is_file() {
-        if !force {
-            bail!("Variant output file already exists. Rerun with -F option to force overwrite.");
-        }
-    }
-
-    let bai_str = bamfile_name.clone() + ".bai";
-    if !Path::new(&bai_str).is_file() {
-        bail!("BAM file must be indexed with samtools index. Index file should have same name with .bai appended.");
-    }
-
+    let force = parse_flag(&input_args, "Force overwrite")?;
+    let no_haps = parse_flag(&input_args, "No haplotypes")?;
+    let min_mapq: u8 = parse_u8(&input_args,"Min mapq")?;
+    let anchor_length: usize = parse_usize(&input_args,"Anchor length")?;
+    let short_hap_max_snvs: usize = parse_usize(&input_args,"Short haplotype max SNVs")?;
+    let max_window_padding: usize = parse_usize(&input_args,"Max window padding")?;
+    let max_cigar_indel: usize = parse_usize(&input_args,"Max CIGAR indel")?;
+    let min_allele_qual: f64 = parse_positive_f64(&input_args,"Min allele quality")?;
+    let hap_assignment_qual: f64 = parse_positive_f64(&input_args,"Haplotype assignment quality")?;
+    let ll_delta: f64 = parse_positive_f64(&input_args,"Haplotype Convergence Delta")?;
+    let potential_snv_cutoff_phred = parse_positive_f64(&input_args,"Haplotype assignment quality")?;
+    let hom_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous SNV Rate")?;
+    let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
+    let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
+    let het_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous Indel Rate")?;
     let sample_name: String = input_args.value_of(&"Sample ID").chain_err(|| "Sample ID not defined.")?.to_string();
+    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
 
+    // sanity checks on values that aren't covered by parsing functions
+    ensure!(ll_delta < 1.0, format!("Haplotype Convergence Delta must be less than 1.0!"));
+
+    // manipulations to get some of the option values into forms we want
+    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
+    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(hap_assignment_qual));
+    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(potential_snv_cutoff_phred));
+
+    // if VCF file exists, throw error unless --force_overwrite option is set
+    let vcf = Path::new(&output_vcf_file);
+    ensure!(!vcf.is_file()||force, "Variant output file already exists. Rerun with -F option to force overwrite.");
+
+    // ensure that BAM file is indexed
+    let bai_str = bamfile_name.clone() + ".bai";
+    ensure!(Path::new(&bai_str).is_file(), "BAM file must be indexed with samtools index. Index file should have same name as BAM file with .bai appended.");
+
+    // ensure that FASTA file is indexed
+    let fai_str = fasta_file.clone() + ".fai";
+    ensure!(Path::new(&fai_str).is_file(), "FASTA reference file must be indexed with samtools faidx. Index file should have same name as FASTA file with .fai appended.");
+
+
+    // check if variant debug directory exists
+    // if it does, delete the directory if --force_overwrite option is set or throw an error
     let variant_debug_directory: Option<String> = match input_args.value_of("Variant debug directory") {
         Some(dir) => {
             let p = Path::new(&dir);
@@ -453,89 +389,9 @@ fn run() -> Result<()> {
         None => None,
     };
 
-    let min_mapq: u8 = input_args.value_of("Min mapq")
-        .chain_err(|| "Min mapq not defined.")?
-        .parse::<u8>()
-        .chain_err(|| "Argument min_mapq must be an integer between 0 and 255!")?;
-
-    let anchor_length: usize = input_args.value_of("Anchor length")
-        .chain_err(|| "Anchor length not defined.")?
-        .parse::<usize>()
-        .chain_err(|| "Argument anchor_length must be a positive integer!")?;
-
-    let short_hap_max_snvs: usize = input_args.value_of("Short haplotype max SNVs")
-        .chain_err(|| "Short haplotype max SNVs not defined.")?
-        .parse::<usize>()
-        .chain_err(|| "Argument max_snvs must be a positive integer!")?;
-
-    let max_window_padding: usize = input_args.value_of("Max window padding")
-        .chain_err(|| "Max window padding not defined.")?
-        .parse::<usize>()
-        .chain_err(|| "Argument max_window must be a positive integer!")?;
-
-    let max_cigar_indel: usize = input_args.value_of("Max CIGAR indel")
-        .chain_err(|| "Max CIGAR indel not defined.")?
-        .parse::<usize>()
-        .chain_err(|| "Argument max_cigar_indel must be a positive integer!")?;
-
-    let min_allele_qual: f64 = input_args.value_of("Min allele quality")
-        .chain_err(|| "Min allele quality not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument max_mec_frac must be a positive float!")?;
-
-    if min_allele_qual <= 0.0 {
-        bail!("Min allele quality must be a positive float.");
-    }
-
-    let hap_assignment_qual: f64 = input_args.value_of("Haplotype assignment quality")
-        .chain_err(|| "Haplotype assignment quality not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument hap_assignment_qual must be a positive float!")?;
-
-    if hap_assignment_qual <= 0.0 {
-        bail!("Haplotype assignment quality must be a positive float.");
-    }
-
-    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
-
-    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(min_allele_qual));
-
-    let ll_delta: f64 = input_args.value_of("Haplotype Convergence Delta")
-        .chain_err(|| "Haplotype convergence delta not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument hap_converge_delta must be a positive float!")?;
-
-    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(input_args.value_of("Potential SNV Cutoff")
-        .chain_err(|| "Potential SNV Cutoff not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument potential_snv_cutoff must be a positive float!")?));
-
-    let hom_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous SNV Rate")
-        .chain_err(|| "Homozygous SNV rate not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument hom_snv_rate must be a positive float!")?));
-
-    let het_snv_rate: LogProb = LogProb::from(Prob(input_args.value_of("Heterozygous SNV Rate")
-        .chain_err(|| "Heterozygous SNV rate not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument het_snv_rate must be a positive float!")?));
-
-    let hom_indel_rate: LogProb = LogProb::from(Prob(input_args.value_of("Homozygous Indel Rate")
-        .chain_err(|| "Homozygous Indel Rate not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument hom_indel_rate must be a positive float!")?));
-
-    let het_indel_rate: LogProb = LogProb::from(Prob(input_args.value_of("Heterozygous Indel Rate")
-        .chain_err(|| "Heterozygous Indel rate not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument het_indel_rate must be a positive float!")?));
-
     // multiply by 2.0 because internally we use this value as the probability of transition to
     // a single transversion base, not the combined probability of transversion to either one
-    let ts_tv_ratio = 2.0 * input_args.value_of("ts/tv Ratio")
-        .chain_err(|| "Ts/tv ratio not defined.")?
-        .parse::<f64>()
-        .chain_err(|| "Argument ts_tv_ratio must be a positive float!")?;
+    let ts_tv_ratio = 2.0 * parse_positive_f64(&input_args,"ts/tv Ratio")?;
 
     let dn_params = input_args.value_of("Density parameters")
         .chain_err(|| "Density parameters not defined.")?
@@ -551,74 +407,31 @@ fn run() -> Result<()> {
 
     let density_params = DensityParameters{n: dn_count, len: dn_len, gq: dn_gq as f64};
 
-    let mut alignment_type = AlignmentType::FastAllAlignment;
-
-    match input_args.occurrences_of("Numerically stable alignment") {
-        0 => {},
-        1 => {alignment_type = AlignmentType::NumericallyStableAllAlignment;},
-        _ => {
-            bail!("stable_alignment specified multiple times");
-        }
+    let alignment_type = match (parse_flag(&input_args,"Numerically stable alignment")?,
+                                    parse_flag(&input_args,"Max alignment")?) {
+        (false, false) => AlignmentType::FastAllAlignment,
+        (true, false) => AlignmentType::NumericallyStableAllAlignment,
+        (false, true) => AlignmentType::MaxAlignment,
+        (true, true) => {bail!("Numerically stable alignment option and max alignment options are incompatible.");},
     };
 
-    match input_args.occurrences_of("Max alignment") {
-        0 => {},
-        1 => {
-            if alignment_type == AlignmentType::NumericallyStableAllAlignment {
-                bail!("Numerically stable alignment option and max alignment options are incompatible. The max alignment algorihm is by design numerically stable.");
-            }
-            alignment_type = AlignmentType::MaxAlignment;
-        },
-        _ => {
-            bail!("max_alignment specified multiple times");
-        }
-    };
+    let band_width: usize = parse_usize(&input_args,"Band width")?;
+    //let use_poa = parse_flag(&input_args, "Use POA");
+    let min_cov: u32 = parse_u32(&input_args, "Min coverage")?;
 
-    /*let debug_allele_realignment: bool = match input_args.occurrences_of("Debug Allele Realignment") {
-        0 => {false},
-        1 => {true},
-        _ => {bail!("debug_allele_realignment specified multiple times");}
-    };*/
-
-    let band_width: usize = input_args.value_of("Band width")
-        .chain_err(|| "Band width not defined.")?
-        .parse::<usize>()
-        .chain_err(|| "Argument band_width must be a positive integer!")?;
-
-    /*
-    let use_poa = match input_args.occurrences_of("Use POA") {
-        0 => false,
-        1 => true,
-        _ => {
-            bail!("Use POA specified multiple times");
-        }
-    };*/
-
-    let min_cov: u32 = input_args.value_of("Min coverage")
-        .chain_err(|| "Min coverage not defined.")?
-        .parse::<u32>()
-        .chain_err(|| "Argument min_cov must be a positive integer!")?;
-
-    let max_cov: u32 = match input_args.occurrences_of("Auto max coverage") {
-        0 => {
+    let max_cov: u32 = match parse_flag(&input_args,"Auto max coverage")? {
+        false => {
             // manually assigned coverage cutoff from user
-             input_args.value_of("Max coverage")
-                 .chain_err(|| "Max coverage not defined.")?
-                 .parse::<u32>()
-                 .chain_err(|| "Argument max_cov must be a positive integer!")?
+            parse_u32(&input_args, "Max coverage")?
         },
-        1 => {
+        true => {
             eprintln!("{} Automatically determining max read coverage.",print_time());
             eprintln!("{} Estimating mean read coverage...",print_time());
             let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval).chain_err(|| "Error calculating mean coverage for BAM file.")?;
             let calculated_max_cov = (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
-
             eprintln!("{} Mean read coverage: {:.2}",print_time(), mean_coverage);
 
             calculated_max_cov
-        },
-        _ => {
-            bail!("auto_max_cov specified multiple times");
         }
     };
 
@@ -630,20 +443,20 @@ fn run() -> Result<()> {
     }
 
     let extract_fragment_parameters = ExtractFragmentParameters {
-        min_mapq: min_mapq,
-        alignment_type: alignment_type,
-        band_width: band_width,
-        anchor_length: anchor_length,
-        short_hap_max_snvs: short_hap_max_snvs,
-        max_window_padding: max_window_padding,
-        max_cigar_indel: max_cigar_indel
+        min_mapq,
+        alignment_type,
+        band_width,
+        anchor_length,
+        short_hap_max_snvs,
+        max_window_padding,
+        max_cigar_indel
     };
 
     eprintln!("{} Estimating alignment parameters...",print_time());
     let alignment_parameters = estimate_alignment_parameters(&bamfile_name, &fasta_file, &interval, min_mapq, max_cigar_indel as u32).chain_err(|| "Error estimating alignment parameters.")?;
 
     /***********************************************************************************************/
-    // GET HUMAN GENOTYPE PRIORS
+    // GET GENOTYPE PRIORS
     /***********************************************************************************************/
 
     let genotype_priors = GenotypePriors::new(hom_snv_rate, het_snv_rate,
@@ -692,19 +505,6 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    /*if debug_allele_realignment {
-
-        extract_fragments_debug::extract_fragments_debug(&bamfile_name,
-                                             &fasta_file,
-                                             &varlist,
-                                             &interval,
-                                             extract_fragment_parameters,
-                                             alignment_parameters,
-                                             None);
-
-        bail!("{} Allele realignment debugging complete. Exiting...");
-    }*/
-
     /***********************************************************************************************/
     // EXTRACT FRAGMENT INFORMATION FROM READS
     /***********************************************************************************************/
@@ -721,16 +521,20 @@ fn run() -> Result<()> {
     // if we're printing out variant "debug" information, print out a fragment file to that debug directory
     match &variant_debug_directory {
         &Some(ref debug_dir) => {
-            // normally phase_variant is used to select which variants are heterozygous, so that
-            // we only pass to HapCUT2 heterozygous variants
-            // in this case, we set them all to 1 so we generate fragments for all variants
+
             let ffn = match Path::new(&debug_dir).join(&"fragments.txt").to_str() {
                 Some(s) => {s.to_owned()},
                 None => {bail!("Invalid unicode provided for variant debug directory");}
             };
+            // normally phase_variant is used to select which variants are heterozygous, so that
+            // we only pass to HapCUT2 heterozygous variants
+            // in this case, we set them all to 1 so we generate fragments for all variants
             let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
-            let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall).chain_err(|| "Error generating fragment list buffer.")?;
+            // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
+            // together the lines represent the contents of a fragment file in HapCUT-like format
+            let mut fragment_buffer = generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true).chain_err(|| "Error generating fragment list buffer.")?;
 
+            // convert the buffer of u8s into strings and print them to the fragment file
             let fragment_file_path = Path::new(&ffn);
             let mut fragment_file = File::create(&fragment_file_path).chain_err(|| "Could not open fragment file for writing.")?;
             for mut line_u8 in fragment_buffer {
@@ -750,14 +554,15 @@ fn run() -> Result<()> {
 
     print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"2.0.realigned_genotypes.vcf", max_cov, &density_params, &sample_name)?;
 
-
-    /***********************************************************************************************/
-    // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
-    /***********************************************************************************************/
+    // if haplotype information usage is turned off, immediately print VCF and terminate.
     if no_haps {
         print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false).chain_err(|| "Error printing VCF output.")?;
         return Ok(());
     }
+    /***********************************************************************************************/
+    // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
+    /***********************************************************************************************/
+
     eprintln!("{} Iteratively assembling haplotypes and refining genotypes...",print_time());
     call_genotypes_with_haplotypes(&mut flist, &mut varlist, &interval, &genotype_priors,
                                    &variant_debug_directory, 3, max_cov, &density_params, max_p_miscall,
@@ -826,13 +631,16 @@ fn run() -> Result<()> {
     };
     */
 
+    // calculate MEC-based statistics for variants and blocks
     calculate_mec(&flist, &mut varlist, max_p_miscall).chain_err(|| "Error calculating MEC for haplotype blocks.")?;
 
-    let debug_filename = "4.0.final_genotypes.vcf";
-
     eprintln!("{} Calculating fraction of reads assigned to either haplotype...",print_time());
+    // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
     let (h1,h2) = separate_fragments_by_haplotype(&flist,
                                                   LogProb::from(Prob(1.0 - hap_max_p_misassign)));
+
+    // if haplotype-based read separation is turned on,
+    // write BAM files for h1,h2, and unassigned
     match hap_bam_prefix {
         Some(p) => {
             eprintln!("{} Writing haplotype-assigned reads to bam files...",print_time());
@@ -841,9 +649,9 @@ fn run() -> Result<()> {
         None => {}
     }
 
-
+    // Print the final VCF output
     eprintln!("{} Printing VCF file...",print_time());
-    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, &debug_filename, max_cov, &density_params, &sample_name)?;
+    print_variant_debug(&mut varlist, &interval,&variant_debug_directory, "4.0.final_genotypes.vcf", max_cov, &density_params, &sample_name)?;
     print_vcf(&mut varlist, &interval, &output_vcf_file, false, max_cov, &density_params, &sample_name, false).chain_err(|| "Error printing VCF output.")?;
 
     Ok(())
