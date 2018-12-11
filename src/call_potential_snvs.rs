@@ -1,49 +1,66 @@
 //! This module contains the function used for identifying potential SNV sites.
-//!
-//! This is performed by performing a relatively standard
 
 extern crate rust_htslib;
 
-use rust_htslib::bam;
-use rust_htslib::prelude::*;
-use bio::io::fasta;
 use std::char;
-use util::*; // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
-use variants_and_fragments::*;
+use std::collections::HashMap;
+
+use bio::io::fasta;
+//,HashSet};
+use bio::stats::LogProb;
+use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
-use std::collections::{HashMap}; //,HashSet};
-use bio::stats::{LogProb};
-use call_genotypes::{calculate_genotype_posteriors_no_haplotypes};
-//use spoa::poa_multiple_sequence_alignment;
-use realignment::{LnAlignmentParameters};
+use rust_htslib::prelude::*;
+
+use call_genotypes::calculate_genotype_posteriors_no_haplotypes;
 use errors::*;
-
-
 //use std::str;
 //use bio::alignment::Alignment;
 //use bio::alignment::pairwise::banded::*;
 //use bio::alignment::AlignmentOperation::*;
 use genotype_probs::*;
+//use spoa::poa_multiple_sequence_alignment;
+use realignment::LnAlignmentParameters;
+use util::*;
+// {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
+use variants_and_fragments::*;
 
 pub static VARLIST_CAPACITY: usize = 1000000;
 static VERBOSE: bool = false; //true;
 
-/// Calls potential SNV sites using pileup-based approach
-pub fn call_potential_snvs(bam_file: &String,
-                           fasta_file: &String,
-                           interval: &Option<GenomicInterval>,
-                           genotype_priors: &GenotypePriors,
-                           min_coverage: u32,
-                           max_coverage: u32,
-                           min_mapq: u8,
-                           max_p_miscall: f64,
-                           ln_align_params: LnAlignmentParameters,
-                           potential_snv_cutoff: LogProb)
-                           -> Result<VarList> {
-
+/// Calls potential SNV sites using a pileup-based genotyping calculation
+///
+/// Potential SNVs are identified by performing a relatively standard pileup-based
+/// genotyping calculation. Despite the fact that SMS read alignments around SNVs are inaccurate,
+/// some of reads should be correctly aligned and indicate the presence of a SNV. So for every site
+/// in the genome, we perform a genotyping calculation and consider every site meeting a low threshold
+/// for variant evidence (by default, probability of non-reference genotype > 0.001) as a potential SNV
+///
+/// #Errors
+/// - ```IndexedFastaOpenError```: error opening the indexed FASTA file
+/// - ```IndexedBamOpenError```: error opening the indexed BAM file
+/// - ```IndexedBamFetchError```: error fetching a region from the indexed BAM file
+/// - ```IndexedBamPileupReadError```: error retrieving pileup from indexed BAM file
+/// - ```IndexedFastaReadError```: error reading an entry from the indexed FASTA file
+/// - ```IndexedBamPileupQueryPositionError```: error accessing the query position from the BAM pileup
+/// - Error calculating genotype posteriors for reference genotype qual calculation (usually having to
+///          do with accessing invalid genotypes)
+pub fn call_potential_snvs(
+    bam_file: &String,
+    fasta_file: &String,
+    interval: &Option<GenomicInterval>,
+    genotype_priors: &GenotypePriors,
+    min_coverage: u32,
+    max_coverage: u32,
+    min_mapq: u8,
+    max_p_miscall: f64,
+    ln_align_params: LnAlignmentParameters,
+    potential_snv_cutoff: LogProb,
+) -> Result<VarList> {
     let target_names = parse_target_names(&bam_file)?;
 
-    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
+    let mut fasta = fasta::IndexedReader::from_file(&fasta_file)
+        .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
@@ -63,23 +80,28 @@ pub fn call_potential_snvs(bam_file: &String,
     // or a totally separate pileup from the unindexed file if not.
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(||ErrorKind::IndexedBamOpenError)?;
+    let mut bam_ix =
+        bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).chain_err(||ErrorKind::IndexedBamFetchError)?;
+        bam_ix
+            .fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1)
+            .chain_err(|| ErrorKind::IndexedBamFetchError)?;
         let bam_pileup = bam_ix.pileup();
         //bam_pileup.set_max_depth(100000000);
         let mut next_valid_pos = 0;
 
         for p in bam_pileup {
-            let pileup = p.chain_err(||ErrorKind::IndexedBamPileupReadError)?;
+            let pileup = p.chain_err(|| ErrorKind::IndexedBamPileupReadError)?;
 
             let tid: usize = pileup.tid() as usize;
             let chrom: String = target_names[tid].clone();
 
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                fasta
+                    .read_all(&chrom, &mut ref_seq_u8)
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
                 next_valid_pos = 0;
             }
@@ -91,10 +113,16 @@ pub fn call_potential_snvs(bam_file: &String,
                 continue;
             }
 
-            let l_window = if pileup.pos() >= 10 {pileup.pos() as usize - 10} else {0};
+            let l_window = if pileup.pos() >= 10 {
+                pileup.pos() as usize - 10
+            } else {
+                0
+            };
             let mut r_window = pileup.pos() as usize + 11;
-            if r_window >= ref_seq.len() {r_window = ref_seq.len();}
-            let sequence_context: String = (ref_seq[l_window .. r_window]).iter().collect::<String>();
+            if r_window >= ref_seq.len() {
+                r_window = ref_seq.len();
+            }
+            let sequence_context: String = (ref_seq[l_window..r_window]).iter().collect::<String>();
 
             let ref_base_str = (ref_seq[pileup.pos() as usize]).to_string();
 
@@ -102,7 +130,12 @@ pub fn call_potential_snvs(bam_file: &String,
                 continue;
             }
 
-            assert!(ref_base_str == a_str || ref_base_str == c_str || ref_base_str == g_str || ref_base_str == t_str);
+            assert!(
+                ref_base_str == a_str
+                    || ref_base_str == c_str
+                    || ref_base_str == g_str
+                    || ref_base_str == t_str
+            );
 
             //let mut counts = [0; 5]; // A,C,G,T,N
             let mut counts: HashMap<(String, String), usize> = HashMap::new();
@@ -123,17 +156,30 @@ pub fn call_potential_snvs(bam_file: &String,
                 let record = alignment.record();
 
                 // may be faster to implement this as bitwise operation on raw flag in the future?
-                if record.is_secondary() || record.is_quality_check_failed() ||
-                    record.is_duplicate() || record.is_supplementary() {
+                if record.is_secondary()
+                    || record.is_quality_check_failed()
+                    || record.is_duplicate()
+                    || record.is_supplementary()
+                {
                     continue;
                 }
 
                 passing_reads += 1;
-                if record.mapq() >= 10 {mq10 += 1.0};
-                if record.mapq() >= 20 {mq20 += 1.0};
-                if record.mapq() >= 30 {mq30 += 1.0};
-                if record.mapq() >= 40 {mq40 += 1.0};
-                if record.mapq() >= 50 {mq50 += 1.0};
+                if record.mapq() >= 10 {
+                    mq10 += 1.0
+                };
+                if record.mapq() >= 20 {
+                    mq20 += 1.0
+                };
+                if record.mapq() >= 30 {
+                    mq30 += 1.0
+                };
+                if record.mapq() >= 40 {
+                    mq40 += 1.0
+                };
+                if record.mapq() >= 50 {
+                    mq50 += 1.0
+                };
 
                 if record.is_unmapped() || record.mapq() < min_mapq {
                     continue;
@@ -147,15 +193,20 @@ pub fn call_potential_snvs(bam_file: &String,
 
                     match alignment.indel() {
                         Indel::None => {
-                            ref_allele =
-                                (ref_seq[pos] as char).to_string().to_uppercase();
+                            ref_allele = (ref_seq[pos] as char).to_string().to_uppercase();
 
-                            let base: char = alignment.record().seq()[alignment.qpos().chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?] as char;
+                            let base: char =
+                                alignment.record().seq()
+                                    [alignment.qpos().chain_err(|| {
+                                        ErrorKind::IndexedBamPileupQueryPositionError
+                                    })?] as char;
 
                             var_allele = base.to_string().to_uppercase();
-                        },
+                        }
                         Indel::Ins(l) => {
-                            let start = alignment.qpos().chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?;
+                            let start = alignment
+                                .qpos()
+                                .chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?;
                             let end = start + l as usize + 1;
                             // don't want to convert whole seq to bytes...
                             let mut var_char: Vec<char> = vec![];
@@ -172,22 +223,24 @@ pub fn call_potential_snvs(bam_file: &String,
 
                             ref_allele = match ref_seq.get(pos) {
                                 Some(&r) => (r as char).to_string().to_uppercase(),
-                                None => "N".to_string()
+                                None => "N".to_string(),
                             };
 
                             var_allele = var_char.into_iter().collect::<String>().to_uppercase();
-                        },
+                        }
                         Indel::Del(l) => {
                             let start = pos;
                             let end: usize = pos + l as usize + 1;
 
                             ref_allele = ref_seq[start..end].iter().collect();
                             var_allele = (ref_seq[pos] as char).to_string().to_uppercase();
-                        },
+                        }
                     }
 
                     pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
-                    *counts.entry((ref_allele.clone(), var_allele.clone())).or_insert(0) += 1;
+                    *counts
+                        .entry((ref_allele.clone(), var_allele.clone()))
+                        .or_insert(0) += 1;
                 }
             }
 
@@ -233,7 +286,9 @@ pub fn call_potential_snvs(bam_file: &String,
             //let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
 
             for (ref_allele, var_allele) in pileup_alleles {
-                let a = if (ref_allele.clone(), var_allele.clone()) == (snv_ref_allele.clone(), snv_var_allele.clone()) {
+                let a = if (ref_allele.clone(), var_allele.clone())
+                    == (snv_ref_allele.clone(), snv_var_allele.clone())
+                {
                     1u8
                 } else {
                     0u8
@@ -242,9 +297,9 @@ pub fn call_potential_snvs(bam_file: &String,
                 let qual = ln_align_params.emission_probs.not_equal;
 
                 let call = FragCall {
-                    frag_ix: None, // index into fragment list
-                    var_ix: 0, // index into variant list
-                    allele: a, // allele call
+                    frag_ix: None,                                    // index into fragment list
+                    var_ix: 0,                                        // index into variant list
+                    allele: a,                                        // allele call
                     qual: qual, // LogProb probability the call is an error
                     one_minus_qual: LogProb::ln_one_minus_exp(&qual), // LogProb probability the call is correct
                 };
@@ -254,7 +309,12 @@ pub fn call_potential_snvs(bam_file: &String,
             // use a basic genotype likelihood calculation to call SNVs
             let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
             let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
-                let snv_post = calculate_genotype_posteriors_no_haplotypes(&snv_pileup_calls, &genotype_priors, &alleles, max_p_miscall).chain_err(|| "Error getting genotype posteriors for calling potential SNVs.")?;
+                let snv_post = calculate_genotype_posteriors_no_haplotypes(
+                    &snv_pileup_calls,
+                    &genotype_priors,
+                    &alleles,
+                    max_p_miscall,
+                ).chain_err(|| "Error getting genotype posteriors for calling potential SNVs.")?;
                 LogProb::ln_one_minus_exp(&snv_post.get(Genotype(0, 0)))
             } else {
                 LogProb::ln_zero()
@@ -264,10 +324,12 @@ pub fn call_potential_snvs(bam_file: &String,
 
             next_valid_pos = (pos + 1) as u32;
 
-            if qual > potential_snv_cutoff &&
-                !ref_allele.contains("N") && !var_allele.contains("N") &&
-                (ref_allele.clone(), var_allele.clone()) !=
-                    (ref_base_str.clone(), ref_base_str.clone()) {
+            if qual > potential_snv_cutoff
+                && !ref_allele.contains("N")
+                && !var_allele.contains("N")
+                && (ref_allele.clone(), var_allele.clone())
+                    != (ref_base_str.clone(), ref_base_str.clone())
+            {
                 let tid: usize = pileup.tid() as usize;
                 let new_var = Var {
                     ix: 0,
@@ -289,8 +351,8 @@ pub fn call_potential_snvs(bam_file: &String,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
                     mec: 0,
-                    mec_frac_variant: 0.0,  // mec fraction for this variant
-                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    mec_frac_variant: 0.0, // mec fraction for this variant
+                    mec_frac_block: 0.0,   // mec fraction for this haplotype block
                     mean_allele_qual: 0.0,
                     dp_any_mq: passing_reads,
                     mq10_frac,
@@ -299,7 +361,7 @@ pub fn call_potential_snvs(bam_file: &String,
                     mq40_frac,
                     mq50_frac,
                     sequence_context,
-                    called: false
+                    called: false,
                 };
 
                 // we don't want potential SNVs that are inside a deletion, for instance.

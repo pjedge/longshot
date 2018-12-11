@@ -9,7 +9,7 @@ static ALLOW_END_GAPS: bool = false;
 pub enum AlignmentType {
     FastAllAlignment,
     NumericallyStableAllAlignment,
-    MaxAlignment
+    MaxAlignment,
 }
 
 // these parameters describe state transition probabilities for a pair HMM
@@ -59,7 +59,7 @@ pub struct EmissionProbs {
     pub equal: f64,
     pub not_equal: f64,
     pub insertion: f64,
-    pub deletion: f64
+    pub deletion: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -67,7 +67,7 @@ pub struct LnEmissionProbs {
     pub equal: LogProb,
     pub not_equal: LogProb,
     pub insertion: LogProb,
-    pub deletion: LogProb
+    pub deletion: LogProb,
 }
 
 impl EmissionProbs {
@@ -76,7 +76,7 @@ impl EmissionProbs {
             equal: LogProb::from(Prob(self.equal)),
             not_equal: LogProb::from(Prob(self.not_equal)),
             insertion: LogProb::from(Prob(self.insertion)),
-            deletion: LogProb::from(Prob(self.deletion))
+            deletion: LogProb::from(Prob(self.deletion)),
         }
     }
 }
@@ -84,30 +84,30 @@ impl EmissionProbs {
 #[derive(Clone, Copy)]
 pub struct AlignmentParameters {
     pub transition_probs: TransitionProbs,
-    pub emission_probs: EmissionProbs
+    pub emission_probs: EmissionProbs,
 }
 
 #[derive(Clone, Copy)]
 pub struct LnAlignmentParameters {
     pub transition_probs: LnTransitionProbs,
-    pub emission_probs: LnEmissionProbs
+    pub emission_probs: LnEmissionProbs,
 }
 
 impl AlignmentParameters {
     pub fn ln(&self) -> LnAlignmentParameters {
         LnAlignmentParameters {
             transition_probs: self.transition_probs.ln(),
-            emission_probs: self.emission_probs.ln()
+            emission_probs: self.emission_probs.ln(),
         }
     }
 }
 
-pub fn sum_all_alignments(v: &Vec<char>,
-                          w: &Vec<char>,
-                          params: AlignmentParameters,
-                          min_band_width: usize)
-                          -> (LogProb) {
-
+pub fn sum_all_alignments(
+    v: &Vec<char>,
+    w: &Vec<char>,
+    params: AlignmentParameters,
+    min_band_width: usize,
+) -> (LogProb) {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
 
@@ -132,7 +132,6 @@ pub fn sum_all_alignments(v: &Vec<char>,
     let e = params.emission_probs;
 
     for i in 1..(v.len() + 1) {
-
         let band_middle = (w.len() * i) / v.len();
         let band_start = if band_middle >= band_width / 2 + 1 {
             band_middle - band_width / 2
@@ -152,13 +151,13 @@ pub fn sum_all_alignments(v: &Vec<char>,
                 if i == 1 {
                     lower_curr[0] = params.transition_probs.insertion_from_match
                 } else {
-                    lower_curr[0] = lower_prev[0] * params.transition_probs.insertion_from_insertion;
+                    lower_curr[0] =
+                        lower_prev[0] * params.transition_probs.insertion_from_insertion;
                 }
             }
         }
 
         for j in band_start..(band_end + 1) {
-
             let lower_continue = lower_prev[j] * t.insertion_from_insertion;
             let lower_from_middle = middle_prev[j] * t.insertion_from_match;
             lower_curr[j] = e.insertion * (lower_continue + lower_from_middle);
@@ -170,8 +169,13 @@ pub fn sum_all_alignments(v: &Vec<char>,
             let middle_from_lower = lower_prev[j - 1] * t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] * t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] * t.match_from_deletion;
-            let match_emission: f64 = if v[i - 1] == w[j - 1] { e.equal } else { e.not_equal };
-            middle_curr[j] = match_emission * (middle_from_lower + middle_continue + middle_from_upper);
+            let match_emission: f64 = if v[i - 1] == w[j - 1] {
+                e.equal
+            } else {
+                e.not_equal
+            };
+            middle_curr[j] =
+                match_emission * (middle_from_lower + middle_continue + middle_from_upper);
         }
 
         for j in band_start..(band_end + 1) {
@@ -183,7 +187,6 @@ pub fn sum_all_alignments(v: &Vec<char>,
         upper_curr[band_start] = 0.0;
         middle_curr[band_start] = 0.0;
         lower_curr[band_start] = 0.0;
-
     }
 
     if middle_prev[w.len()] != 0.0 {
@@ -193,12 +196,12 @@ pub fn sum_all_alignments(v: &Vec<char>,
     }
 }
 
-pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
-                                             w: &Vec<char>,
-                                             params: LnAlignmentParameters,
-                                             min_band_width: usize)
-                                             -> (LogProb) {
-
+pub fn sum_all_alignments_numerically_stable(
+    v: &Vec<char>,
+    w: &Vec<char>,
+    params: LnAlignmentParameters,
+    min_band_width: usize,
+) -> (LogProb) {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
 
@@ -214,7 +217,6 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
     let e = params.emission_probs;
 
     if ALLOW_END_GAPS {
-
         upper_prev[1] = params.transition_probs.deletion_from_match;
         for j in 2..(w.len() + 1) {
             upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
@@ -222,7 +224,6 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
     }
 
     for i in 1..(v.len() + 1) {
-
         let band_middle = (w.len() * i) / v.len();
         let band_start = if band_middle >= band_width / 2 + 1 {
             band_middle - band_width / 2
@@ -236,19 +237,18 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
         };
 
         if ALLOW_END_GAPS {
-
             if band_start == 1 {
                 middle_curr[0] = LogProb::ln_zero();
                 if i == 1 {
                     lower_curr[0] = params.transition_probs.insertion_from_match
                 } else {
-                    lower_curr[0] = lower_prev[0] + params.transition_probs.insertion_from_insertion;
+                    lower_curr[0] =
+                        lower_prev[0] + params.transition_probs.insertion_from_insertion;
                 }
             }
         }
 
         for j in band_start..(band_end + 1) {
-
             let lower_continue = lower_prev[j] + t.insertion_from_insertion;
             let lower_from_middle = middle_prev[j] + t.insertion_from_match;
             lower_curr[j] = e.insertion + LogProb::ln_add_exp(lower_continue, lower_from_middle);
@@ -261,7 +261,11 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
             let middle_continue = middle_prev[j - 1] + t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] + t.match_from_deletion;
             let options3 = [middle_from_lower, middle_continue, middle_from_upper];
-            let match_emission: LogProb = if v[i - 1] == w[j - 1] { e.equal } else { e.not_equal };
+            let match_emission: LogProb = if v[i - 1] == w[j - 1] {
+                e.equal
+            } else {
+                e.not_equal
+            };
             middle_curr[j] = match_emission + LogProb::ln_sum_exp(&options3);
         }
 
@@ -274,17 +278,17 @@ pub fn sum_all_alignments_numerically_stable(v: &Vec<char>,
         upper_curr[band_start] = LogProb::ln_zero();
         middle_curr[band_start] = LogProb::ln_zero();
         lower_curr[band_start] = LogProb::ln_zero();
-
     }
 
     middle_prev[w.len()]
 }
 
-pub fn max_alignment(v: &Vec<char>,
-                     w: &Vec<char>,
-                     params: LnAlignmentParameters,
-                     min_band_width: usize) -> LogProb {
-
+pub fn max_alignment(
+    v: &Vec<char>,
+    w: &Vec<char>,
+    params: LnAlignmentParameters,
+    min_band_width: usize,
+) -> LogProb {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
 
@@ -299,7 +303,6 @@ pub fn max_alignment(v: &Vec<char>,
     let t = params.transition_probs;
     let e = params.emission_probs;
 
-
     if ALLOW_END_GAPS {
         upper_prev[1] = params.transition_probs.deletion_from_match;
         for j in 2..(w.len() + 1) {
@@ -308,7 +311,6 @@ pub fn max_alignment(v: &Vec<char>,
     }
 
     for i in 1..(v.len() + 1) {
-
         let band_middle = (w.len() * i) / v.len();
         let band_start = if band_middle >= band_width / 2 + 1 {
             band_middle - band_width / 2
@@ -327,20 +329,28 @@ pub fn max_alignment(v: &Vec<char>,
                 if i == 1 {
                     lower_curr[0] = params.transition_probs.insertion_from_match
                 } else {
-                    lower_curr[0] = lower_prev[0] + params.transition_probs.insertion_from_insertion;
+                    lower_curr[0] =
+                        lower_prev[0] + params.transition_probs.insertion_from_insertion;
                 }
             }
         }
 
         for j in band_start..(band_end + 1) {
-
             let lower_continue = lower_prev[j] + t.insertion_from_insertion;
             let lower_from_middle = middle_prev[j] + t.insertion_from_match;
-            lower_curr[j] = if lower_continue > lower_from_middle {e.insertion+lower_continue} else {e.insertion+lower_from_middle};
+            lower_curr[j] = if lower_continue > lower_from_middle {
+                e.insertion + lower_continue
+            } else {
+                e.insertion + lower_from_middle
+            };
 
             let upper_continue = upper_curr[j - 1] + t.deletion_from_deletion;
             let upper_from_middle = middle_curr[j - 1] + t.deletion_from_match;
-            upper_curr[j] = if upper_continue > upper_from_middle {e.deletion+upper_continue} else {e.deletion+upper_from_middle};
+            upper_curr[j] = if upper_continue > upper_from_middle {
+                e.deletion + upper_continue
+            } else {
+                e.deletion + upper_from_middle
+            };
 
             let middle_from_lower = lower_prev[j - 1] + t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] + t.match_from_match;
@@ -352,7 +362,11 @@ pub fn max_alignment(v: &Vec<char>,
                     max_option = option;
                 }
             }
-            let match_emission: LogProb = if v[i - 1] == w[j - 1] { e.equal } else { e.not_equal };
+            let match_emission: LogProb = if v[i - 1] == w[j - 1] {
+                e.equal
+            } else {
+                e.not_equal
+            };
             middle_curr[j] = match_emission + max_option;
         }
 
@@ -365,7 +379,6 @@ pub fn max_alignment(v: &Vec<char>,
         upper_curr[band_start] = LogProb::ln_zero();
         middle_curr[band_start] = LogProb::ln_zero();
         lower_curr[band_start] = LogProb::ln_zero();
-
     }
 
     middle_prev[w.len()]

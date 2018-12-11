@@ -1,25 +1,36 @@
-
-use bio::stats::{PHREDProb};
-use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
-use variants_and_fragments::{VarList, var_filter};
-use genotype_probs::Genotype;
+use bio::stats::PHREDProb;
 use errors::*;
-use std::io::prelude::*;
+use genotype_probs::Genotype;
 use std::fs::File;
+use std::io::prelude::*;
 use std::path::Path;
+use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
+use variants_and_fragments::{var_filter, VarList};
 
-
-pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, output_vcf_file: &String,
-                 print_reference_genotype: bool, max_cov: u32, density_params: &DensityParameters,
-                 sample_name: &String, print_outside_region: bool) -> Result<()> {
-
+pub fn print_vcf(
+    varlist: &mut VarList,
+    interval: &Option<GenomicInterval>,
+    output_vcf_file: &String,
+    print_reference_genotype: bool,
+    max_cov: u32,
+    density_params: &DensityParameters,
+    sample_name: &String,
+    print_outside_region: bool,
+) -> Result<()> {
     // first, add filter flags for variant density
-    var_filter(varlist, density_params.gq, density_params.len, density_params.n, max_cov);
+    var_filter(
+        varlist,
+        density_params.gq,
+        density_params.len,
+        density_params.n,
+        max_cov,
+    );
 
     let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
     // Open a file in write-only mode, returns `io::Result<File>`
-    let mut file = File::create(&vcf_path).chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
+    let mut file = File::create(&vcf_path)
+        .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
     let headerstr = format!("##fileformat=VCFv4.2
 ##source=ReaperV0.1
@@ -49,20 +60,21 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
     //"##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
     //##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
     //##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">"
-    writeln!(file, "{}", headerstr).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+    writeln!(file, "{}", headerstr)
+        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
 
     for var in &varlist.lst {
-
         assert!(var.alleles.len() >= 2);
         assert!(var.allele_counts.len() == var.alleles.len());
         assert!(var.genotype_post.n_alleles() == var.alleles.len());
 
         match interval {
             &Some(ref iv) => {
-                if !print_outside_region &&
-                    (var.chrom != iv.chrom ||
-                    var.pos0 < iv.start_pos as usize ||
-                    var.pos0 > iv.end_pos as usize) {
+                if !print_outside_region
+                    && (var.chrom != iv.chrom
+                        || var.pos0 < iv.start_pos as usize
+                        || var.pos0 > iv.end_pos as usize)
+                {
                     continue;
                 }
             }
@@ -70,17 +82,23 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
         }
 
         if !print_reference_genotype {
-            if var.genotype == Genotype(0,0) {
+            if var.genotype == Genotype(0, 0) {
                 continue;
             }
         }
 
         let ps = match var.phase_set {
             Some(ps) => format!("{}", ps),
-            None => ".".to_string()
+            None => ".".to_string(),
         };
 
-        let allele_counts_str = var.allele_counts.clone().iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",");
+        let allele_counts_str = var
+            .allele_counts
+            .clone()
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>()
+            .join(",");
         let mut post_vec: Vec<String> = vec![];
         for g in var.possible_genotypes() {
             post_vec.push(format!("{:.2}", *PHREDProb::from(var.genotype_post.get(g))));
@@ -97,14 +115,18 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
 
         let sep = match var.phase_set {
             Some(_) => "|",
-            None => "/"
+            None => "/",
         };
 
         let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
-        let unphased_genotype_str = vec![var.unphased_genotype.0.to_string(), var.unphased_genotype.1.to_string()].join("/");
+        let unphased_genotype_str = vec![
+            var.unphased_genotype.0.to_string(),
+            var.unphased_genotype.1.to_string(),
+        ].join("/");
 
         let genotypes_match: usize = (var.genotype == var.unphased_genotype
-            || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype) as usize;
+            || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype)
+            as usize;
 
         writeln!(file,
                        "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
@@ -139,16 +161,33 @@ pub fn print_vcf(varlist: &mut VarList, interval: &Option<GenomicInterval>, outp
     Ok(())
 }
 
-pub fn print_variant_debug(varlist: &mut VarList, interval: &Option<GenomicInterval>,
-                           variant_debug_directory: &Option<String>, debug_filename: &str,
-                           max_cov: u32, density_params: &DensityParameters, sample_name: &String) -> Result<()> {
+pub fn print_variant_debug(
+    varlist: &mut VarList,
+    interval: &Option<GenomicInterval>,
+    variant_debug_directory: &Option<String>,
+    debug_filename: &str,
+    max_cov: u32,
+    density_params: &DensityParameters,
+    sample_name: &String,
+) -> Result<()> {
     match variant_debug_directory {
         &Some(ref dir) => {
             let outfile = match Path::new(&dir).join(&debug_filename).to_str() {
-                Some(s) => {s.to_owned()},
-                None => {bail!("Invalid unicode provided for variant debug directory");}
+                Some(s) => s.to_owned(),
+                None => {
+                    bail!("Invalid unicode provided for variant debug directory");
+                }
             };
-            print_vcf(varlist, &interval,&outfile, true, max_cov, density_params, sample_name, true).chain_err(|| "Error printing debug VCF file.")?;
+            print_vcf(
+                varlist,
+                &interval,
+                &outfile,
+                true,
+                max_cov,
+                density_params,
+                sample_name,
+                true,
+            ).chain_err(|| "Error printing debug VCF file.")?;
         }
         &None => {}
     };
