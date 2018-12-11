@@ -34,6 +34,7 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
     for fragment in flist {
         for call in fragment.clone().calls {
+            // push the fragment call to the pileup for the variant that the fragment call covers
             pileup_lst[call.var_ix].push(call);
         }
     }
@@ -54,20 +55,22 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 /// and contains the count for each allele (```counts[0]``` is the reference allele, etc).
 /// ```counts_amb``` is the number of ambiquous alleles that fell beneath the quality cutoff.
 fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64) -> (Vec<usize>, usize) {
-    // compute probabilities of data given each genotype
+
     let mut counts: Vec<usize> = vec![0; num_alleles]; // counts for each allele
     let mut count_amb = 0; // ambiguous allele count
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
     for call in pileup {
         if call.qual < ln_max_p_miscall {
+            // allele call meets cutoff
             counts[call.allele as usize] += 1;
         } else {
+            // allele is ambiguously called
             count_amb += 1;
         }
     }
 
-    (counts, count_amb)
+    (counts, count_amb) // return counts
 }
 
 /// Calculates the posterior probabilities for a pileup-based genotyping calculation (without using
@@ -79,6 +82,9 @@ fn count_alleles(pileup: &Vec<FragCall>, num_alleles: usize, max_p_miscall: f64)
 /// - alleles: a vector of the alleles (as Strings) for this variant site. ```alleles[0]``` should
 ///            be the ref allele, and alleles must be in same order as the allele indices held in the
 ///            pileup ```FragCalls```.
+/// - max_p_miscall: the maximum probability of an allele miscall to count the allele (equivalent
+///                  to the minimum allowed allele quality, but represented as a normal probability
+///                  rather than PHRED-scaled)
 ///
 /// # Returns
 /// Returns a Result holding a ```GenotypeProbs``` struct.
@@ -93,9 +99,10 @@ pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
                                                    max_p_miscall: f64) -> Result<GenotypeProbs> {
 
     let ln_max_p_miscall: LogProb = LogProb::from(Prob(max_p_miscall));
-    let ln_half: LogProb = LogProb::from(Prob(0.5));
+    let ln_half: LogProb = LogProb::from(Prob(0.5)); // ln(0.5)
 
-    // this matrix holds P(data | g) * p(g)
+    // this probability matrix initially holds the genotype priors p(g),
+    // and after the loop it holds P(data | g) * p(g)
     let mut probs: GenotypeProbs = genotype_priors.get_all_priors(alleles).chain_err(|| "Error getting all genotype priors while calculating genotypes.")?;
 
     for &call in pileup {
@@ -105,62 +112,88 @@ pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
         let p_call = call.one_minus_qual;
 
         if p_miscall >= ln_max_p_miscall {
-            continue;
+            continue; // allele call fails allele quality cutoff, do not use
         }
 
-        // for each possible genotype, update the P(data | g) * p(g)
+        // for each possible genotype (e.g. there are 4 possible genotypes for biallelic site)
+        // update the genotype probabilities as we calculate P(data | g) * p(g)
         for g in possible_genotypes(alleles) {
-            if g.0 == allele && g.1 == allele {
+            if g.0 == allele && g.1 == allele {        // both alleles of genotype match this allele observation
                 probs.ln_times_equals(g, p_call);
-            } else if g.0 != allele && g.1 != allele {
+            } else if g.0 != allele && g.1 != allele { // neither alleles of genotype match this allele observation
                 probs.ln_times_equals(g, p_miscall);
-            } else {
+            } else {                                   // exactly one allele of genotype matches this allele observation
                 let p_het = LogProb::ln_add_exp(ln_half + p_call, ln_half + p_miscall);
                 probs.ln_times_equals(g, p_het);
             }
         }
     }
 
-    // posterior probabilities
+    // get posterior probabilities by "normalizing" all the probabilities so they sum to 1
     let posts = probs.normalize();
 
     Ok(posts)
 }
 
-/// Calls genotypes for each variant in the ```VarList``` using a pileup-based genotyping calculation
-/// (without using haplotype information)
+/// Calls diploid genotypes for each variant in the ```VarList``` using a pileup-based genotyping calculation
+/// (without using haplotype information) similar to Samtools or other pileup-based calling methods.
 ///
 /// #Arguments
-/// -flist: a vector of Fragment structs
-/// -
+/// - flist: a vector of ```Fragment```s representing the list of haplotype fragments
+/// - varlist: a mutable ```VarList``` representing the information about variants (including current genotypes)
+/// - genotype_priors: a struct holding the genotype prior probabilities
+/// - max_p_miscall: the maximum probability of an allele miscall to count the allele (equivalent
+///                  to the minimum allowed allele quality, but represented as a normal probability
+///                  rather than PHRED-scaled)
+///
+/// # Returns
+/// Returns nothing. The function mutates each Var in the input VarList to have
+/// - new ```genotype```
+/// - new genotype quality (```gq```)
+/// - unphased genotype and GQ (these are copies of the above information saved for the output VCF
+///     since the main genotype and GQ will be updated using haplotype information)
+/// - allele counts and ambiguous allele counts
+///
+/// # Errors
+/// Can throw an error if an error occurs while calculating the genotype posteriors,
+/// and particularly if there is an attempt to query ```genotype_priors``` using an invalid genotype
 pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) -> Result<()> {
+
+    // generate a list of allele pileups so we can iterate over them and use each pileup to calculate genotypes
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
 
     assert_eq!(pileup_lst.len(), varlist.lst.len());
 
+    // for each variant in the VarList
     for i in 0..varlist.lst.len() {
         let pileup = &pileup_lst[i];
         let var = &mut varlist.lst[i];
 
+        // calculate the genotype posteriors for the pileup
         let posts: GenotypeProbs = calculate_genotype_posteriors_no_haplotypes(&pileup,
                                                                                &genotype_priors,
                                                                                &var.alleles,
                                                                                max_p_miscall).chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
 
+        // get the genotype with maximum genotype posterior
         let (max_g, max_post) = posts.max_genotype(false, false);
 
+        // convert genotype quality into a PHRED scaled value
         let genotype_qual:f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
+        // count the number of alleles (for annotating the VCF fields)
         let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
         let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
 
+        // UPDATE THE VARIANT FIELDS
         if var.dp < allele_total {
-            var.dp = allele_total;
+            var.dp = allele_total; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
         }
 
         var.qual = *PHREDProb::from(posts.get(Genotype(0,0)));
+
         if var.qual > MAX_VCF_QUAL {
-            var.qual = MAX_VCF_QUAL;
+            var.qual = MAX_VCF_QUAL; // don't let the variant quality exceed upper bound
         }
 
         var.genotype = max_g;
@@ -170,18 +203,58 @@ pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList
         var.gq = genotype_qual;
         var.unphased_gq = genotype_qual;
         if var.gq > MAX_VCF_QUAL {
-            var.gq = MAX_VCF_QUAL;
+            var.gq = MAX_VCF_QUAL; // don't let the genotype quality exceed upper bound
         }
 
         if var.unphased_gq > MAX_VCF_QUAL {
-            var.unphased_gq = MAX_VCF_QUAL;
+            var.unphased_gq = MAX_VCF_QUAL; // don't let the unphased quality exceed upper bound
         }
 
-        var.phase_set = None;
+        var.phase_set = None; // set phase set to none since phase information was not used
     }
     Ok(())
 }
 
+/// Refines diploid genotypes for each variant in the ```VarList``` using a haplotype assembly approach.
+///
+/// #Arguments
+/// - flist: a vector of ```Fragment```s representing the list of haplotype fragments
+/// - varlist: a mutable ```VarList``` representing the information about variants (including current genotypes)
+/// - interval: an optional ```GenomicInterval``` specifying the region where variants are being called.
+/// - genotype_priors: a struct holding the genotype prior probabilities
+/// - variant_debug_directory: an optional string specifying a directory path where we are writing
+///                            intermediate variant and fragment data for debugging purposes
+/// - program_step: this argument is only needed for naming the output files placed in the
+///                 variant_debug_directory. It specifies the first integer in the file name,
+///                 generally referring to the "step" that is being performed in the algorithm.
+///                 Usually this value will be 3, as called by the run() function.
+/// - max_cov: the maximum read coverage. This is only relevant for printing out debug VCFs.
+/// - density params: the parameters controlling which variants should be labeled as part of a
+///                   "dense variant cluster". This is only important for printing debug VCFs.
+/// - max_p_miscall: the maximum probability of an allele miscall to count the allele (equivalent
+///                  to the minimum allowed allele quality, but represented as a normal probability
+///                  rather than PHRED-scaled)
+/// - sample_name: the sample name that each variant should be associated with
+/// - ll_delta: a parameter to control how quickly the likelihood algorithm converges.
+///             the algorithm terminates when ```abs((log10(l_new)-log10(l_old))/log10(l_old)) < ll_delta```,
+///             or in other words when the improvement in likelihood from one iteration to the next
+///             is small.
+///
+/// # Returns
+/// Returns nothing. The function mutates each Var in the input VarList. The fields are updated
+///  using phase-aware genotyping calculation.
+/// - ```var.qual```: the variant quality
+/// - ```var.genotype```: the genotype call
+/// - ```var.gq```: the genotype quality
+/// - ```var.filter```: the variant filter field. All variants are set to ```PASS``, but if the
+///                     variant debug directory is specified then the depth and variant density filters
+///                     are applied so that intermediary/debug VCFs have the filters applied.
+/// - ```var.called```: set to true.
+///
+/// # Errors
+/// - Can encounter an error while generating flist buffer regarding converting numerical values to char
+/// - Can encounter an error while accessing genotype priors, in particular if there is
+///          attempted access of an invalid genotype
 pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                       varlist: &mut VarList,
                                       interval: &Option<GenomicInterval>,
@@ -201,7 +274,6 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
     assert_eq!(pileup_lst.len(), varlist.lst.len());
 
     let max_iterations: usize = 1000000;
-    //let sample_every: usize = 1;
     let ln_half = LogProb::from(Prob(0.5));
     let mut rng: StdRng = StdRng::from_seed(&[0]);
     let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -236,12 +308,14 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
     }
 
+    // perform multiple rounds of haplotype/genotype iteration
+    // - perform HapCUT2 haplotype assembly over the variants currently called as heterozygous
+    // - take variants in random order and greedily update genotypes, maximizing genotype
+    //     likelihood using the haplotype information
     for hapcut2_iter in 0..max_iterations {
 
         // print the haplotype assembly iteration
         eprintln!("{}    Round {} of haplotype assembly...",print_time(), hapcut2_iter+1);
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
 
         // count how many variants meet the criteria for "phased"
         let mut num_phased = 0;
@@ -253,15 +327,20 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
-        let mut total_likelihood: LogProb = LogProb::ln_one();
+        let mut total_likelihood: LogProb = LogProb::ln_one(); // initial read likelihood is one
 
+        // initialize likelihood as the likelihood of the haplotypes
+        // calculated as the product of the genotype prior probability at each variant site
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
             total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
         }
 
+        // iterate over all the fragments and all the sites and calculate the read likelihood
+        // take the product of each allele observation given the haplotypes
         for f in 0..flist.len() {
 
+            // pr[0] holds P(read | H1), pr[1] holds P(read | H2)
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
             for hap_ix in &hap_ixs {
                 for call in &flist[f].calls {
@@ -275,13 +354,20 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                     }
                 }
             }
+            // L = L * ( 0.5*P(read | H1) + 0.5*P(read | H2) )
             total_likelihood = total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
         }
 
         eprintln!("{}    (Before HapCUT2) Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
-        ////////////////////////////////////////////////////////////////////////////////////////////
+        // generate buffers with contents equivalent to VCF and fragment file and
+        // pass these off to HapCUT2 for haplotype assembly
+        // this is a far simpler solution than trying to generate all of the HapCUT2 data structures
+        // and passing them all through the FFI.
 
+        // vcf_buffer is a vector of vectors
+        // each inner vector represents a VCF file line
+        // it contains the VCF line formatted as vec of u8
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
         let mut vcf_buffer: Vec<Vec<u8>> = Vec::with_capacity(varlist.lst.len());
         let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
@@ -289,6 +375,11 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         for i in 0..varlist.lst.len() {
 
             let var = &varlist.lst[i];
+
+            // if the variant meets certain criteria (heterozygous, biallelic, not an indel)
+            // set its bit to true in var_phased (so that it will be used in HapCUT2 assembly)
+            // and take the haplotype information from the current haplotypes
+            // so that the HapCUT2 assembly isn't starting from a random haplotype
             if var.alleles.len() == 2 && (var.genotype == Genotype(0,1) || var.genotype == Genotype(1,0))
                 && var.alleles[0].len() == 1 && var.alleles[1].len() == 1
                 && var.gq > min_hap_gq {
@@ -303,6 +394,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                 hap1[i] = '-' as u8;
             }
 
+            // make formatted VCF file line
             let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join("/");
             let line: String = format!("{}\t{}\t.\t{}\t{}\t.\t.\t.\tGT:GQ\t{}:{}",
                                        var.chrom,
@@ -312,8 +404,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                                        genotype_str,
                                        var.gq);
 
-            //println!("{}", line);
-
+            // push the line to the list of u8 buffers
             let mut vcf_line: Vec<u8> = vec![];
             for u in line.into_bytes() {
                 vcf_line.push(u as u8);
@@ -323,9 +414,16 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             vcf_buffer.push(vcf_line);
         }
 
+        // similarly to the VCF buffer, generate a fragment buffer representing the fragment file
+        // this also gets passed off as input to HapCUT2
         let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall, false).chain_err(|| "Error generating fragment list buffer.")?;
+        // this phase_sets vector gets modified by HapCUT2 to hold the haplotype block (phase set)
+        // information
+        // phase_sets[i] will hold a specific integer that is like a haplotype block identifier
         let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
 
+        // ASSEMBLE HAPLOTYPES WITH HAPCUT2
+        // make an unsafe call to the HapCUT2 code which is linked statically via FFI
         call_hapcut2(&frag_buffer,
                      &vcf_buffer,
                      frag_buffer.len(),
@@ -333,6 +431,10 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                      &mut hap1,
                      &mut phase_sets);
 
+        // we want to convert the phase set ID given by HapCUT2 into the VCF standard type
+        // it should be the variant position (on its chromosome) of the first phased variant in the block
+        // we'll iterate over the phase set IDs given by HapCUT2 and figure out what the minimum
+        // position for that phase set is, so we can use it as the PS flag value
         let m = <usize>::max_value();
         let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
 
@@ -345,6 +447,10 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
+        // we passed the hap1 vector to HapCUT2 and it contains the phased haplotype results
+        // we want to convert the haplotype vectors into the phased genotype field in the VarList
+        // we copy over the genotypes and use min_pos_ps to convert the phase set/block information
+        // into PS field values.
         for i in 0..hap1.len() {
             match hap1[i] as char {
                 '0' => {
@@ -375,9 +481,6 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         }
 
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
         // count how many variants meet the criteria for "phased"
         num_phased = 0;
         for var in varlist.lst.iter() {
@@ -388,13 +491,16 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
-        total_likelihood = LogProb::ln_one();
-
+        // initialize likelihood as the likelihood of the haplotypes
+        // calculated as the product of the genotype prior probability at each variant site
+        total_likelihood = LogProb::ln_one()
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
             total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
         }
 
+        // iterate over all the fragments and all the sites and calculate the read likelihood
+        // take the product of each allele observation given the haplotypes
         for f in 0..flist.len() {
 
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
@@ -415,9 +521,8 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
         eprintln!("{}    (After HapCUT2)  Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}",print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        // p_read_hap[i][j] contains P(R_j | H_i)
+        // p_read_hap[i][j] will contain P(R_j | H_i)
+        // we will keep this saved and update it when the haplotypes change
         let mut p_read_hap: Vec<Vec<LogProb>> = vec![vec![LogProb::ln_one(); flist.len()]; 2];
 
         for hap_ix in &hap_ixs {
@@ -435,10 +540,13 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
+        // GREEDY GENOTYPE OPTIMIZATION
+
+        // loop over all variants repeatedly until the haplotype likelihoods stop changing
         for _ in 0..max_iterations {
             let mut changed = false;
 
-            // take the variants v in random order
+            // loop over the set of variants v in random order
             let mut ixvec: Vec<usize> = (0..varlist.lst.len()).collect();
             let ixslice: &mut [usize] = ixvec.as_mut_slice();
             rng.shuffle(ixslice);
@@ -458,7 +566,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                 let mut p_reads_g: Vec<Vec<Vec<(usize, LogProb, LogProb)>>> = vec![vec![vec![]; var.alleles.len()]; var.alleles.len()];
 
 
-                // THOUGHT -- p_read_hap contains the probability of reads given haplotypes,
+                // p_read_hap contains the probability of reads given haplotypes,
                 // ONLY for variants in variant_phased.
                 // so to correctly calculate p_reads for a variant, if the variant isn't in var_phased
                 // we should simply multiply in the values
@@ -467,7 +575,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
 
                     for call in &pileup_lst[v] {
                         if call.qual >= ln_max_p_miscall {
-                            continue;
+                            continue; // allele call fails allele quality cutoff
                         }
 
                         // get the value of the read likelihood given each haplotype
@@ -536,6 +644,7 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
                     }
                 }
 
+                // calculate the posterior probabilities
                 let posts: GenotypeProbs = p_reads.normalize();
 
                 let (max_g, _) = posts.max_genotype(true, false);
@@ -579,13 +688,16 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
+        // initialize likelihood as the likelihood of the haplotypes
+        // calculated as the product of the genotype prior probability at each variant site
         total_likelihood = LogProb::ln_one();
-
         for v in 0..varlist.lst.len() {
             let g = Genotype(haps[0][v], haps[1][v]);
             total_likelihood = total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
         }
 
+        // iterate over all the fragments and all the sites and calculate the read likelihood
+        // take the product of each allele observation given the haplotypes
         for f in 0..flist.len() {
 
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
@@ -605,14 +717,13 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         }
 
         // update the various fields for the variant.
-
         for i in 0..varlist.lst.len() {
             let pileup = &pileup_lst[i];
             let var = &mut varlist.lst[i];
 
             let (max_g, _) = var.genotype_post.max_genotype(true, false);
 
-            // we computed the max phased genotype but we want the unphased genotype quality
+            // calculate the genotype quality for the max phased genotype
             // sum all of the genotypes that aren't max_g, or the flipped phase version of max_g
             let mut non_max_post: Vec<LogProb> = vec![];
             for g in var.possible_genotypes() {
@@ -624,16 +735,16 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             //let p_call_wrong: LogProb = LogProb::ln_one_minus_exp(&max_post);
             let genotype_qual: f64 = *PHREDProb::from(p_call_wrong);
 
-            let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
-            let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
+            //let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
+            //let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
 
-            if var.dp < allele_total {
-                var.dp = allele_total;
-            }
+            //if var.dp < allele_total {
+            //    var.dp = allele_total;
+            //}
 
             var.qual = *PHREDProb::from(var.genotype_post.get(Genotype(0,0)));
-            var.allele_counts = allele_counts;
-            var.ambiguous_count = ambig_count;
+            //var.allele_counts = allele_counts;
+            //var.ambiguous_count = ambig_count;
             var.genotype = max_g;
             var.gq = genotype_qual;
             var.filter = "PASS".to_string();
@@ -648,10 +759,13 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
             }
         }
 
+        // for each fragment in the flist
+        // save the values of P(read | H1) and P(read | H2)
         for i in 0..flist.len() {
             flist[i].p_read_hap = [p_read_hap[0][i], p_read_hap[1][i]];
         }
 
+        // print out current variants to VCF file in VCF debug directory (if turned on)
         let debug_vcf_str = format!("{}.{}.haplotype_genotype_iteration.vcf", program_step, hapcut2_iter).to_owned();
         print_variant_debug(varlist, &interval, &variant_debug_directory,&debug_vcf_str, max_cov, density_params, sample_name)?;
 
@@ -660,11 +774,12 @@ pub fn call_genotypes_with_haplotypes(flist: &mut Vec<Fragment>,
         // convert logprob value to base 10
         let b10 = |x: LogProb| (*PHREDProb::from(x) / -10.0) as f64;
 
+        // termination criteria for the likelihoods
         if ((b10(total_likelihood) - b10(prev_likelihood)) / b10(prev_likelihood)).abs() < ll_delta {
             break;
         }
 
-        prev_likelihood = total_likelihood;
+        prev_likelihood = total_likelihood; // save the current likelihood as the previous likelihood
     }
     Ok(())
 }
