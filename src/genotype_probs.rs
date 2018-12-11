@@ -352,7 +352,7 @@ impl GenotypePriors {
                         if g0 != g1 {return Ok(ln_half+*p);} else {return Ok(*p);}
                     },
                     None => { bail!(ErrorKind::GenotypeNotInGenotypePriorsError(ra, g0, g1)) }
-                };
+                }
             }
         }
     }

@@ -26,6 +26,9 @@ pub struct Fragment {
     pub p_read_hap: [LogProb; 2]
 }
 
+//pub struct VarIx {
+//    pub ix: usize
+//}
 
 #[derive(Debug, Clone)]
 pub struct Var {
@@ -184,6 +187,23 @@ pub fn parse_vcf_potential_variants(vcffile_name: &String, bamfile_name: &String
     Ok(vlst)
 }
 
+/*
+impl Index<VarIx> for VarList {
+    type Output = Var;
+
+    fn index(&self, var_ix: VarIx) -> &Var {
+        &self.lst[var_ix.ix]
+    }
+}
+
+impl Index<Range<VarIx>> for VarList {
+    type Output = VarList;
+
+    fn index(&self, r: Range<VarIx>) -> &Var {
+        &self.lst[r.start.ix..r.end.ix]
+    }
+}*/
+
 impl VarList {
     pub fn new(lst: Vec<Var>) -> Result<VarList> {
         let mut v = VarList {
@@ -192,6 +212,10 @@ impl VarList {
         };
         v.sort()?;
         Ok(v)
+    }
+
+    pub fn len(&self) -> usize {
+        self.lst.len()
     }
 
     pub fn sort(&mut self) -> Result<()> {
@@ -824,7 +848,7 @@ mod tests {
     fn test_varlist_sort1() {
         let mut vlst_unsorted = generate_test_lst1_unsorted1();
 
-        vlst_unsorted.sort();
+        vlst_unsorted.sort().unwrap();
         vlst_unsorted.assert_sorted();
     }
 
@@ -832,7 +856,7 @@ mod tests {
     fn test_varlist_sort2() {
         let mut vlst_unsorted = generate_test_lst1_unsorted2();
 
-        vlst_unsorted.sort();
+        vlst_unsorted.sort().unwrap();
         vlst_unsorted.assert_sorted();
     }
 
