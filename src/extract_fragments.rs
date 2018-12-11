@@ -1,17 +1,17 @@
+use bio::io::fasta;
+use bio::pattern_matching::bndm;
+use bio::stats::{LogProb, PHREDProb, Prob};
+use errors::*;
+use realignment::*;
 use rust_htslib::bam;
-use rust_htslib::bam::Read;
-use rust_htslib::bam::record::Record;
-use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Cigar;
+use rust_htslib::bam::record::CigarStringView;
+use rust_htslib::bam::record::Record;
+use rust_htslib::bam::Read;
+use std::collections::HashMap;
 use std::error::Error;
 use util::*;
 use variants_and_fragments::*;
-use std::collections::HashMap;
-use bio::stats::{LogProb, Prob, PHREDProb};
-use bio::io::fasta;
-use bio::pattern_matching::bndm;
-use realignment::*;
-use errors::*;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -24,7 +24,7 @@ pub struct ExtractFragmentParameters {
     pub anchor_length: usize,
     pub short_hap_max_snvs: usize,
     pub max_window_padding: usize,
-    pub max_cigar_indel: usize
+    pub max_cigar_indel: usize,
 }
 
 // an extension of the rust-htslib cigar representation
@@ -35,7 +35,6 @@ pub struct CigarPos {
     pub ref_pos: u32,
     pub read_pos: u32,
 }
-
 
 //************************************************************************************************
 // BEGINNING OF RUST-HTSLIB BASED CODE *****************************************************************
@@ -79,9 +78,10 @@ quick_error! {
 ///
 /// * `cigar_string_view` - cigar string to create cigar position list for
 ///
-pub fn create_augmented_cigarlist(refpos: u32,
-                                  cigar_string_view: &CigarStringView)
-                                  -> Result<Vec<CigarPos>> {
+pub fn create_augmented_cigarlist(
+    refpos: u32,
+    cigar_string_view: &CigarStringView,
+) -> Result<Vec<CigarPos>> {
     let mut rpos = refpos;
     let mut qpos = 0u32; // position within read
     let mut j = 0; // index into cigar operation vector
@@ -134,12 +134,12 @@ pub fn create_augmented_cigarlist(refpos: u32,
     while j < cigar_string_view.len() {
         // append CigarPos to list (contains cigar op, ref position, read position)
         match &cigar_string_view[j] {
-            &Cigar::Match(_) |
-            &Cigar::Diff(_) |
-            &Cigar::Equal(_) |
-            &Cigar::Ins(_) |
-            &Cigar::Del(_) |
-            &Cigar::RefSkip(_) => {
+            &Cigar::Match(_)
+            | &Cigar::Diff(_)
+            | &Cigar::Equal(_)
+            | &Cigar::Ins(_)
+            | &Cigar::Del(_)
+            | &Cigar::RefSkip(_) => {
                 // push the current cigar operation, ref position, and query position onto the list
                 cigar_list.push(CigarPos {
                     cig: cigar_string_view[j].clone(),
@@ -147,10 +147,7 @@ pub fn create_augmented_cigarlist(refpos: u32,
                     read_pos: qpos,
                 });
             }
-            &Cigar::SoftClip(_) |
-            &Cigar::Pad(_) |
-            &Cigar::HardClip(_) |
-            &Cigar::Back(_) => {}
+            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) | &Cigar::Back(_) => {}
         }
 
         // move the reference and query positions forward
@@ -168,8 +165,7 @@ pub fn create_augmented_cigarlist(refpos: u32,
                 qpos += l;
                 j += 1;
             }
-            &Cigar::RefSkip(l) |
-            &Cigar::Del(l) => {
+            &Cigar::RefSkip(l) | &Cigar::Del(l) => {
                 rpos += l;
                 j += 1;
             }
@@ -202,15 +198,15 @@ pub struct AnchorPositions {
     pub right_anchor_read: u32,
 }
 
-pub fn find_anchors(bam_record: &Record,
-                    cigarpos_list: &Vec<CigarPos>,
-                    var_interval: GenomicInterval,
-                    ref_seq: &Vec<char>,
-                    read_seq: &Vec<char>,
-                    target_names: &Vec<String>,
-                    extract_params: ExtractFragmentParameters)
-                    -> Result<Option<AnchorPositions>> {
-
+pub fn find_anchors(
+    bam_record: &Record,
+    cigarpos_list: &Vec<CigarPos>,
+    var_interval: GenomicInterval,
+    ref_seq: &Vec<char>,
+    read_seq: &Vec<char>,
+    target_names: &Vec<String>,
+    extract_params: ExtractFragmentParameters,
+) -> Result<Option<AnchorPositions>> {
     //let min_window_length = extract_params.min_window_length;
     let max_window_padding = extract_params.max_window_padding;
 
@@ -229,21 +225,37 @@ pub fn find_anchors(bam_record: &Record,
     };
     let mut ref_seq_max_window: Vec<u8> = vec![];
 
-
-    for c in ref_seq[l_max..r_max+1].iter() {
+    for c in ref_seq[l_max..r_max + 1].iter() {
         ref_seq_max_window.push(*c as u8);
     }
 
     if VERBOSE {
-        eprintln!("Finding anchors for variant at {} {} {}:",var_interval.chrom, var_interval.start_pos, var_interval.end_pos);
+        eprintln!(
+            "Finding anchors for variant at {} {} {}:",
+            var_interval.chrom, var_interval.start_pos, var_interval.end_pos
+        );
     }
 
-    if var_interval.chrom != target_names[bam_record.tid() as usize] ||
-        (var_interval.start_pos as i32) >=
-            bam_record.cigar().end_pos().chain_err(||"Error while accessing CIGAR end position")? ||
-        (var_interval.end_pos as i32) < bam_record.pos() {
-        eprintln!("var_interval: {}\t{}\t{}",var_interval.chrom, var_interval.start_pos, var_interval.end_pos);
-        eprintln!("bam_record:   {}\t{}\t{}",target_names[bam_record.tid() as usize], bam_record.pos(), bam_record.cigar().end_pos().chain_err(|| "Error while accessing CIGAR end position")?);
+    if var_interval.chrom != target_names[bam_record.tid() as usize]
+        || (var_interval.start_pos as i32) >= bam_record
+            .cigar()
+            .end_pos()
+            .chain_err(|| "Error while accessing CIGAR end position")?
+        || (var_interval.end_pos as i32) < bam_record.pos()
+    {
+        eprintln!(
+            "var_interval: {}\t{}\t{}",
+            var_interval.chrom, var_interval.start_pos, var_interval.end_pos
+        );
+        eprintln!(
+            "bam_record:   {}\t{}\t{}",
+            target_names[bam_record.tid() as usize],
+            bam_record.pos(),
+            bam_record
+                .cigar()
+                .end_pos()
+                .chain_err(|| "Error while accessing CIGAR end position")?
+        );
 
         bail!(ErrorKind::AnchorRangeOutsideRead);
     }
@@ -260,7 +272,6 @@ pub fn find_anchors(bam_record: &Record,
         cigar_op_start <= pos && cigar_op_start + cigar_op_length > pos
     };
 
-
     // find left_ix and right_ix.
     // these are the indexes into the CIGAR of the CIGAR operation holding the
     // left side of the range and right side of the range
@@ -268,12 +279,12 @@ pub fn find_anchors(bam_record: &Record,
     // how slow is this? could be sped up with binary search in the future.
     for (i, cigarpos) in cigarpos_list.iter().enumerate() {
         match cigarpos.cig {
-            Cigar::Match(l) |
-            Cigar::Diff(l) |
-            Cigar::Equal(l) |
-            Cigar::Ins(l) |
-            Cigar::Del(l) |
-            Cigar::RefSkip(l) => {
+            Cigar::Match(l)
+            | Cigar::Diff(l)
+            | Cigar::Equal(l)
+            | Cigar::Ins(l)
+            | Cigar::Del(l)
+            | Cigar::RefSkip(l) => {
                 if contains_pos(var_interval.start_pos, cigarpos.ref_pos, l) {
                     left_ix = i;
                 }
@@ -282,12 +293,10 @@ pub fn find_anchors(bam_record: &Record,
                     break;
                 }
             }
-            Cigar::Pad(_) |
-            Cigar::Back(_) |
-            Cigar::SoftClip(_) |
-            Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
-                    "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
+                    "CIGAR operation found in cigarpos_list that should have been removed already."
+                        .to_owned()
                 ));
             }
         }
@@ -305,16 +314,14 @@ pub fn find_anchors(bam_record: &Record,
     }
 
     for i in (0..left_ix + 1).rev() {
-
         if cigarpos_list[i].ref_pos <= anchor_length
-            || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length {
+            || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length
+        {
             return Ok(None);
         }
 
         match cigarpos_list[i].cig {
-
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
-
                 match_len_left += l;
                 let mut potential_anchor = false;
                 if seen_indel_left && match_len_left > anchor_length {
@@ -322,14 +329,14 @@ pub fn find_anchors(bam_record: &Record,
                     left_anchor_ref = cigarpos_list[i].ref_pos + match_len_left - anchor_length;
                     left_anchor_read = cigarpos_list[i].read_pos + match_len_left - anchor_length;
                     potential_anchor = true;
-                } else if !seen_indel_left &&
-                    cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length {
+                } else if !seen_indel_left
+                    && cigarpos_list[i].ref_pos < var_interval.start_pos - anchor_length
+                {
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.start_pos
                     // the var_interval.start_pos we are trying to anchor is just inside one huge match
                     left_anchor_ref = var_interval.start_pos - anchor_length;
-                    left_anchor_read = cigarpos_list[i].read_pos +
-                        (var_interval.start_pos - anchor_length -
-                            cigarpos_list[i].ref_pos);
+                    left_anchor_read = cigarpos_list[i].read_pos
+                        + (var_interval.start_pos - anchor_length - cigarpos_list[i].ref_pos);
                     potential_anchor = true;
                 }
 
@@ -339,7 +346,6 @@ pub fn find_anchors(bam_record: &Record,
 
                 if potential_anchor {
                     while left_anchor_ref >= cigarpos_list[i].ref_pos {
-
                         let l_anc: usize = left_anchor_ref as usize;
                         let r_anc: usize = (left_anchor_ref + anchor_length) as usize;
                         if l_anc <= 0 || r_anc >= ref_seq.len() {
@@ -347,18 +353,19 @@ pub fn find_anchors(bam_record: &Record,
                         }
 
                         // check if there is an exact match between anchor sequence on read and ref
-                        let anchor_on_read: Vec<char> = read_seq[(left_anchor_read as usize)..
-                            (left_anchor_read + anchor_length) as usize]
-                            .to_vec();
-                        assert_eq!(anchor_on_read.len(),anchor_length as usize);
+                        let anchor_on_read: Vec<char> =
+                            read_seq[(left_anchor_read as usize)
+                                         ..(left_anchor_read + anchor_length) as usize]
+                                .to_vec();
+                        assert_eq!(anchor_on_read.len(), anchor_length as usize);
                         let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
                         let anchor_match = anchor_on_read == anchor_on_ref;
 
                         // check that the anchor sequence is unique in the region
-                        let mut pattern: Vec<u8>= vec![];
+                        let mut pattern: Vec<u8> = vec![];
                         for c in anchor_on_ref.iter() {
                             pattern.push(*c as u8);
-                        };
+                        }
                         assert_eq!(pattern.len(), anchor_length as usize);
                         let bndm = bndm::BNDM::new(&pattern);
                         let occ: Vec<usize> = bndm.find_all(&ref_seq_max_window).collect();
@@ -376,13 +383,10 @@ pub fn find_anchors(bam_record: &Record,
                     }
                 }
             }
-            Cigar::Ins(l) |
-            Cigar::Del(l) |
-            Cigar::RefSkip(l) => {
+            Cigar::Ins(l) | Cigar::Del(l) | Cigar::RefSkip(l) => {
                 if l > extract_params.max_cigar_indel as u32 {
                     return Ok(None); // cigar indel too long
                 }
-
 
                 if VERBOSE {
                     eprint!("I/D/N {},", l);
@@ -390,12 +394,10 @@ pub fn find_anchors(bam_record: &Record,
                 match_len_left = 0;
                 seen_indel_left = true;
             }
-            Cigar::Pad(_) |
-            Cigar::Back(_) |
-            Cigar::SoftClip(_) |
-            Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
-                    "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
+                    "CIGAR operation found in cigarpos_list that should have been removed already."
+                        .to_owned()
                 ));
             }
         }
@@ -412,14 +414,14 @@ pub fn find_anchors(bam_record: &Record,
     //println!("**************************************************");
     if VERBOSE {
         eprint!("Finding right anchor: ");
-    }    // step forwards to find right anchor
+    } // step forwards to find right anchor
     let mut match_len_right = 0;
     let mut seen_indel_right = false;
     let mut found_anchor_right = false;
     for i in right_ix..cigarpos_list.len() {
-
         if cigarpos_list[i].ref_pos <= anchor_length
-            || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length {
+            || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length
+        {
             return Ok(None);
         }
 
@@ -429,19 +431,19 @@ pub fn find_anchors(bam_record: &Record,
                 let mut potential_anchor = false;
                 if seen_indel_right && match_len_right > anchor_length {
                     // we have found a sufficiently long match and it's NOT the cigar op containing var_interval.end_pos
-                    right_anchor_ref = cigarpos_list[i].ref_pos + l - match_len_right +
-                        anchor_length;
-                    right_anchor_read = cigarpos_list[i].read_pos + l - match_len_right +
-                        anchor_length;
+                    right_anchor_ref =
+                        cigarpos_list[i].ref_pos + l - match_len_right + anchor_length;
+                    right_anchor_read =
+                        cigarpos_list[i].read_pos + l - match_len_right + anchor_length;
                     potential_anchor = true;
-                } else if !seen_indel_right &&
-                    cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length {
+                } else if !seen_indel_right
+                    && cigarpos_list[i].ref_pos + l > var_interval.end_pos + anchor_length
+                {
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.end_pos
                     // the var_interval.end_pos we are trying to anchor is just inside one huge match
                     right_anchor_ref = var_interval.end_pos + anchor_length;
-                    right_anchor_read = cigarpos_list[i].read_pos +
-                        (var_interval.end_pos + anchor_length -
-                            cigarpos_list[i].ref_pos);
+                    right_anchor_read = cigarpos_list[i].read_pos
+                        + (var_interval.end_pos + anchor_length - cigarpos_list[i].ref_pos);
                     potential_anchor = true;
                 }
 
@@ -451,7 +453,6 @@ pub fn find_anchors(bam_record: &Record,
 
                 if potential_anchor {
                     while right_anchor_ref < cigarpos_list[i].ref_pos + l {
-
                         let l_anc: usize = (right_anchor_ref - anchor_length) as usize;
                         let r_anc: usize = right_anchor_ref as usize;
                         if l_anc <= 0 || r_anc >= ref_seq.len() {
@@ -459,10 +460,11 @@ pub fn find_anchors(bam_record: &Record,
                         }
 
                         // check if there is an exact match between anchor sequence on read and ref
-                        let anchor_on_read: Vec<char> = read_seq[(right_anchor_read - anchor_length) as usize..
-                            right_anchor_read as usize]
-                            .to_vec();
-                        assert_eq!(anchor_on_read.len(),anchor_length as usize);
+                        let anchor_on_read: Vec<char> =
+                            read_seq[(right_anchor_read - anchor_length) as usize
+                                         ..right_anchor_read as usize]
+                                .to_vec();
+                        assert_eq!(anchor_on_read.len(), anchor_length as usize);
                         let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
                         let anchor_match = anchor_on_read == anchor_on_ref;
 
@@ -470,7 +472,7 @@ pub fn find_anchors(bam_record: &Record,
                         let mut pattern: Vec<u8> = vec![];
                         for c in anchor_on_ref.iter() {
                             pattern.push(*c as u8);
-                        };
+                        }
                         assert_eq!(pattern.len(), anchor_length as usize);
                         let bndm = bndm::BNDM::new(&pattern);
                         let occ: Vec<usize> = bndm.find_all(&ref_seq_max_window).collect();
@@ -488,9 +490,7 @@ pub fn find_anchors(bam_record: &Record,
                     }
                 }
             }
-            Cigar::Ins(l) |
-            Cigar::Del(l) |
-            Cigar::RefSkip(l) => {
+            Cigar::Ins(l) | Cigar::Del(l) | Cigar::RefSkip(l) => {
                 if l > extract_params.max_cigar_indel as u32 {
                     return Ok(None); // cigar indel too long
                 }
@@ -500,12 +500,10 @@ pub fn find_anchors(bam_record: &Record,
                 match_len_right = 0;
                 seen_indel_right = true;
             }
-            Cigar::Pad(_) |
-            Cigar::Back(_) |
-            Cigar::SoftClip(_) |
-            Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
-                    "CIGAR operation found in cigarpos_list that should have been removed already.".to_owned()
+                    "CIGAR operation found in cigarpos_list that should have been removed already."
+                        .to_owned()
                 ));
             }
         }
@@ -520,8 +518,9 @@ pub fn find_anchors(bam_record: &Record,
     }
 
     // return none if any of the anchors are out of bounds
-    if right_anchor_ref as usize >= ref_seq.len() ||
-        right_anchor_read as usize >= bam_record.seq().len() {
+    if right_anchor_ref as usize >= ref_seq.len()
+        || right_anchor_read as usize >= bam_record.seq().len()
+    {
         return Ok(None);
     }
 
@@ -538,7 +537,6 @@ pub fn find_anchors(bam_record: &Record,
 // output: a vector of all possible haplotypes from the k-th variant onward,
 // where each haplotype is a vector of u8s representing sequence of alleles
 fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
-
     if k >= var_cluster.len() {
         return vec![vec![]];
     }
@@ -566,14 +564,14 @@ fn generate_haps(var_cluster: &Vec<Var>) -> Vec<Vec<u8>> {
     generate_haps_k_onward(var_cluster, 0)
 }
 
-fn extract_var_cluster(read_seq: &Vec<char>,
-                       ref_seq: &Vec<char>,
-                       var_cluster: Vec<Var>,
-                       anchors: AnchorPositions,
-                       extract_params: ExtractFragmentParameters,
-                       align_params: AlignmentParameters)
-                       -> Vec<FragCall> {
-
+fn extract_var_cluster(
+    read_seq: &Vec<char>,
+    ref_seq: &Vec<char>,
+    var_cluster: Vec<Var>,
+    anchors: AnchorPositions,
+    extract_params: ExtractFragmentParameters,
+    align_params: AlignmentParameters,
+) -> Vec<FragCall> {
     let mut calls: Vec<FragCall> = vec![];
 
     //let ref_window = ref_seq[(anchors.left_anchor_ref as usize)..
@@ -581,8 +579,8 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     //        .to_vec();
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
-    let read_window: Vec<char> = read_seq[(anchors.left_anchor_read as usize)..
-        (anchors.right_anchor_read as usize) + 1]
+    let read_window: Vec<char> = read_seq
+        [(anchors.left_anchor_read as usize)..(anchors.right_anchor_read as usize) + 1]
         .to_vec();
 
     let mut max_score: LogProb = LogProb::ln_zero();
@@ -602,9 +600,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
 
     if VERBOSE {
         for var in var_cluster.clone() {
-            eprint!("{} {}",
-                     var.chrom,
-                     var.pos0);
+            eprint!("{} {}", var.chrom, var.pos0);
             for allele in var.alleles {
                 eprint!(" {}", allele);
             }
@@ -617,7 +613,6 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     let haps = generate_haps(&var_cluster);
 
     for ref hap in haps {
-
         assert!(hap.len() > 0);
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
@@ -640,37 +635,41 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
 
         // we now want to score hap_window
-        let score: LogProb = match extract_params.alignment_type{
-            AlignmentType::NumericallyStableAllAlignment => {
-                sum_all_alignments_numerically_stable(&read_window,
-                                                                   &hap_window,
-                                                                   align_params.ln(),
-                                                                   extract_params.band_width)
-            }
-            AlignmentType::FastAllAlignment => {
-                sum_all_alignments(&read_window,
-                                                &hap_window,
-                                                align_params,
-                                                extract_params.band_width)
-            }
-            AlignmentType::MaxAlignment => {
-                max_alignment(&read_window,
-                                           &hap_window,
-                                           align_params.ln(),
-                                           extract_params.band_width)
-            }
+        let score: LogProb = match extract_params.alignment_type {
+            AlignmentType::NumericallyStableAllAlignment => sum_all_alignments_numerically_stable(
+                &read_window,
+                &hap_window,
+                align_params.ln(),
+                extract_params.band_width,
+            ),
+            AlignmentType::FastAllAlignment => sum_all_alignments(
+                &read_window,
+                &hap_window,
+                align_params,
+                extract_params.band_width,
+            ),
+            AlignmentType::MaxAlignment => max_alignment(
+                &read_window,
+                &hap_window,
+                align_params.ln(),
+                extract_params.band_width,
+            ),
         };
 
         assert!(score > LogProb::ln_zero());
 
         for var in 0..n_vars {
-
-            allele_scores[var][hap[var] as usize] = LogProb::ln_add_exp(allele_scores[var][hap[var] as usize], score);
-
+            allele_scores[var][hap[var] as usize] =
+                LogProb::ln_add_exp(allele_scores[var][hap[var] as usize], score);
         }
         if VERBOSE {
             let hap_seq_str: String = hap_window.into_iter().collect();
-            eprintln!("hap:{:?} {} PHRED: {}", hap, hap_seq_str, *PHREDProb::from(score));
+            eprintln!(
+                "hap:{:?} {} PHRED: {}",
+                hap,
+                hap_seq_str,
+                *PHREDProb::from(score)
+            );
         }
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
@@ -681,12 +680,11 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
     }
 
-
     for v in 0..n_vars {
-
         let best_allele = max_hap[v];
         assert_ne!(allele_scores[v][best_allele as usize], LogProb::ln_zero());
-        let mut qual = LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
+        let mut qual =
+            LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
 
         //assert_ne!(qual, LogProb::ln_zero());
 
@@ -698,14 +696,16 @@ fn extract_var_cluster(read_seq: &Vec<char>,
         }
 
         if VERBOSE {
-            eprint!("adding call: {} {}", var_cluster[v].chrom, var_cluster[v].pos0);
+            eprint!(
+                "adding call: {} {}",
+                var_cluster[v].chrom, var_cluster[v].pos0
+            );
             for allele in &var_cluster[v].alleles {
                 eprint!(" {}", allele);
             }
 
             eprint!("; allele = {};", best_allele);
             eprintln!(" qual = {};", *Prob::from(qual));
-
         }
 
         calls.push(FragCall {
@@ -713,7 +713,7 @@ fn extract_var_cluster(read_seq: &Vec<char>,
             var_ix: var_cluster[v].ix,
             allele: best_allele,
             qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual),
         });
     }
 
@@ -724,31 +724,36 @@ fn extract_var_cluster(read_seq: &Vec<char>,
     calls
 }
 
-
-pub fn extract_fragment(bam_record: &Record,
-                        cigarpos_list: &Vec<CigarPos>,
-                        vars: Vec<Var>,
-                        ref_seq: &Vec<char>,
-                        target_names: &Vec<String>,
-                        extract_params: ExtractFragmentParameters,
-                        align_params: AlignmentParameters,
-                        old_frag: Option<Fragment>)
-                        -> Result<Option<Fragment>> {
-
+pub fn extract_fragment(
+    bam_record: &Record,
+    cigarpos_list: &Vec<CigarPos>,
+    vars: Vec<Var>,
+    ref_seq: &Vec<char>,
+    target_names: &Vec<String>,
+    extract_params: ExtractFragmentParameters,
+    align_params: AlignmentParameters,
+    old_frag: Option<Fragment>,
+) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
 
-    if VERBOSE {eprintln!("Extracting fragment for read {}...", id);}
+    if VERBOSE {
+        eprintln!("Extracting fragment for read {}...", id);
+    }
 
     let mut fragment = Fragment {
         id: id,
         calls: vec![],
-        p_read_hap: [LogProb::from(Prob(0.5)),LogProb::from(Prob(0.5))]
+        p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
     };
 
-    if bam_record.is_quality_check_failed() || bam_record.is_duplicate() ||
-        bam_record.is_secondary() || bam_record.is_unmapped() || bam_record.mapq() < extract_params.min_mapq
-        || bam_record.is_supplementary(){
+    if bam_record.is_quality_check_failed()
+        || bam_record.is_duplicate()
+        || bam_record.is_secondary()
+        || bam_record.is_unmapped()
+        || bam_record.mapq() < extract_params.min_mapq
+        || bam_record.is_supplementary()
+    {
         return Ok(None);
     }
 
@@ -758,20 +763,25 @@ pub fn extract_fragment(bam_record: &Record,
 
     // populate a list with tuples of each variant, and anchor sequences for its alignment
     for ref var in vars {
-        let var_interval = GenomicInterval{
+        let var_interval = GenomicInterval {
             tid: var.tid as u32,
             chrom: var.chrom.clone(),
             start_pos: var.pos0 as u32,
-            end_pos: var.pos0 as u32
+            end_pos: var.pos0 as u32,
         };
-        match find_anchors(&bam_record,
-                                   &cigarpos_list,
-                                   var_interval,
-                                   &ref_seq,
-                                   &read_seq,
-                                   &target_names,
-                                   extract_params).chain_err(|| "Error while finding anchor sequences.")? {
-            Some(anchors) => {var_anchor_lst.push((var.clone(), anchors));},
+        match find_anchors(
+            &bam_record,
+            &cigarpos_list,
+            var_interval,
+            &ref_seq,
+            &read_seq,
+            &target_names,
+            extract_params,
+        ).chain_err(|| "Error while finding anchor sequences.")?
+        {
+            Some(anchors) => {
+                var_anchor_lst.push((var.clone(), anchors));
+            }
             _ => {}
         };
     }
@@ -788,19 +798,19 @@ pub fn extract_fragment(bam_record: &Record,
         // generate clusters of SNVs that should be considered
         for (var, anc) in var_anchor_lst {
             l = var_cluster.len();
-            if l == 0 ||
-                (anc.left_anchor_ref < var_anchors[l - 1].right_anchor_ref
-                    && l < extract_params.short_hap_max_snvs) {
+            if l == 0
+                || (anc.left_anchor_ref < var_anchors[l - 1].right_anchor_ref
+                    && l < extract_params.short_hap_max_snvs)
+            {
                 var_cluster.push(var);
                 var_anchors.push(anc);
             } else {
-
                 // sequence anchor that covers the whole cluster of variants
-                let combined_anchor = AnchorPositions{
+                let combined_anchor = AnchorPositions {
                     left_anchor_ref: var_anchors[0].left_anchor_ref,
                     right_anchor_ref: var_anchors[l - 1].right_anchor_ref,
                     left_anchor_read: var_anchors[0].left_anchor_read,
-                    right_anchor_read: var_anchors[l - 1].right_anchor_read
+                    right_anchor_read: var_anchors[l - 1].right_anchor_read,
                 };
 
                 cluster_lst.push((combined_anchor, var_cluster.clone()));
@@ -816,11 +826,11 @@ pub fn extract_fragment(bam_record: &Record,
 
         if l > 0 {
             // sequence anchor that covers the whole cluster of variants
-            let combined_anchor = AnchorPositions{
+            let combined_anchor = AnchorPositions {
                 left_anchor_ref: var_anchors[0].left_anchor_ref,
                 right_anchor_ref: var_anchors[l - 1].right_anchor_ref,
                 left_anchor_read: var_anchors[0].left_anchor_read,
-                right_anchor_read: var_anchors[l - 1].right_anchor_read
+                right_anchor_read: var_anchors[l - 1].right_anchor_read,
             };
 
             cluster_lst.push((combined_anchor, var_cluster.clone()));
@@ -830,11 +840,11 @@ pub fn extract_fragment(bam_record: &Record,
     // now extract alleles for the variant cluster
 
     let mut old_frag_ix = 0; // hold onto index in old fragment
-    // save reallocation of this hashmap for every variant
-    let mut new_var_ix: HashMap<usize, usize> = HashMap::with_capacity(extract_params.short_hap_max_snvs);
+                             // save reallocation of this hashmap for every variant
+    let mut new_var_ix: HashMap<usize, usize> =
+        HashMap::with_capacity(extract_params.short_hap_max_snvs);
 
     for (anchors, var_cluster) in cluster_lst {
-
         if IGNORE_INDEL_ONLY_CLUSTERS {
             let mut seen_snv = false;
             for var in var_cluster.iter() {
@@ -870,7 +880,8 @@ pub fn extract_fragment(bam_record: &Record,
                 // if var.called is true, then this variant existed before POA
                 let mut changed = false;
                 for ref var in &var_cluster {
-                    if !var.called { // this is a new variant from POA
+                    if !var.called {
+                        // this is a new variant from POA
                         assert_eq!(var.old_ix, None);
                         changed = true;
                         break;
@@ -880,7 +891,6 @@ pub fn extract_fragment(bam_record: &Record,
                 // the fragment cluster didn't change, so convert the old varlist indices to new ones
                 // and just re-use the calls without realigning anything.
                 if !changed {
-
                     // map old varlist indices to new ones
                     assert!(new_var_ix.is_empty()); // shouldn't ever have to clear this hashmap
 
@@ -888,9 +898,11 @@ pub fn extract_fragment(bam_record: &Record,
                         match var.old_ix {
                             Some(old_ix) => {
                                 new_var_ix.insert(old_ix, var.ix);
-                            },
-                            None => {panic!("Attempted to reuse fragment call in an unchanged variant \
-                                 cluster, but var.old_ix was None.")}
+                            }
+                            None => panic!(
+                                "Attempted to reuse fragment call in an unchanged variant \
+                                 cluster, but var.old_ix was None."
+                            ),
                         }
                     }
 
@@ -898,12 +910,12 @@ pub fn extract_fragment(bam_record: &Record,
                     while !new_var_ix.is_empty() {
                         let call = old_f.calls[old_frag_ix];
 
-                        match new_var_ix.remove(&call.var_ix){
+                        match new_var_ix.remove(&call.var_ix) {
                             Some(new_ix) => {
                                 let mut new_call = call.clone();
                                 new_call.var_ix = new_ix;
                                 fragment.calls.push(new_call);
-                            },
+                            }
                             None => {}
                         }
 
@@ -918,12 +930,14 @@ pub fn extract_fragment(bam_record: &Record,
         }
 
         // extract the calls for the fragment
-        for call in extract_var_cluster(&read_seq,
-                                        ref_seq,
-                                        var_cluster,
-                                        anchors,
-                                        extract_params,
-                                        align_params) {
+        for call in extract_var_cluster(
+            &read_seq,
+            ref_seq,
+            var_cluster,
+            anchors,
+            extract_params,
+            align_params,
+        ) {
             fragment.calls.push(call);
         }
     }
@@ -931,19 +945,20 @@ pub fn extract_fragment(bam_record: &Record,
     Ok(Some(fragment))
 }
 
-pub fn extract_fragments(bam_file: &String,
-                         fastafile_name: &String,
-                         varlist: &mut VarList,
-                         interval: &Option<GenomicInterval>,
-                         extract_params: ExtractFragmentParameters,
-                         align_params: AlignmentParameters,
-                         old_flist: Option<Vec<Fragment>>)
-                         -> Result<Vec<Fragment>> {
-
+pub fn extract_fragments(
+    bam_file: &String,
+    fastafile_name: &String,
+    varlist: &mut VarList,
+    interval: &Option<GenomicInterval>,
+    extract_params: ExtractFragmentParameters,
+    align_params: AlignmentParameters,
+    old_flist: Option<Vec<Fragment>>,
+) -> Result<Vec<Fragment>> {
     let t_names = parse_target_names(&bam_file)?;
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
-    let mut fasta = fasta::IndexedReader::from_file(fastafile_name).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
+    let mut fasta = fasta::IndexedReader::from_file(fastafile_name)
+        .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
     let mut ref_seq: Vec<char> = vec![];
 
     let mut flist: Vec<Fragment> = vec![];
@@ -952,17 +967,24 @@ pub fn extract_fragments(bam_file: &String,
     let mut complete = 0;
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
+    let mut bam_ix =
+        bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).chain_err(|| "Error seeking BAM file while extracting fragments.")?;
+        bam_ix
+            .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
+            .chain_err(|| "Error seeking BAM file while extracting fragments.")?;
 
         for (i, r) in bam_ix.records().enumerate() {
             let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
-            if record.is_quality_check_failed() || record.is_duplicate() ||
-                record.is_secondary() || record.is_unmapped() || record.mapq() < extract_params.min_mapq
-                || record.is_supplementary() {
+            if record.is_quality_check_failed()
+                || record.is_duplicate()
+                || record.is_secondary()
+                || record.is_unmapped()
+                || record.mapq() < extract_params.min_mapq
+                || record.is_supplementary()
+            {
                 continue;
             }
 
@@ -971,7 +993,7 @@ pub fn extract_fragments(bam_file: &String,
                     assert_eq!(fl[i].id, u8_to_string(record.qname())?);
                     Some(fl[i].clone())
                 }
-                &None => { None }
+                &None => None,
             };
 
             let tid: usize = record.tid() as usize;
@@ -979,18 +1001,23 @@ pub fn extract_fragments(bam_file: &String,
 
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| "Failed to read fasta sequence record.")?;
+                fasta
+                    .read_all(&chrom, &mut ref_seq_u8)
+                    .chain_err(|| "Failed to read fasta sequence record.")?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
             let start_pos = record.pos();
-            let end_pos =
-                record.cigar().end_pos().chain_err(|| "Error while accessing CIGAR end position")? - 1;
+            let end_pos = record
+                .cigar()
+                .end_pos()
+                .chain_err(|| "Error while accessing CIGAR end position")?
+                - 1;
 
             let bam_cig: CigarStringView = record.cigar();
             let cigarpos_list: Vec<CigarPos> =
-                create_augmented_cigarlist(start_pos as u32, &bam_cig).chain_err(|| "Error creating augmented cigarlist.")?;
-
+                create_augmented_cigarlist(start_pos as u32, &bam_cig)
+                    .chain_err(|| "Error creating augmented cigarlist.")?;
 
             let interval = GenomicInterval {
                 tid: tid as u32,
@@ -1000,27 +1027,39 @@ pub fn extract_fragments(bam_file: &String,
             };
 
             // get the list of variants that overlap this read
-            let read_vars = varlist.get_variants_range(interval).chain_err(|| "Error getting variants in range.")?;
+            let read_vars = varlist
+                .get_variants_range(interval)
+                .chain_err(|| "Error getting variants in range.")?;
 
             // print the percentage of variants processed every 10%
-            if read_vars.len() > 0 && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete {
+            if read_vars.len() > 0
+                && ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize > complete
+            {
                 complete = ((read_vars[0].ix as f64 / varlist.lst.len() as f64) * 10.0) as usize;
                 if complete < 10 {
-                    eprintln!("{}    {}% of variants processed...", print_time(), complete * 10);
+                    eprintln!(
+                        "{}    {}% of variants processed...",
+                        print_time(),
+                        complete * 10
+                    );
                 }
             }
 
-            let frag = extract_fragment(&record,
-                                        &cigarpos_list,
-                                        read_vars,
-                                        &ref_seq,
-                                        &t_names,
-                                        extract_params,
-                                        align_params,
-                                        old_frag).chain_err(|| "Error extracting fragment from read.")?;
+            let frag = extract_fragment(
+                &record,
+                &cigarpos_list,
+                read_vars,
+                &ref_seq,
+                &t_names,
+                extract_params,
+                align_params,
+                old_frag,
+            ).chain_err(|| "Error extracting fragment from read.")?;
 
             match frag {
-                Some(some_frag) => {flist.push(some_frag);},
+                Some(some_frag) => {
+                    flist.push(some_frag);
+                }
                 None => {}
             }
 
@@ -1029,10 +1068,8 @@ pub fn extract_fragments(bam_file: &String,
     }
     eprintln!("{}    100% of variants processed.", print_time());
 
-
     // label every fragment call with its index in the fragment list.
     for i in 0..flist.len() {
-
         for j in 0..flist[i].calls.len() {
             flist[i].calls[j].frag_ix = Some(i);
         }
@@ -1044,7 +1081,6 @@ pub fn extract_fragments(bam_file: &String,
     let mut var_num_alleles: Vec<usize> = vec![0; varlist.lst.len()];
 
     for i in 0..flist.len() {
-
         for j in 0..flist[i].calls.len() {
             let vix = flist[i].calls[j].var_ix;
             let qual = flist[i].calls[j].qual;
@@ -1054,7 +1090,6 @@ pub fn extract_fragments(bam_file: &String,
     }
 
     for (i, ref mut var) in varlist.lst.iter_mut().enumerate() {
-
         let q = var_qual_sum[i] - LogProb::from(Prob(var_num_alleles[i] as f64)); // q is LogProb of mean allele qual
         var.mean_allele_qual = *PHREDProb::from(q);
     }
@@ -1065,7 +1100,6 @@ pub fn extract_fragments(bam_file: &String,
 //************************************************************************************************
 // END OF RUST-HTSLIB BASED CODE *****************************************************************
 //************************************************************************************************
-
 
 #[cfg(test)]
 mod tests {
@@ -1120,7 +1154,13 @@ mod tests {
         }
     }
     */
-    fn generate_var2(ix: usize, tid: usize, chrom: String, pos0: usize, alleles: Vec<String>) -> Var {
+    fn generate_var2(
+        ix: usize,
+        tid: usize,
+        chrom: String,
+        pos0: usize,
+        alleles: Vec<String>,
+    ) -> Var {
         Var {
             ix: ix,
             old_ix: None,
@@ -1129,11 +1169,11 @@ mod tests {
             pos0: pos0,
             alleles: alleles,
             dp: 40,
-            allele_counts: vec![20,20],
+            allele_counts: vec![20, 20],
             ambiguous_count: 0,
             qual: 0.0,
             filter: ".".to_string(),
-            genotype: Genotype(0,1),
+            genotype: Genotype(0, 1),
             gq: 0.0,
             mean_allele_qual: 0.0,
             mec: 0,
@@ -1145,24 +1185,29 @@ mod tests {
             mq30_frac: 1.0,
             mq40_frac: 1.0,
             mq50_frac: 1.0,
-            unphased_genotype: Genotype(0,1),
+            unphased_genotype: Genotype(0, 1),
             unphased_gq: 0.0,
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            called: true
+            called: true,
         }
     }
 
     #[test]
     fn test_generate_haplotypes_basic() {
         let mut lst1: Vec<Var> = vec![];
-        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
+        lst1.push(generate_var2(
+            0,
+            0,
+            "chr1".to_string(),
+            1,
+            vec!["A".to_string(), "G".to_string()],
+        ));
         let mut haps = generate_haps(&lst1);
 
         haps.sort();
-        let mut exp = vec![vec![0u8],
-                           vec![1u8]];
+        let mut exp = vec![vec![0u8], vec![1u8]];
 
         exp.sort();
         assert_eq!(haps, exp);
@@ -1171,20 +1216,40 @@ mod tests {
     #[test]
     fn test_generate_haplotypes_multivariant() {
         let mut lst1: Vec<Var> = vec![];
-        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
-        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string()]));
-        lst1.push( generate_var2(2, 0, "chr1".to_string(), 200, vec!["T".to_string(), "G".to_string()]));
+        lst1.push(generate_var2(
+            0,
+            0,
+            "chr1".to_string(),
+            1,
+            vec!["A".to_string(), "G".to_string()],
+        ));
+        lst1.push(generate_var2(
+            1,
+            0,
+            "chr1".to_string(),
+            100,
+            vec!["A".to_string(), "T".to_string()],
+        ));
+        lst1.push(generate_var2(
+            2,
+            0,
+            "chr1".to_string(),
+            200,
+            vec!["T".to_string(), "G".to_string()],
+        ));
         let mut haps = generate_haps(&lst1);
 
         haps.sort();
-        let mut exp = vec![vec![0u8,0u8,0u8],
-                       vec![0u8,0u8,1u8],
-                       vec![0u8,1u8,0u8],
-                       vec![1u8,0u8,0u8],
-                       vec![1u8,1u8,0u8],
-                       vec![0u8,1u8,1u8],
-                       vec![1u8,0u8,1u8],
-                       vec![1u8,1u8,1u8]];
+        let mut exp = vec![
+            vec![0u8, 0u8, 0u8],
+            vec![0u8, 0u8, 1u8],
+            vec![0u8, 1u8, 0u8],
+            vec![1u8, 0u8, 0u8],
+            vec![1u8, 1u8, 0u8],
+            vec![0u8, 1u8, 1u8],
+            vec![1u8, 0u8, 1u8],
+            vec![1u8, 1u8, 1u8],
+        ];
 
         exp.sort();
         assert_eq!(haps, exp);
@@ -1193,17 +1258,31 @@ mod tests {
     #[test]
     fn test_generate_haplotypes_multiallelic() {
         let mut lst1: Vec<Var> = vec![];
-        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
-        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+        lst1.push(generate_var2(
+            0,
+            0,
+            "chr1".to_string(),
+            1,
+            vec!["A".to_string(), "G".to_string()],
+        ));
+        lst1.push(generate_var2(
+            1,
+            0,
+            "chr1".to_string(),
+            100,
+            vec!["A".to_string(), "T".to_string(), "C".to_string()],
+        ));
         let mut haps = generate_haps(&lst1);
 
         haps.sort();
-        let mut exp = vec![vec![0u8,0u8],
-                           vec![0u8,1u8],
-                           vec![1u8,0u8],
-                           vec![1u8,1u8],
-                           vec![0u8,2u8],
-                           vec![1u8,2u8]];
+        let mut exp = vec![
+            vec![0u8, 0u8],
+            vec![0u8, 1u8],
+            vec![1u8, 0u8],
+            vec![1u8, 1u8],
+            vec![0u8, 2u8],
+            vec![1u8, 2u8],
+        ];
 
         exp.sort();
         assert_eq!(haps, exp);
@@ -1212,31 +1291,51 @@ mod tests {
     #[test]
     fn test_generate_haplotypes_multiallelic2() {
         let mut lst1: Vec<Var> = vec![];
-        lst1.push( generate_var2(0, 0, "chr1".to_string(), 1, vec!["A".to_string(), "G".to_string()]));
-        lst1.push( generate_var2(1, 0, "chr1".to_string(), 100, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
-        lst1.push( generate_var2(1, 0, "chr1".to_string(), 200, vec!["A".to_string(), "T".to_string(), "C".to_string()]));
+        lst1.push(generate_var2(
+            0,
+            0,
+            "chr1".to_string(),
+            1,
+            vec!["A".to_string(), "G".to_string()],
+        ));
+        lst1.push(generate_var2(
+            1,
+            0,
+            "chr1".to_string(),
+            100,
+            vec!["A".to_string(), "T".to_string(), "C".to_string()],
+        ));
+        lst1.push(generate_var2(
+            1,
+            0,
+            "chr1".to_string(),
+            200,
+            vec!["A".to_string(), "T".to_string(), "C".to_string()],
+        ));
 
         let mut haps = generate_haps(&lst1);
 
         haps.sort();
-        let mut exp = vec![vec![0u8,0u8,0u8],
-                           vec![0u8,0u8,1u8],
-                           vec![0u8,0u8,2u8],
-                           vec![0u8,1u8,0u8],
-                           vec![0u8,1u8,1u8],
-                           vec![0u8,1u8,2u8],
-                           vec![0u8,2u8,0u8],
-                           vec![0u8,2u8,1u8],
-                           vec![0u8,2u8,2u8],
-                           vec![1u8,0u8,0u8],
-                           vec![1u8,0u8,1u8],
-                           vec![1u8,0u8,2u8],
-                           vec![1u8,1u8,0u8],
-                           vec![1u8,1u8,1u8],
-                           vec![1u8,1u8,2u8],
-                           vec![1u8,2u8,0u8],
-                           vec![1u8,2u8,1u8],
-                           vec![1u8,2u8,2u8],];
+        let mut exp = vec![
+            vec![0u8, 0u8, 0u8],
+            vec![0u8, 0u8, 1u8],
+            vec![0u8, 0u8, 2u8],
+            vec![0u8, 1u8, 0u8],
+            vec![0u8, 1u8, 1u8],
+            vec![0u8, 1u8, 2u8],
+            vec![0u8, 2u8, 0u8],
+            vec![0u8, 2u8, 1u8],
+            vec![0u8, 2u8, 2u8],
+            vec![1u8, 0u8, 0u8],
+            vec![1u8, 0u8, 1u8],
+            vec![1u8, 0u8, 2u8],
+            vec![1u8, 1u8, 0u8],
+            vec![1u8, 1u8, 1u8],
+            vec![1u8, 1u8, 2u8],
+            vec![1u8, 2u8, 0u8],
+            vec![1u8, 2u8, 1u8],
+            vec![1u8, 2u8, 2u8],
+        ];
 
         exp.sort();
         assert_eq!(haps, exp);
