@@ -1,3 +1,6 @@
+//! This module contains the function used for identifying potential SNV sites.
+//!
+//! This is performed by performing a relatively standard
 
 extern crate rust_htslib;
 
