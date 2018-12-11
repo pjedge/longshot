@@ -132,7 +132,7 @@ pub fn calculate_genotype_posteriors_no_haplotypes(pileup: &Vec<FragCall>,
 ///
 /// #Arguments
 /// -flist: a vector of Fragment structs
-/// - 
+/// -
 pub fn call_genotypes_no_haplotypes(flist: &Vec<Fragment>, varlist: &mut VarList, genotype_priors: &GenotypePriors, max_p_miscall: f64) -> Result<()> {
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
 
