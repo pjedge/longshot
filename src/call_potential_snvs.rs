@@ -36,6 +36,32 @@ static VERBOSE: bool = false; //true;
 /// in the genome, we perform a genotyping calculation and consider every site meeting a low threshold
 /// for variant evidence (by default, probability of non-reference genotype > 0.001) as a potential SNV
 ///
+/// # Arguments
+/// -```bam_file```: the input BAM file name as a string
+/// -```fasta_file```: the input FASTA file name as a string
+/// -```interval```: optional struct holding the genomic interval to call variants in
+/// -```genotype_priors```: struct holding the genotype priors
+/// -```min_coverage```: the minimum read coverage to consider a site as a potential variant
+/// -```max_coverage```: the maximum read coverage to consider a site as a potential variant
+/// -```min_mapq```: the minimum mapping quality to use a read in variant calling
+/// -```max_p_miscall```: the maximum probability of an allele miscall to count the allele (equivalent
+/////                     to the minimum allowed allele quality, but represented as a normal probability
+/////                     rather than PHRED-scaled)
+/// -```ln_align_params```: natural-log-scaled parameters for read alignment (Pair-HMM). Note that
+///                         no alignment is performed in this function; these parameters are only
+///                         required so that the base substitution rate can be used as interim
+///                         "allele quality values" for the genotyping calculation.
+/// -```potential_snv_cutoff```: natural-log-scaled cutoff for the probability of non-reference
+///                              genotype (by default 0.001). Any site with probability of
+///                              non-reference genotype greater than this amount will be kept and
+///                              considered as a potential SNV site.
+///
+/// # Returns
+/// Returns a result that wraps a VarList struct, representing the list of potential variants.
+/// The data structure has fields corresponding to data that will be written to the output VCF file.
+/// This variant list will be passed mutably to other functions that perform genotyping and
+/// haplotype assembly steps.
+///
 /// #Errors
 /// - ```IndexedFastaOpenError```: error opening the indexed FASTA file
 /// - ```IndexedBamOpenError```: error opening the indexed BAM file
@@ -57,6 +83,8 @@ pub fn call_potential_snvs(
     ln_align_params: LnAlignmentParameters,
     potential_snv_cutoff: LogProb,
 ) -> Result<VarList> {
+
+    // the list of target (contig) names from the bam file
     let target_names = parse_target_names(&bam_file)?;
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file)
@@ -65,38 +93,53 @@ pub fn call_potential_snvs(
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
     // pileup over all covered sites
-    let mut ref_seq: Vec<char> = vec![];
+    let mut ref_seq: Vec<char> = vec![]; // this vector will be used to hold the reference sequence
     let mut prev_tid = 4294967295;
 
+    // the 4 bases as String type
     let a_str = "A".to_string();
     let c_str = "C".to_string();
     let g_str = "G".to_string();
     let t_str = "T".to_string();
 
-    // there is a really weird bug going on here,
-    // hence the duplicate file handles to the bam file.
+    // the strategy used for iterating over the BAM entries is as follows:
+    // if a genomic region was specified, then ```get_interval_lst``` puts that genomic region into a vector (interval_lst)
+    // containing only that one region. Then we iterate over the region list and seek every region,
+    // which effectively means we just seek that single genomic interval.
+    //
+    // if a genomic region was not specified, then we want to iterate over the whole BAM file.
+    // so get_interval_lst returns a list of genomic intervals that contain each whole chromosome
+    // as described by the BAM header SQ lines. Then we iterate over the interval lst and seek each
+    // interval separately, which effectively just iterates over all the BAM entries.
+    //
+    // the reason for this strange design (instead of either fetching a region beforehand or not and
+    // then just iterating over all of ```bam_ix.pileup()```) is the following:
     // if an indexed reader is used, and fetch is never called, pileup() hangs.
-    // so we need to iterate over the fetched indexed pileup if there's a region,
-    // or a totally separate pileup from the unindexed file if not.
 
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
     let mut bam_ix =
         bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
+    // interval_lst has either a single genomic interval (if --region was specified) or a list of
+    // genomic intervals for each chromosome covering the entire genome
     for iv in interval_lst {
         bam_ix
             .fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1)
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
         let bam_pileup = bam_ix.pileup();
-        //bam_pileup.set_max_depth(100000000);
+
+        // this variable is used to avoid having a variant inside a previous variant's deletion.
         let mut next_valid_pos = 0;
 
+        // iterate over base pileup
         for p in bam_pileup {
             let pileup = p.chain_err(|| ErrorKind::IndexedBamPileupReadError)?;
 
             let tid: usize = pileup.tid() as usize;
             let chrom: String = target_names[tid].clone();
 
+            // if we're on a different contig/chrom, we need to read in the sequence for that
+            // contig/chrom from the FASTA into the ref_seq vector
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
                 fasta
@@ -113,11 +156,16 @@ pub fn call_potential_snvs(
                 continue;
             }
 
+            // we want to save the sequence context (21 bp window around variant on reference)
+            // this will be printed to the VCF later and may help diagnose variant calling
+            // issues e.g. if the variant occurs inside a large homopolymer or etc.
+            // get the position 10 bases to the left
             let l_window = if pileup.pos() >= 10 {
                 pileup.pos() as usize - 10
             } else {
                 0
             };
+            // get the position 11 bases to the right
             let mut r_window = pileup.pos() as usize + 11;
             if r_window >= ref_seq.len() {
                 r_window = ref_seq.len();
@@ -130,6 +178,7 @@ pub fn call_potential_snvs(
                 continue;
             }
 
+            // the dna_vec conversion function should remove any non-ACGT bases
             assert!(
                 ref_base_str == a_str
                     || ref_base_str == c_str
@@ -155,7 +204,7 @@ pub fn call_potential_snvs(
             for alignment in pileup.alignments() {
                 let record = alignment.record();
 
-                // may be faster to implement this as bitwise operation on raw flag in the future?
+                // check that the read doesn't fail any standard filters
                 if record.is_secondary()
                     || record.is_quality_check_failed()
                     || record.is_duplicate()
@@ -164,6 +213,9 @@ pub fn call_potential_snvs(
                     continue;
                 }
 
+                // we're keeping track of how many reads meeting different MAPQ cutoff we see
+                // this information will be printed to the VCF and may help identify poor-mappability sites
+                // iterate counters if read meets a MAPQ cutoff
                 passing_reads += 1;
                 if record.mapq() >= 10 {
                     mq10 += 1.0
@@ -185,14 +237,16 @@ pub fn call_potential_snvs(
                     continue;
                 }
 
-                depth += 1;
+                depth += 1; // depth counter does not consider unmapped low-mapq reads
 
+                // handle the base/indel observed on the read
                 if !alignment.is_del() && !alignment.is_refskip() {
                     let ref_allele;
                     let var_allele;
 
                     match alignment.indel() {
                         Indel::None => {
+                            // read is NOT an indel (a base is observed)
                             ref_allele = (ref_seq[pos] as char).to_string().to_uppercase();
 
                             let base: char =
@@ -204,6 +258,7 @@ pub fn call_potential_snvs(
                             var_allele = base.to_string().to_uppercase();
                         }
                         Indel::Ins(l) => {
+                            // read is an insertion
                             let start = alignment
                                 .qpos()
                                 .chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?;
@@ -229,6 +284,7 @@ pub fn call_potential_snvs(
                             var_allele = var_char.into_iter().collect::<String>().to_uppercase();
                         }
                         Indel::Del(l) => {
+                            // read is a deletion
                             let start = pos;
                             let end: usize = pos + l as usize + 1;
 
@@ -237,13 +293,16 @@ pub fn call_potential_snvs(
                         }
                     }
 
+                    // add the ref and var alleles to a vector representing the pileup
                     pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
+                    // iterate the counts for this observation in the counts hashmap
                     *counts
                         .entry((ref_allele.clone(), var_allele.clone()))
                         .or_insert(0) += 1;
                 }
             }
 
+            // these values representing read mappability will be saved and written to the VCF later
             let mq10_frac = mq10 / (passing_reads as f64);
             let mq20_frac = mq20 / (passing_reads as f64);
             let mq30_frac = mq30 / (passing_reads as f64);
@@ -262,8 +321,7 @@ pub fn call_potential_snvs(
             let mut snv_ref_allele = 'N'.to_string();
             let mut snv_var_allele = 'N'.to_string();
 
-            // iterate over everything.
-
+            // iterate over all the counts in the hashmap.
             for (&(ref r, ref v), &count) in &counts {
                 if has_non_acgt(&r) || has_non_acgt(&v) {
                     continue;
@@ -285,6 +343,8 @@ pub fn call_potential_snvs(
             let mut snv_pileup_calls: Vec<FragCall> = vec![];
             //let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
 
+            // iterate over the observed alleles and count which ones match the most common one
+            // (snv_var_allele)
             for (ref_allele, var_allele) in pileup_alleles {
                 let a = if (ref_allele.clone(), var_allele.clone())
                     == (snv_ref_allele.clone(), snv_var_allele.clone())
@@ -307,6 +367,7 @@ pub fn call_potential_snvs(
             }
 
             // use a basic genotype likelihood calculation to call SNVs
+            // snv_qual is the LogProb probability of a non-reference base observation
             let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
             let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
                 let snv_post = calculate_genotype_posteriors_no_haplotypes(
@@ -324,6 +385,8 @@ pub fn call_potential_snvs(
 
             next_valid_pos = (pos + 1) as u32;
 
+            // check if SNV meets our quality criteria for a potential SNV
+            // if it does, make a new variant and add it to the list of potential SNVs.
             if qual > potential_snv_cutoff
                 && !ref_allele.contains("N")
                 && !var_allele.contains("N")
@@ -371,6 +434,7 @@ pub fn call_potential_snvs(
             }
         }
     }
+    // return the vector of Vars as a VarList struct
     Ok(VarList::new(varlist)?)
 }
 

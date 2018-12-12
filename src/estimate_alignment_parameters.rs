@@ -1,3 +1,10 @@
+//! This module contains functions for estimating the alignment parameters for the sequence alignment
+//! Pair Hidden Markov Model (Pair-HMM).
+//!
+//! For more information about sequence alignment Pair-HMM:
+//! Durbin, R., Eddy, S.R., Krogh, A. and Mitchison, G., 1998. Biological sequence analysis:
+//! probabilistic models of proteins and nucleic acids. Cambridge university press.
+
 use bio::io::fasta;
 use errors::*;
 use extract_fragments::{create_augmented_cigarlist, CigarPos};
@@ -8,6 +15,7 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::Read;
 use util::*;
 
+/// represents the 3 states for the sequence alignment Pair-HMM
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlignmentState {
     Match,
@@ -15,13 +23,17 @@ pub enum AlignmentState {
     Deletion,
 }
 
+/// represents a transition between two states in the sequence alignment Pair-HMM
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StateTransition {
     pub prev_state: AlignmentState,
     pub current_state: AlignmentState,
 }
 
-// these counts can be used to help us estimate alignment parameters
+/// represents counts of different transitions from state-to-state in the Pair-HMM
+///
+/// the counts in this struct are used to keep track of the different alignment transitions that
+/// are observed in the BAM file. These counts can be used to help us directly estimate alignment parameters
 #[derive(Clone, Copy)]
 pub struct TransitionCounts {
     match_from_match: usize,
@@ -33,13 +45,16 @@ pub struct TransitionCounts {
     match_from_deletion: usize,
 }
 
-// these counts can be used to help us estimate alignment parameters
+/// represents counts of different emission events (aligned bases being equal or not equal) in the BAM
 #[derive(Clone, Copy)]
 pub struct EmissionCounts {
     equal: usize,
     not_equal: usize,
 }
 
+/// a struct to hold counts of transition events and emission events from the BAM file
+///
+/// together these counts represent all of the counts necessary to estimate the HMM parameters
 #[derive(Clone, Copy)]
 struct AlignmentCounts {
     transition_counts: TransitionCounts,
@@ -47,6 +62,12 @@ struct AlignmentCounts {
 }
 
 impl TransitionCounts {
+    /// converts TransitionCounts to TransitionProbs
+    ///
+    /// Using this function, HMM transition counts that are empirically observed and counted in the
+    /// BAM file can be converted into probabilities that can be used for sequence alignment.
+    /// The transition counts out of a single state (e.g. insertion -> other state) are converted
+    /// into a fraction of the total transition counts out of that state.
     fn to_probs(&self) -> TransitionProbs {
         let total_from_match: f64 = self.match_from_match as f64
             + self.insertion_from_match as f64
@@ -67,6 +88,10 @@ impl TransitionCounts {
         }
     }
 
+    /// add the corresponding counts inside two ```TransitionCount```s together
+    ///
+    /// this function allows us to create separate ```TransitionCount``` structs for each newly
+    /// observed read, and then just add those counts onto a grand total count for the BAM file.
     fn add(&mut self, other: TransitionCounts) {
         self.match_from_match += other.match_from_match;
         self.insertion_from_match += other.insertion_from_match;
@@ -79,6 +104,13 @@ impl TransitionCounts {
 }
 
 impl EmissionCounts {
+    /// converts EmissionCounts to EmissionProbs
+    ///
+    /// Using this function, HMM emission counts that are empirically observed and counted in the
+    /// BAM file can be converted into probabilities that can be used for sequence alignment.
+    /// The emission counts for equal and not equal bases are turned into a fraction of the total.
+    /// The insertion and deletion emission probabilities are just fixed to 1.0.
+    /// This probably isn't ideal, but it works alright in practice.
     fn to_probs(&self) -> EmissionProbs {
         let total: f64 = self.equal as f64 + self.not_equal as f64;
 
@@ -90,6 +122,10 @@ impl EmissionCounts {
         }
     }
 
+    /// add the corresponding counts inside two ```EmissionCount```s together
+    ///
+    /// this function allows us to create separate ```EmissionCount``` structs for each newly
+    /// observed read, and then just add those counts onto a grand total count for the BAM file.
     fn add(&mut self, other: EmissionCounts) {
         self.equal += other.equal;
         self.not_equal += other.not_equal;
@@ -97,6 +133,8 @@ impl EmissionCounts {
 }
 
 impl AlignmentCounts {
+    /// convert ```AlignmentCounts``` into ```AlignmentParameters``` by converting the transition
+    /// and emission counts into probabilities
     fn to_parameters(&self) -> AlignmentParameters {
         AlignmentParameters {
             transition_probs: self.transition_counts.to_probs(),
@@ -122,14 +160,36 @@ impl AlignmentCounts {
 
 //THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+/// Count the number of alignment events (state transitions and emissions) observed for a single
+/// read from a BAM file
+///
+/// #Arguments
+/// -```cigarpos_list```: a vector of ```CigarPos``` which hold the CIGAR operations for the read,
+///                       along with the reference and read positions where they occur
+/// -```ref_seq```: the reference sequence for the chromosome that the read is aligned to
+/// -```read_seq```: the sequence of the read from the BAM file
+/// -```max_cigar_indel```: the maximum length of a CIGAR operation in order to count it.
+///                         this is meant to filter out large indels observed in the BAM alignment
+///                         that are due to misalignment or structural variations instead of
+///                         random sequencing error.
+///
+/// #Returns
+/// Returns a Result containing a TransitionCounts and an EmissionCounts.
+/// The TransitionCounts represents the total count of observed HMM transitions described by the
+/// BAM alignment. The EmissionCounts represents the observed HMM emissions (base match / base
+/// substitution) in the BAM alignment.
+///
+/// #Errors
+/// Can throw an error if ```cigarpos_list``` contains a cigar operation that should already have
+///   been filtered out (Pad,Back,Softclip,Hardclip).
 pub fn count_alignment_events(
     cigarpos_list: &Vec<CigarPos>,
     ref_seq: &Vec<char>,
     read_seq: &Vec<char>,
     max_cigar_indel: u32,
 ) -> Result<(TransitionCounts, EmissionCounts)> {
-    // key is a state transition
-    // value is the number of times that transition was observed
+
+    // initialize TransitionCounts and EmissionCounts with all counts set to 0
     let mut transition_counts = TransitionCounts {
         match_from_match: 0,
         insertion_from_match: 0,
@@ -145,19 +205,26 @@ pub fn count_alignment_events(
         not_equal: 0,
     };
 
+    // assume the initial state is MATCH
     let mut state: AlignmentState = AlignmentState::Match;
 
+    // for each cigar operation in the BAM record
     for cigarpos in cigarpos_list {
         match cigarpos.cig {
             Cigar::Match(l) | Cigar::Diff(l) | Cigar::Equal(l) => {
+                // the current operation is a match
+
                 let mut ref_pos = cigarpos.ref_pos as usize;
                 let mut read_pos = cigarpos.read_pos as usize;
 
+                // traverse over the length of the match operation
                 for _ in 0..l {
                     if ref_pos >= ref_seq.len() - 1 || read_pos >= read_seq.len() - 1 {
-                        break;
+                        break; // break if we've reached the end of the read or reference
                     }
 
+                    // we add the transition from the current state
+                    // to the new state (which is match)
                     match state {
                         AlignmentState::Match => {
                             transition_counts.match_from_match += 1;
@@ -170,8 +237,11 @@ pub fn count_alignment_events(
                         }
                     }
 
+                    // we have transitioned to a match so set the current state to match
                     state = AlignmentState::Match;
 
+                    // check if the aligned bases match or mismatch and use these to iterate the
+                    // emission counts (whether bases match or mismatch)
                     if ref_seq[ref_pos] != 'N' && read_seq[read_pos] != 'N' {
                         if ref_seq[ref_pos] == read_seq[read_pos] {
                             emission_counts.equal += 1;
@@ -180,23 +250,29 @@ pub fn count_alignment_events(
                         }
                     }
 
+                    // it's a match operation so both read and reference move forward one position
                     ref_pos += 1;
                     read_pos += 1;
                 }
             }
             Cigar::Ins(l) => {
+                // the current operation is insertion
+
                 if l > max_cigar_indel {
-                    continue;
+                    continue; // skip this operation if the insertion is too long
                 }
 
                 let mut ref_pos = cigarpos.ref_pos as usize;
                 let mut read_pos = cigarpos.read_pos as usize;
 
+                // traverse over the length of the insertion operation
                 for _ in 0..l {
                     if ref_pos >= ref_seq.len() - 1 || read_pos >= read_seq.len() - 1 {
-                        break;
+                        break; // break if we've reached the end of the read or reference
                     }
 
+                    // we add the transition from the current state
+                    // to the new state (which is insertion)
                     match state {
                         AlignmentState::Insertion => {
                             transition_counts.insertion_from_insertion += 1;
@@ -212,24 +288,29 @@ pub fn count_alignment_events(
                         }
                     }
 
+                    // we have transitioned to an insertion so set the current state as insertion
                     state = AlignmentState::Insertion;
-
+                    // this is an insertion so only the read position is moved forward
                     read_pos += 1;
                 }
             }
             Cigar::Del(l) | Cigar::RefSkip(l) => {
+                // the current operation is deletion
+
                 if l > max_cigar_indel {
-                    continue;
+                    continue; // skip this operation if the insertion is too long
                 }
 
                 let mut ref_pos = cigarpos.ref_pos as usize;
                 let mut read_pos = cigarpos.read_pos as usize;
 
+                // traverse over the length of the deletion operation
                 for _ in 0..l {
                     if ref_pos >= ref_seq.len() - 1 || read_pos >= read_seq.len() - 1 {
-                        break;
+                        break; // break if we've reached the end of the read or reference
                     }
-
+                    // we add the transition from the current state
+                    // to the new state (which is deletion)
                     match state {
                         AlignmentState::Deletion => {
                             transition_counts.deletion_from_deletion += 1;
@@ -245,8 +326,9 @@ pub fn count_alignment_events(
                         }
                     }
 
+                    // we have transitioned to deletion so set the current state to deletion
                     state = AlignmentState::Deletion;
-
+                    // this is a deletion so only the reference position is moved forward
                     ref_pos += 1;
                 }
             }
@@ -265,6 +347,32 @@ pub fn count_alignment_events(
 // END OF RUST-HTSLIB BASED CODE *****************************************************************
 //************************************************************************************************
 
+/// Estimates the alignment parameters needed for the Pair Hidden Markov Model (Pair-HMM) directly
+/// from the alignments in a BAM file
+///
+/// #Arguments
+/// -```bam_file```: the input BAM file name
+/// -```fasta_file```: the input FASTA file name
+/// -```interval```: the (optional) GenomicInterval within which variants should be called
+///                  the reads that are used for estimating the alignment parameters are also
+///                  limited to this region.
+/// -```min_mapq```: the minimium mapping quality to use a read
+/// -```max_cigar_indel```: the maximum length of a CIGAR operation in order to count it.
+///                         this is meant to filter out large indels observed in the BAM alignment
+///                         that are due to misalignment or structural variations instead of
+///                         random sequencing error.
+///
+/// #Returns
+/// Returns a result contain an ```AlignmentParameters``` struct. This struct contains the alignment
+/// parameters estimated from the BAM file.
+///
+/// #Errors
+/// - ```IndexedFastaOpenError```: error opening the indexed FASTA file
+/// - ```IndexedBamOpenError```: error opening the indexed BAM file
+/// - Error seeking a region from the BAM file.
+/// - ```IndexedBamRecordReadError```: error reading a record from the BAM
+/// - ```IndexedFastaReadError```: error reading a record from the FASTA
+/// - Any errors incurred while creating the augmented cigar list or counting alignment events.
 pub fn estimate_alignment_parameters(
     bam_file: &String,
     fasta_file: &String,
@@ -279,9 +387,8 @@ pub fn estimate_alignment_parameters(
         .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
     let mut ref_seq: Vec<char> = vec![];
 
-    // TODO: this uses a lot of duplicate code, need to figure out a better solution.
-    // key is a state transition
-    // value is the number of times that transition was observed
+    // initial transition and emission counts
+    // set everything to 1 so that it's impossible to have e.g. divide by 0 errors
     let mut transition_counts = TransitionCounts {
         match_from_match: 1,
         insertion_from_match: 1,
@@ -297,6 +404,20 @@ pub fn estimate_alignment_parameters(
         not_equal: 1,
     };
 
+    // the strategy used for iterating over the BAM entries is as follows:
+    // if a genomic region was specified, then ```get_interval_lst``` puts that genomic region into a vector (interval_lst)
+    // containing only that one region. Then we iterate over the region list and seek every region,
+    // which effectively means we just seek that single genomic interval.
+    //
+    // if a genomic region was not specified, then we want to iterate over the whole BAM file.
+    // so get_interval_lst returns a list of genomic intervals that contain each whole chromosome
+    // as described by the BAM header SQ lines. Then we iterate over the interval lst and seek each
+    // interval separately, which effectively just iterates over all the BAM entries.
+    //
+    // the reason for this strange design (instead of either fetching a region beforehand or not and
+    // then just iterating over all of ```bam_ix.pileup()```) is the following:
+    // if an indexed reader is used, and fetch is never called, pileup() hangs.
+
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
     let mut bam_ix =
         bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
@@ -308,9 +429,9 @@ pub fn estimate_alignment_parameters(
 
         for r in bam_ix.records() {
             let record =
-                r.chain_err(|| "Error reading BAM record while estimating alignment parameters.")?;
+                r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
-            // may be faster to implement this as bitwise operation on raw flag in the future?
+            // check that the read doesn't fail any standard filters
             if record.mapq() < min_mapq
                 || record.is_unmapped()
                 || record.is_secondary()
@@ -321,27 +442,33 @@ pub fn estimate_alignment_parameters(
                 continue;
             }
 
+            // if we're on a different contig/chrom than the previous BAM record, we need to read
+            // in the sequence for that contig/chrom from the FASTA into the ref_seq vector
             let tid: usize = record.tid() as usize;
             let chrom: String = t_names[record.tid() as usize].clone();
-            //println!("{}",u8_to_string(record.qname()));
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
                 fasta
                     .read_all(&chrom, &mut ref_seq_u8)
-                    .chain_err(|| "Failed to read fasta sequence record.")?;
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
+            // create a vector of CigarPos from the BAM record
+            // these contain the CIGAR operation as well as the reference and read positions
+            // where it occurs in the BAM alignment
             let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
             let bam_cig: CigarStringView = record.cigar();
             let cigarpos_list: Vec<CigarPos> =
                 create_augmented_cigarlist(record.pos() as u32, &bam_cig)
                     .chain_err(|| "Error creating augmented cigarlist.")?;
 
+            // count the emission and transition events directly from the record's CIGAR and sequences
             let (read_transition_counts, read_emission_counts) =
                 count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, max_cigar_indel)
                     .chain_err(|| "Error counting cigar alignment events.")?;
 
+            // add emission and transition counts to the running total
             transition_counts.add(read_transition_counts);
             emission_counts.add(read_emission_counts);
 
@@ -349,13 +476,16 @@ pub fn estimate_alignment_parameters(
         }
     }
 
+    // place the transition and emission counts together in an AlignmentCounts struct
     let alignment_counts = AlignmentCounts {
         transition_counts: transition_counts,
         emission_counts: emission_counts,
     };
 
+    // convert the alignment counts from the BAM into probabilities
     let params = alignment_counts.to_parameters();
 
+    // print the estimated alignment parameters to STDERR
     eprintln!("{} Done estimating alignment parameters.", print_time());
     eprintln!("");
 
