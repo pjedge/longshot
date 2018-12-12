@@ -30,7 +30,7 @@ error_chain! {
             description("Error fetching region from indexed BAM file.")
         }
         IndexedBamRecordReadError {
-            description("Error reading BAM pileup.")
+            description("Error reading BAM record.")
         }
         IndexedBamPileupReadError {
             description("Error reading BAM pileup.")
@@ -40,7 +40,7 @@ error_chain! {
         }
         // Indexed Fasta errors
         IndexedFastaOpenError {
-            description("Error reading indexed FASTA file.")
+            description("Error opening indexed FASTA file.")
         }
         IndexedFastaReadError {
             description("Error reading indexed FASTA file.")

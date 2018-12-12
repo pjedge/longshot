@@ -1003,7 +1003,7 @@ pub fn extract_fragments(
                 let mut ref_seq_u8: Vec<u8> = vec![];
                 fasta
                     .read_all(&chrom, &mut ref_seq_u8)
-                    .chain_err(|| "Failed to read fasta sequence record.")?;
+                    .chain_err(|| IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
