@@ -1,10 +1,18 @@
+//! This module contains a function for estimating the mean read coverage from a BAM file.
+//!
+//! This is used in Longshot if the user specifies the ```-A``` option, which calculates the mean read
+//! coverage and then estimates a maximum read coverage based on this mean coverage.
+
+// extern crates
 extern crate rust_htslib;
 
+// use declarations
 use errors::*;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use util::{get_interval_lst, print_time, GenomicInterval};
 
+///
 pub fn calculate_mean_coverage(
     bam_file: &String,
     interval: &Option<GenomicInterval>,
