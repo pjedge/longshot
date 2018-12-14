@@ -265,10 +265,20 @@ pub fn get_whole_genome_intervals(bam_file: &String) -> Result<Vec<GenomicInterv
     Ok(intervals)
 }
 
-// given a bam file name and a possible genomic interval,
-// if the interval exists then just return a vector holding that lone interval
-// otherwise, if the interval is None,
-// return a vector holding GenomicIntervals representing the whole genome.
+// the strategy used for iterating over the BAM entries is as follows:
+// if a genomic region was specified, then ```get_interval_lst``` puts that genomic region into a vector (interval_lst)
+// containing only that one region. Then we iterate over the region list and seek every region,
+// which effectively means we just seek that single genomic interval.
+//
+// if a genomic region was not specified, then we want to iterate over the whole BAM file.
+// so get_interval_lst returns a list of genomic intervals that contain each whole chromosome
+// as described by the BAM header SQ lines. Then we iterate over the interval lst and seek each
+// interval separately, which effectively just iterates over all the BAM entries.
+//
+// the reason for this strange design (instead of either fetching a region beforehand or not and
+// then just iterating over all of it is the following:
+// if an indexed reader is used, and fetch is never called, pileup() hangs and accessing BAM records
+// doesn't work.
 pub fn get_interval_lst(
     bam_file: &String,
     interval: &Option<GenomicInterval>,

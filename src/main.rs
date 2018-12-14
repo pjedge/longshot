@@ -14,8 +14,6 @@
 extern crate bio;
 extern crate clap;
 extern crate rust_htslib;
-#[macro_use]
-extern crate quick_error;
 extern crate chrono;
 extern crate core;
 extern crate rand;
@@ -216,11 +214,11 @@ fn run() -> Result<()> {
                 .help("Length of indel-free anchor sequence on the left and right side of read realignment window.")
                 .display_order(100)
                 .default_value("6"))
-        .arg(Arg::with_name("Short haplotype max SNVs")
+        .arg(Arg::with_name("Variant cluster max size")
                 .short("m")
                 .long("max_snvs")
                 .value_name("int")
-                .help("Cut off short haplotypes after this many SNVs. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
+                .help("Cut off variant clusters after this many variants. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
                 .display_order(130)
                 .default_value("3"))
         /*.arg(Arg::with_name("Use POA")
@@ -344,7 +342,7 @@ fn run() -> Result<()> {
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
     let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
-    let short_hap_max_snvs: usize = parse_usize(&input_args, "Short haplotype max SNVs")?;
+    let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
     let min_allele_qual: f64 = parse_positive_f64(&input_args, "Min allele quality")?;
@@ -444,9 +442,9 @@ fn run() -> Result<()> {
         parse_flag(&input_args, "Numerically stable alignment")?,
         parse_flag(&input_args, "Max alignment")?,
     ) {
-        (false, false) => AlignmentType::FastAllAlignment,
-        (true, false) => AlignmentType::NumericallyStableAllAlignment,
-        (false, true) => AlignmentType::MaxAlignment,
+        (false, false) => AlignmentType::ForwardAlgorithmNonNumericallyStable,
+        (true, false) => AlignmentType::ForwardAlgorithmNumericallyStable,
+        (false, true) => AlignmentType::ViterbiMaxScoringAlignment,
         (true, true) => {
             bail!(
                 "Numerically stable alignment option and max alignment options are incompatible."
@@ -491,7 +489,7 @@ fn run() -> Result<()> {
         alignment_type,
         band_width,
         anchor_length,
-        short_hap_max_snvs,
+        variant_cluster_max_size: variant_cluster_max_size,
         max_window_padding,
         max_cigar_indel,
     };

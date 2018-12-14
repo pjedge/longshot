@@ -1,3 +1,27 @@
+//! This module contains code to extract haplotype fragment information from the BAM reads.
+//!
+//! The functionality of this module is similar to extractHAIRS from the HapCUT2 project with the
+//! --pacbio option turned on.
+//!
+//! General outline of the algorithm for each BAM read:
+//! 1. identify the potential variant sites that the read overlaps
+//! 2. for each variant in this set, step leftward and rightward to find two exactly matched "anchor sequences" in
+//!     the BAM alignment that are unique in the nearby reference sequence. These "anchor sequences"
+//!     will serve as the bookends of the sensitive read-to-variant realignment procedure.
+//! 3. group together potential variants that occur in close proximity (overlapping realignment
+//!     window boundaries) into variant clusters, cutting clusters into smaller ones if they are too large
+//! 4. For each variant, realign the read to the reference sequence and the "variant" sequence which
+//!     is the reference sequence with the variant superimposed. Use the alignment score (calculated
+//!     using the forward algorithm on the sequence alignment pair-HMM) to calculate Bayesian
+//!     posteriors for reference and variant sequence. Use these to form allele calls and quality values
+//!     for the allele calls.
+//!     In the case of multi-variant clusters, a similar procedure is performed but all short-haplotypes
+//!     that are possible for the variants in the cluster are enumerated and considered for alignment
+//!     intead of just reference vs variant.
+//! 5. Return the allele calls and quality values for the read in the form of a ```Fragment``` Struct
+//!     containing ```FragCall``` structs for each call.
+
+// use declarations
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use bio::stats::{LogProb, PHREDProb, Prob};
@@ -9,30 +33,46 @@ use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
 use std::collections::HashMap;
-use std::error::Error;
 use util::*;
 use variants_and_fragments::*;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 
+/// Stores a set of parameters necessary for extracting haplotype fragments, to make it easier
+/// to pass all of the parameters between functions in this module
 #[derive(Clone, Copy)]
 pub struct ExtractFragmentParameters {
+    /// minimum mapping quality to use (extract haplotype information for) a read
     pub min_mapq: u8,
-    pub alignment_type: AlignmentType,
+    /// type of alignment algorithm to use (viterbi, forward algorithm, numerically stable forward algorithm)
+    pub alignment_type: AlignmentType,    //
+    /// band width for the alignment algorithm
     pub band_width: usize,
+    /// the length of unique and exact-matching "anchor" sequences to left and right of alignment window.
+    /// In forming the realignment window it is necessary that the ends of the window are well-aligned.
     pub anchor_length: usize,
-    pub short_hap_max_snvs: usize,
+    /// maximum number of variants allowed in a variant cluster "short-haplotype". Closely clustered variants
+    /// are considered in combination (a "short-haplotype") during variant realignment but it is
+    /// computationally infeasible to consider too many together.
+    pub variant_cluster_max_size: usize,
+    /// the maximum distance in bp to the left or right of a variant (or short-haplotype) that the
+    /// realignment window can be expanded to.
     pub max_window_padding: usize,
+    /// the maximum allowed size of a CIGAR indel in order to use a realignment window.
+    /// if a CIGAR indel is encountered that exceeds this size while forming the window,
+    /// the allele site is thrown out for that read.
     pub max_cigar_indel: usize,
 }
 
-// an extension of the rust-htslib cigar representation
-// has the cigar operation as well as the position on the reference of the operation start,
-// and the position on the read of the operation start
+/// an extension of the rust-htslib cigar representation that has the cigar operation and length as
+/// well as the position on the reference of the operation start, and the position on the read of the operation start
 pub struct CigarPos {
+    /// CIGAR struct containing CIGAR operation and operation length
     pub cig: Cigar,
+    /// position of cigar op on reference
     pub ref_pos: u32,
+    /// position of cigar op on read
     pub read_pos: u32,
 }
 
@@ -53,31 +93,15 @@ pub struct CigarPos {
 
 //THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-quick_error! {
-    #[derive(Debug)]
-    pub enum CigarOrAnchorError {
-        UnsupportedOperation(msg: String) {
-            description("Unsupported CIGAR operation")
-            display(x) -> ("{}: {}", x.description(), msg)
-        }
-        UnexpectedOperation(msg: String) {
-            description("CIGAR operation not allowed at this point")
-            display(x) -> ("{}: {}", x.description(), msg)
-        }
-        AnchorRangeOutsideRead(msg: String) {
-            description("Attempted to find sequence anchors for a range completely outside of the sequence.")
-            display(x) -> ("{}: {}", x.description(), msg)
-        }
-    }
-}
-
 /// Creates a vector of CigarPos, which contain each cigar operation and the reference position
 /// and read position at the start of the operation
 ///
 /// # Arguments
+/// - `refpos`: the starting reference position for the read
+/// - `cigar_string_view` - cigar string to create cigar position list for
 ///
-/// * `cigar_string_view` - cigar string to create cigar position list for
-///
+/// # Returns
+/// A vector of CigarPos corresponding to the CIGAR string.
 pub fn create_augmented_cigarlist(
     refpos: u32,
     cigar_string_view: &CigarStringView,
@@ -191,13 +215,32 @@ pub fn create_augmented_cigarlist(
     Ok(cigar_list)
 }
 
+/// describes the anchor positions which define the read realignment window
 pub struct AnchorPositions {
+    /// the position of the left anchor on the reference. This should be the leftmost base of the left anchor sequence.
     pub left_anchor_ref: u32,
+    /// the position of the right anchor on the reference. This should be the rightmost base of the right anchor sequence.
     pub right_anchor_ref: u32,
+    /// the position of the left anchor on the read. This should be the leftmost base of the left anchor sequence.
     pub left_anchor_read: u32,
+    /// the position of the right anchor on the read. This should be the rightmost base of the right anchor sequence.
     pub right_anchor_read: u32,
 }
 
+
+/// Given a BAM record, and the position (or interval) of a variant (or variant cluster),
+/// find the AnchorPositions which describe the left and right realignment window boundaries on both
+/// read and reference sequence
+///
+/// #Arguments
+/// -`bam_record`: the BAM record to find the anchor sequences for
+/// -`cigarpos_list`: vector of CigarPos for the BAM record, containing both Cigar operations, lengths,
+///                   as well as the positions of each operation on read and reference
+/// -`var_interval`: a GenomicInterval that describes the position of the variant (start and end should be the same).
+/// -`ref_seq`: the reference sequence for the contig/chromosome that `bam_record` is aligned to
+/// -`read_seq`: the read sequence for the read in `bam_record`
+/// -`target_names`: the list of target/contig names described in the BAM file
+/// -`extract_params`: a struct containing parameters for the fragment extraction procedure
 pub fn find_anchors(
     bam_record: &Record,
     cigarpos_list: &Vec<CigarPos>,
@@ -533,18 +576,30 @@ pub fn find_anchors(
     }))
 }
 
-// input: a reference to a vector of variants length n, and a number k
-// output: a vector of all possible haplotypes from the k-th variant onward,
-// where each haplotype is a vector of u8s representing sequence of alleles
+/// A recursive helper function for `generate_haps`. Generates possible haplotypes for a variant cluster
+///  from the k-th variant onwards.
+///
+/// #Arguments
+/// -`var_cluster`: vector of variants
+///- `k`: an integer
+/// #Returns
+/// Returns a vector of all possible haplotypes from the k-th variant onward,
+/// where each haplotype is a vector of u8s representing sequence of alleles
 fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
+    // base case
+    // return a haplotype list with a single empty haplotype
     if k >= var_cluster.len() {
         return vec![vec![]];
     }
 
+    // recursive call
+    // we generate the haplotypes from k onward by generating all the haplotype suffixes from k+1 onward
     let hap_suffixes = generate_haps_k_onward(var_cluster, k + 1);
     let c = (hap_suffixes.len() * var_cluster[k].alleles.len()) as usize;
     let mut hap_list: Vec<Vec<u8>> = Vec::with_capacity(c);
 
+    // we iterate over the possible alleles for the k-th variant and for each one, append it
+    // to each of those haplotype suffixes.
     for a in 0..var_cluster[k].alleles.len() {
         for mut hap_suffix in hap_suffixes.clone() {
             let mut hap = Vec::with_capacity(var_cluster.len() - k);
@@ -557,6 +612,10 @@ fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
     hap_list
 }
 
+/// Generates all possible short-haplotypes for a variant cluster. The short-haplotypes are represented
+///  as a vector of u8s, where the u8s signify the allele number. The set of haplotypes is given
+/// as a vector of these vectors of u8s
+///
 // input: a reference to a vector of variants length n
 // output: a vector of all possible haplotypes
 // where each haplotype is a vector of u8s length n representing sequence of alleles for the variants
@@ -586,7 +645,7 @@ fn extract_var_cluster(
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: Vec<u8> = vec![0u8; var_cluster.len()];
     let n_vars: usize = var_cluster.len() as usize; // number of variants in cluster
-    assert!(n_vars <= extract_params.short_hap_max_snvs);
+    assert!(n_vars <= extract_params.variant_cluster_max_size);
 
     // allele_scores[i][j] contains the Log sum of the probabilities of all short haplotypes
     // that had the jth allele at the ith variant of the cluster.
@@ -636,19 +695,19 @@ fn extract_var_cluster(
 
         // we now want to score hap_window
         let score: LogProb = match extract_params.alignment_type {
-            AlignmentType::NumericallyStableAllAlignment => sum_all_alignments_numerically_stable(
+            AlignmentType::ForwardAlgorithmNumericallyStable => forward_algorithm_numerically_stable(
                 &read_window,
                 &hap_window,
                 align_params.ln(),
                 extract_params.band_width,
             ),
-            AlignmentType::FastAllAlignment => sum_all_alignments(
+            AlignmentType::ForwardAlgorithmNonNumericallyStable => forward_algorithm_non_numerically_stable(
                 &read_window,
                 &hap_window,
                 align_params,
                 extract_params.band_width,
             ),
-            AlignmentType::MaxAlignment => max_alignment(
+            AlignmentType::ViterbiMaxScoringAlignment => viterbi_max_scoring_alignment(
                 &read_window,
                 &hap_window,
                 align_params.ln(),
@@ -800,7 +859,7 @@ pub fn extract_fragment(
             l = var_cluster.len();
             if l == 0
                 || (anc.left_anchor_ref < var_anchors[l - 1].right_anchor_ref
-                    && l < extract_params.short_hap_max_snvs)
+                    && l < extract_params.variant_cluster_max_size)
             {
                 var_cluster.push(var);
                 var_anchors.push(anc);
@@ -842,7 +901,7 @@ pub fn extract_fragment(
     let mut old_frag_ix = 0; // hold onto index in old fragment
                              // save reallocation of this hashmap for every variant
     let mut new_var_ix: HashMap<usize, usize> =
-        HashMap::with_capacity(extract_params.short_hap_max_snvs);
+        HashMap::with_capacity(extract_params.variant_cluster_max_size);
 
     for (anchors, var_cluster) in cluster_lst {
         if IGNORE_INDEL_ONLY_CLUSTERS {
@@ -1003,7 +1062,7 @@ pub fn extract_fragments(
                 let mut ref_seq_u8: Vec<u8> = vec![];
                 fasta
                     .read_all(&chrom, &mut ref_seq_u8)
-                    .chain_err(|| IndexedFastaReadError)?;
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 

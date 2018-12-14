@@ -369,7 +369,7 @@ pub fn count_alignment_events(
 /// #Errors
 /// - ```IndexedFastaOpenError```: error opening the indexed FASTA file
 /// - ```IndexedBamOpenError```: error opening the indexed BAM file
-/// - Error seeking a region from the BAM file.
+/// - ```IndexedBamFetchError```: error fetching region from the indexed BAM file
 /// - ```IndexedBamRecordReadError```: error reading a record from the BAM
 /// - ```IndexedFastaReadError```: error reading a record from the FASTA
 /// - Any errors incurred while creating the augmented cigar list or counting alignment events.
@@ -404,20 +404,8 @@ pub fn estimate_alignment_parameters(
         not_equal: 1,
     };
 
-    // the strategy used for iterating over the BAM entries is as follows:
-    // if a genomic region was specified, then ```get_interval_lst``` puts that genomic region into a vector (interval_lst)
-    // containing only that one region. Then we iterate over the region list and seek every region,
-    // which effectively means we just seek that single genomic interval.
-    //
-    // if a genomic region was not specified, then we want to iterate over the whole BAM file.
-    // so get_interval_lst returns a list of genomic intervals that contain each whole chromosome
-    // as described by the BAM header SQ lines. Then we iterate over the interval lst and seek each
-    // interval separately, which effectively just iterates over all the BAM entries.
-    //
-    // the reason for this strange design (instead of either fetching a region beforehand or not and
-    // then just iterating over all of ```bam_ix.pileup()```) is the following:
-    // if an indexed reader is used, and fetch is never called, pileup() hangs.
-
+    // interval_lst has either the single specified genomic region, or list of regions covering all chromosomes
+    // for more information about this design decision, see get_interval_lst implementation in util.rs
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
     let mut bam_ix =
         bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
@@ -425,7 +413,7 @@ pub fn estimate_alignment_parameters(
     for iv in interval_lst {
         bam_ix
             .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
-            .chain_err(|| "Error seeking BAM file while estimating alignment parameters.")?;
+            .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() {
             let record =

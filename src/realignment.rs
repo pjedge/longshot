@@ -7,9 +7,9 @@ static ALLOW_END_GAPS: bool = false;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AlignmentType {
-    FastAllAlignment,
-    NumericallyStableAllAlignment,
-    MaxAlignment,
+    ForwardAlgorithmNonNumericallyStable,
+    ForwardAlgorithmNumericallyStable,
+    ViterbiMaxScoringAlignment,
 }
 
 // these parameters describe state transition probabilities for a pair HMM
@@ -102,7 +102,7 @@ impl AlignmentParameters {
     }
 }
 
-pub fn sum_all_alignments(
+pub fn forward_algorithm_non_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
     params: AlignmentParameters,
@@ -192,11 +192,11 @@ pub fn sum_all_alignments(
     if middle_prev[w.len()] != 0.0 {
         LogProb::from(Prob(middle_prev[w.len()]))
     } else {
-        sum_all_alignments_numerically_stable(v, w, params.ln(), band_width)
+        forward_algorithm_numerically_stable(v, w, params.ln(), band_width)
     }
 }
 
-pub fn sum_all_alignments_numerically_stable(
+pub fn forward_algorithm_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
     params: LnAlignmentParameters,
@@ -283,7 +283,7 @@ pub fn sum_all_alignments_numerically_stable(
     middle_prev[w.len()]
 }
 
-pub fn max_alignment(
+pub fn viterbi_max_scoring_alignment(
     v: &Vec<char>,
     w: &Vec<char>,
     params: LnAlignmentParameters,
