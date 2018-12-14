@@ -1,3 +1,5 @@
+//! Miscellaneous utility functions for printing, parsing, type conversion, etc.
+
 use bio::stats::{LogProb, Prob};
 use chrono::prelude::*;
 use clap::ArgMatches;

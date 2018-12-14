@@ -1,3 +1,5 @@
+//! Wrapper functions for the SPOA (simd-accelerated partial order alignment) library
+
 extern "C" {
     fn poa_func(
         seqs: *const *const u8,

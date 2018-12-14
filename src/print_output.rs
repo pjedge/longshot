@@ -1,3 +1,5 @@
+//! Print Longshot output in VCF format
+
 use bio::stats::PHREDProb;
 use errors::*;
 use genotype_probs::Genotype;

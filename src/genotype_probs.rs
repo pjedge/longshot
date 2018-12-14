@@ -1,3 +1,6 @@
+//! Contains structs for representing tables of genotype probabilities, as well as estimation of
+//!  genotype priors.
+
 use bio::stats::*;
 use errors::*;
 use std::collections::HashMap;

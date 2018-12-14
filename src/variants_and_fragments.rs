@@ -1,3 +1,5 @@
+//! Data structures to represent variants and haplotype fragments defined over those variants.
+
 use bio::stats::LogProb;
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
