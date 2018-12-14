@@ -1,3 +1,4 @@
+//! Structs and functions for sequence alignment (Smith-waterman and Pair-HMM forward algorithm)
 // original author: Ben Pullman
 // modified: Peter Edge, September 2017
 

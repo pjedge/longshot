@@ -1,4 +1,5 @@
-// calls HapCUT2 as a static library
+//! Contains functions related to haplotype assembly, including a FFI wrapper function for HapCUT2,
+//! MEC criteria, haplotype read separation, etc.
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
 use rust_htslib::bam;

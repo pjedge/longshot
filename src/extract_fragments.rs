@@ -613,16 +613,41 @@ fn generate_haps_k_onward(var_cluster: &Vec<Var>, k: usize) -> Vec<Vec<u8>> {
 }
 
 /// Generates all possible short-haplotypes for a variant cluster. The short-haplotypes are represented
-///  as a vector of u8s, where the u8s signify the allele number. The set of haplotypes is given
-/// as a vector of these vectors of u8s
+/// as a vector of u8s, where the u8s signify the allele number. The set of haplotypes is returned
+/// as a vector of these vectors of u8s.
 ///
-// input: a reference to a vector of variants length n
-// output: a vector of all possible haplotypes
-// where each haplotype is a vector of u8s length n representing sequence of alleles for the variants
+/// input: a reference to a vector of variants length n
+/// output: a vector of all possible haplotypes
+/// where each haplotype is a vector of u8s length n representing sequence of alleles for the variants
+///
+/// #Arguments
+/// - `var_cluster`: vector of variants
+///
+/// #Returns
+/// - returns a vector of vectors of u8s. The u8s represent allele numbers. Each inner
+///    vector represents a different possible haplotype and has length equal to the input variant cluster.
+///
+/// #Example
+///
+/// For two variant sites (length of var_cluster == 2), where the first site is triallelic and the
+///  second site is biallelic, the returned haplotypes are:
+/// - [0,0]
+/// - [0,1]
+/// - [1,0]
+/// - [1,1]
+/// - [2,0]
+/// - [2,1]
+///
+/// See the following unit tests for more examples:
+/// - `test_generate_haplotypes_basic`
+/// - `test_generate_haplotypes_multivariant`
+/// - `test_generate_haplotypes_multiallelic`
+/// - `test_generate_haplotypes_multiallelic2`
 fn generate_haps(var_cluster: &Vec<Var>) -> Vec<Vec<u8>> {
     generate_haps_k_onward(var_cluster, 0)
 }
 
+///
 fn extract_var_cluster(
     read_seq: &Vec<char>,
     ref_seq: &Vec<char>,
