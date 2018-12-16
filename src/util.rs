@@ -1,6 +1,11 @@
+//! Miscellaneous utility functions for printing, parsing, type conversion, etc.
+
+use bio::stats::{LogProb, Prob};
+use chrono::prelude::*;
+use clap::ArgMatches;
+use errors::*;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
-use chrono::prelude::*;
 
 pub static INDEX_FREQ: usize = 1000;
 pub static MAX_VCF_QUAL: f64 = 500.0;
@@ -13,66 +18,156 @@ pub fn print_time() -> String {
 // lines that document the time
 pub static SPACER: &str = "                   ";
 
+pub fn parse_u8(argmatch: &ArgMatches, arg_name: &str) -> Result<u8> {
+    let parse_result: u8 = argmatch
+        .value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<u8>()
+        .chain_err(|| format!("{} must be an integer between 0 and 255!", arg_name))?;
+    Ok(parse_result)
+}
+
+pub fn parse_u32(argmatch: &ArgMatches, arg_name: &str) -> Result<u32> {
+    let parse_result: u32 = argmatch
+        .value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<u32>()
+        .chain_err(|| format!("{} must be a positive integer!", arg_name))?;
+    Ok(parse_result)
+}
+
+pub fn parse_usize(argmatch: &ArgMatches, arg_name: &str) -> Result<usize> {
+    let parse_result: usize = argmatch
+        .value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<usize>()
+        .chain_err(|| format!("{} must be a positive integer!", arg_name))?;
+    Ok(parse_result)
+}
+
+pub fn parse_positive_f64(argmatch: &ArgMatches, arg_name: &str) -> Result<f64> {
+    let parse_result: f64 = argmatch
+        .value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<f64>()
+        .chain_err(|| format!("{} must be a positive float!", arg_name))?;
+    ensure!(
+        parse_result > 0.0,
+        format!("{} must be a positive float!", arg_name)
+    );
+    Ok(parse_result)
+}
+
+pub fn parse_prob_into_logprob(argmatch: &ArgMatches, arg_name: &str) -> Result<LogProb> {
+    let parse_result: f64 = argmatch
+        .value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<f64>()
+        .chain_err(|| format!("{} must be a float between 0.0 and 1.0!", arg_name))?;
+    ensure!(
+        parse_result >= 0.0 && parse_result <= 1.0,
+        format!("{} must be a float between 0.0 and 1.0!", arg_name)
+    );
+    Ok(LogProb::from(Prob(parse_result)))
+}
+
+pub fn parse_flag(argmatch: &ArgMatches, arg_name: &str) -> Result<bool> {
+    let is_flag_set = match argmatch.occurrences_of(arg_name) {
+        0 => false,
+        1 => true,
+        _ => {
+            bail!(format!("{} cannot be specified multiple times.", arg_name));
+        }
+    };
+    Ok(is_flag_set)
+}
+
 // this is really ugly. TODO a less verbose implementation
-pub fn parse_region_string(region_string: Option<&str>,
-                           bamfile_name: &String)
-                           -> Option<GenomicInterval> {
-    let bam = bam::Reader::from_path(bamfile_name).unwrap();
+pub fn parse_region_string(
+    region_string: Option<&str>,
+    bamfile_name: &String,
+) -> Result<Option<GenomicInterval>> {
+    let bam = bam::Reader::from_path(bamfile_name).chain_err(|| ErrorKind::BamOpenError)?;
 
     match region_string {
         Some(r) if r.contains(":") && r.contains("-") => {
             let split1: Vec<&str> = r.split(":").collect();
             if split1.len() != 2 {
-                panic!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
+                bail!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
             }
             let split2: Vec<&str> = split1[1].split("-").collect();
             if split2.len() != 2 {
-                panic!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
+                bail!("Invalid format for region. Please use <chrom> or <chrom:start-stop>");
             }
             let iv_chrom = split1[0].to_string();
-            let iv_start = split2[0].parse::<u32>().expect("Invalid position value specified in region string."); // read in as 1-based inclusive range
-            let iv_end = split2[1].parse::<u32>().expect("Invalid position value specified in region string.");   // read in as 1-based inclusive range
+            let iv_start = split2[0]
+                .parse::<u32>()
+                .chain_err(|| "Invalid position value specified in region string.")?; // read in as 1-based inclusive range
+            let iv_end = split2[1]
+                .parse::<u32>()
+                .chain_err(|| "Invalid position value specified in region string.")?; // read in as 1-based inclusive range
 
             let mut tid: u32 = 0;
             for name in bam.header().target_names() {
-                if u8_to_string(name) == iv_chrom {
+                if u8_to_string(name)? == iv_chrom {
                     break;
                 }
                 tid += 1;
             }
             if tid as usize == bam.header().target_names().len() {
-                panic!("Chromosome name for region is not in BAM file.");
+                bail!("Chromosome name for region is not in BAM file.");
             }
 
-            Some(GenomicInterval {
+            let tlen = bam
+                .header()
+                .target_len(tid)
+                .chain_err(|| ErrorKind::BamHeaderTargetLenAccessError)?;
+
+            ensure!(
+                iv_start > 0,
+                "--region start position must be greater than 0."
+            );
+            ensure!(
+                iv_start < tlen,
+                "--region start position exceeds the length of the contig."
+            );
+            ensure!(
+                iv_end <= tlen,
+                "--region end position exceeds the length of the contig."
+            );
+
+            Ok(Some(GenomicInterval {
                 tid: tid,
                 chrom: iv_chrom,
                 start_pos: iv_start - 1, // convert to 0-based inclusive range
                 end_pos: iv_end - 1,     // convert to 0-based inclusive range
-            })
+            }))
         }
         Some(r) => {
             let r_str = r.to_string();
             let mut tid: u32 = 0;
             for name in bam.header().target_names() {
-                if u8_to_string(name) == r_str {
+                if u8_to_string(name)? == r_str {
                     break;
                 }
                 tid += 1;
             }
             if tid as usize == bam.header().target_names().len() {
-                panic!("Chromosome name for region is not in BAM file.");
+                bail!("Chromosome name for region is not in BAM file.");
             }
 
-            let tlen = bam.header().target_len(tid).unwrap();
-            Some(GenomicInterval {
+            let tlen = bam
+                .header()
+                .target_len(tid)
+                .chain_err(|| ErrorKind::BamHeaderTargetLenAccessError)?;
+            Ok(Some(GenomicInterval {
                 tid: tid,
                 chrom: r_str,
                 start_pos: 0,
                 end_pos: tlen - 1,
-            })
+            }))
         }
-        None => None,
+        None => Ok(None),
     }
 }
 
@@ -91,12 +186,11 @@ pub struct GenomicInterval {
 pub struct DensityParameters {
     pub n: usize,
     pub len: usize,
-    pub gq: f64
+    pub gq: f64,
 }
 
-
-pub fn u8_to_string(u: &[u8]) -> String {
-    String::from_utf8(u.to_vec()).unwrap()
+pub fn u8_to_string(u: &[u8]) -> Result<String> {
+    Ok(String::from_utf8(u.to_vec()).chain_err(|| "Error converting u8 to String.")?)
 }
 
 //
@@ -108,8 +202,10 @@ pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
         if c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N' {
             v.push(c);
         } else {
-            eprintln!("Warning: Unexpected base \"{}\" encountered. Replaced with \"N\".",
-                      c);
+            eprintln!(
+                "Warning: Unexpected base \"{}\" encountered. Replaced with \"N\".",
+                c
+            );
             v.push('N');
         }
     }
@@ -119,14 +215,14 @@ pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
 pub fn has_non_acgt(s: &String) -> bool {
     for c in s.chars() {
         if !(c == 'A' || c == 'C' || c == 'G' || c == 'T') {
-            return true
+            return true;
         }
     }
     false
 }
 
-pub fn parse_target_names(bam_file: &String) -> Vec<String> {
-    let bam = bam::Reader::from_path(bam_file).unwrap();
+pub fn parse_target_names(bam_file: &String) -> Result<Vec<String>> {
+    let bam = bam::Reader::from_path(bam_file).chain_err(|| ErrorKind::BamOpenError)?;
     let header_view = bam.header();
     let target_names_dec: Vec<&[u8]> = header_view.target_names();
     let mut target_names: Vec<String> = vec![];
@@ -141,11 +237,11 @@ pub fn parse_target_names(bam_file: &String) -> Vec<String> {
         target_names.push(name_string);
     }
 
-    target_names
+    Ok(target_names)
 }
 
-pub fn get_whole_genome_intervals(bam_file: &String) -> Vec<GenomicInterval> {
-    let bam = bam::Reader::from_path(bam_file).unwrap();
+pub fn get_whole_genome_intervals(bam_file: &String) -> Result<Vec<GenomicInterval>> {
+    let bam = bam::Reader::from_path(bam_file).chain_err(|| ErrorKind::BamOpenError)?;
     let header_view = bam.header();
     let target_names_dec: Vec<&[u8]> = header_view.target_names();
     let mut intervals: Vec<GenomicInterval> = vec![];
@@ -157,28 +253,40 @@ pub fn get_whole_genome_intervals(bam_file: &String) -> Vec<GenomicInterval> {
             name_vec.push(dec as char);
         }
         let name_string: String = name_vec.into_iter().collect();
-        intervals.push(GenomicInterval{
+        intervals.push(GenomicInterval {
             tid: tid as u32,
             chrom: name_string,
             start_pos: 0,
-            end_pos: header_view.target_len(tid as u32).unwrap()-1
+            end_pos: header_view
+                .target_len(tid as u32)
+                .chain_err(|| format!("Error accessing target len for tid {}", tid))?
+                - 1,
         });
     }
 
-    intervals
+    Ok(intervals)
 }
 
-// given a bam file name and a possible genomic interval,
-// if the interval exists then just return a vector holding that lone interval
-// otherwise, if the interval is None,
-// return a vector holding GenomicIntervals representing the whole genome.
-pub fn get_interval_lst(bam_file: &String, interval: &Option<GenomicInterval>) -> Vec<GenomicInterval> {
+// the strategy used for iterating over the BAM entries is as follows:
+// if a genomic region was specified, then ```get_interval_lst``` puts that genomic region into a vector (interval_lst)
+// containing only that one region. Then we iterate over the region list and seek every region,
+// which effectively means we just seek that single genomic interval.
+//
+// if a genomic region was not specified, then we want to iterate over the whole BAM file.
+// so get_interval_lst returns a list of genomic intervals that contain each whole chromosome
+// as described by the BAM header SQ lines. Then we iterate over the interval lst and seek each
+// interval separately, which effectively just iterates over all the BAM entries.
+//
+// the reason for this strange design (instead of either fetching a region beforehand or not and
+// then just iterating over all of it is the following:
+// if an indexed reader is used, and fetch is never called, pileup() hangs and accessing BAM records
+// doesn't work.
+pub fn get_interval_lst(
+    bam_file: &String,
+    interval: &Option<GenomicInterval>,
+) -> Result<Vec<GenomicInterval>> {
     match interval {
-        &Some(ref iv) => {
-            vec![iv.clone()]
-        }
-        &None => {
-            get_whole_genome_intervals(bam_file)
-        }
+        &Some(ref iv) => Ok(vec![iv.clone()]),
+        &None => get_whole_genome_intervals(bam_file),
     }
 }
