@@ -1,14 +1,18 @@
-// calls HapCUT2 as a static library
-use variants_and_fragments::*;
-use bio::stats::{LogProb, Prob, PHREDProb};
-use std::collections::{HashMap, HashSet};
-use std::char::from_digit;
+//! Contains functions related to haplotype assembly, including a FFI wrapper function for HapCUT2,
+//! MEC criteria, haplotype read separation, etc.
+use bio::stats::{LogProb, PHREDProb, Prob};
+use errors::*;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
+use std::char::from_digit;
+use std::collections::{HashMap, HashSet};
 use util::*;
+use variants_and_fragments::*;
 
-pub fn separate_fragments_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb) -> (HashSet<String>, HashSet<String>) {
-
+pub fn separate_fragments_by_haplotype(
+    flist: &Vec<Fragment>,
+    threshold: LogProb,
+) -> (HashSet<String>, HashSet<String>) {
     let mut h1 = HashSet::new();
     let mut h2 = HashSet::new();
 
@@ -17,7 +21,7 @@ pub fn separate_fragments_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb
     let mut unassigned_count = 0;
 
     for ref f in flist {
-        let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0],f.p_read_hap[1]);
+        let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0], f.p_read_hap[1]);
         let p_read_hap0: LogProb = f.p_read_hap[0] - total;
         let p_read_hap1: LogProb = f.p_read_hap[1] - total;
 
@@ -38,62 +42,105 @@ pub fn separate_fragments_by_haplotype(flist: &Vec<Fragment>, threshold: LogProb
     let h2_percent: f64 = 100.0 * h2_count as f64 / total;
     let unassigned_percent: f64 = 100.0 * unassigned_count as f64 / total;
 
-    eprintln!("{}     {} reads ({:.2}%) assigned to haplotype 1", print_time(), h1_count, h1_percent);
-    eprintln!("{}     {} reads ({:.2}%) assigned to haplotype 2", print_time(), h2_count, h2_percent);
-    eprintln!("{}     {} reads ({:.2}%) unassigned.", print_time(), unassigned_count, unassigned_percent);
+    eprintln!(
+        "{}     {} reads ({:.2}%) assigned to haplotype 1",
+        print_time(),
+        h1_count,
+        h1_percent
+    );
+    eprintln!(
+        "{}     {} reads ({:.2}%) assigned to haplotype 2",
+        print_time(),
+        h2_count,
+        h2_percent
+    );
+    eprintln!(
+        "{}     {} reads ({:.2}%) unassigned.",
+        print_time(),
+        unassigned_count,
+        unassigned_percent
+    );
 
-    (h1,h2)
+    (h1, h2)
 }
 
-pub fn separate_bam_reads_by_haplotype(bamfile_name: &String, interval: &Option<GenomicInterval>,
-                                       hap_bam_prefix: String, h1: &HashSet<String>, h2: &HashSet<String>,
-                                       min_mapq: u8){
+pub fn separate_bam_reads_by_haplotype(
+    bamfile_name: &String,
+    interval: &Option<GenomicInterval>,
+    hap_bam_prefix: String,
+    h1: &HashSet<String>,
+    h2: &HashSet<String>,
+    min_mapq: u8,
+) -> Result<()> {
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval)
+        .chain_err(|| "Error getting genomic interval list.")?;
 
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval);
-
-    let mut bam_ix = bam::IndexedReader::from_path(bamfile_name).unwrap();
+    let mut bam_ix =
+        bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     let h1_bam_file = format!("{}.hap1.bam", &hap_bam_prefix);
     let h2_bam_file = format!("{}.hap2.bam", &hap_bam_prefix);
     let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
 
     let header = bam::Header::from_template(&bam_ix.header);
-    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header).unwrap();
-    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header).unwrap();
-    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header).unwrap();
+    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header)
+        .chain_err(|| ErrorKind::BamWriterOpenError(h1_bam_file))?;
+    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header)
+        .chain_err(|| ErrorKind::BamWriterOpenError(h2_bam_file))?;
+    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header)
+        .chain_err(|| ErrorKind::BamWriterOpenError(unassigned_bam_file))?;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid, iv.start_pos, iv.end_pos + 1).ok().expect("Error seeking BAM file while extracting fragments.");
+        bam_ix
+            .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
+            .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() {
-            let record = r.unwrap();
+            let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
-            if record.is_quality_check_failed() || record.is_duplicate() ||
-                record.is_secondary() || record.is_unmapped() || record.mapq() < min_mapq
-                || record.is_supplementary() {
+            if record.is_quality_check_failed()
+                || record.is_duplicate()
+                || record.is_secondary()
+                || record.is_unmapped()
+                || record.mapq() < min_mapq
+                || record.is_supplementary()
+            {
                 continue;
             }
 
-            let read_id = u8_to_string(record.qname());
+            let qname = u8_to_string(record.qname())?;
 
-            if h1.contains(&read_id) {
-                h1_bam.write(&record).unwrap();
-            } else if h2.contains(&read_id) {
-                h2_bam.write(&record).unwrap();
+            if h1.contains(&qname) {
+                h1_bam
+                    .write(&record)
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
+            } else if h2.contains(&qname) {
+                h2_bam
+                    .write(&record)
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
             } else {
-                unassigned_bam.write(&record).unwrap();
+                unassigned_bam
+                    .write(&record)
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
             }
         }
     }
+
+    Ok(())
 }
 
-pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, max_p_miscall: f64) -> Vec<Vec<u8>> {
+pub fn generate_flist_buffer(
+    flist: &Vec<Fragment>,
+    phase_variant: &Vec<bool>,
+    max_p_miscall: f64,
+    single_reads: bool,
+) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
-        let mut blocks = 0;
-        let mut n_calls = 0;
+        let mut blocks: usize = 0;
+        let mut n_calls: usize = 0;
 
         for c in frag.clone().calls {
             if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
@@ -104,7 +151,10 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
                 prev_call = c.var_ix
             }
         }
-        if n_calls < 2 {
+        if !single_reads && n_calls == 1 {
+            continue;
+        }
+        if n_calls == 0 {
             continue;
         }
 
@@ -122,16 +172,32 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
         let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)){
+            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
-                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
+                    ensure!(
+                        c.allele == 0 as u8 || c.allele == 1 as u8,
+                        "Allele is not valid for incorporation into fragment file."
+                    );
+                    line.push(
+                        from_digit(c.allele as u32, 10)
+                            .chain_err(|| "Error converting allele digit to char.")?
+                            as u8,
+                    )
                 } else {
                     line.push(' ' as u8);
                     for u in (c.var_ix + 1).to_string().into_bytes() {
                         line.push(u as u8);
                     }
                     line.push(' ' as u8);
-                    line.push(from_digit(c.allele as u32, 10).unwrap() as u8)
+                    ensure!(
+                        c.allele == 0 as u8 || c.allele == 1 as u8,
+                        "Allele is not valid for incorporation into fragment file."
+                    );
+                    line.push(
+                        from_digit(c.allele as u32, 10)
+                            .chain_err(|| "Error converting allele digit to char.")?
+                            as u8,
+                    )
                 }
                 let mut qint = *PHREDProb::from(c.qual) as u32 + 33;
                 if qint > 126 {
@@ -155,25 +221,28 @@ pub fn generate_flist_buffer(flist: &Vec<Fragment>, phase_variant: &Vec<bool>, m
 
         buffer.push(line);
     }
-    buffer
+    Ok(buffer)
 }
 
 extern "C" {
-    fn hapcut2(fragmentbuffer: *const *const u8,
-               variantbuffer: *const *const u8,
-               fragments: usize,
-               snps: usize,
-               hap1: *mut u8,
-               phase_sets: *mut i32);
+    fn hapcut2(
+        fragmentbuffer: *const *const u8,
+        variantbuffer: *const *const u8,
+        fragments: usize,
+        snps: usize,
+        hap1: *mut u8,
+        phase_sets: *mut i32,
+    );
 }
 
-pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,
-                    vcf_buffer: &Vec<Vec<u8>>,
-                    fragments: usize,
-                    snps: usize,
-                    hap1: &mut Vec<u8>,
-                    phase_sets: &mut Vec<i32>) {
-
+pub fn call_hapcut2(
+    frag_buffer: &Vec<Vec<u8>>,
+    vcf_buffer: &Vec<Vec<u8>>,
+    fragments: usize,
+    snps: usize,
+    hap1: &mut Vec<u8>,
+    phase_sets: &mut Vec<i32>,
+) {
     unsafe {
         let mut frag_ptrs: Vec<*const u8> = Vec::with_capacity(frag_buffer.len());
         let mut vcf_ptrs: Vec<*const u8> = Vec::with_capacity(vcf_buffer.len());
@@ -186,17 +255,22 @@ pub fn call_hapcut2(frag_buffer: &Vec<Vec<u8>>,
             vcf_ptrs.push(line.as_ptr());
         }
 
-        hapcut2(frag_ptrs.as_ptr(),
-                vcf_ptrs.as_ptr(),
-                fragments,
-                snps,
-                hap1.as_mut_ptr(),
-                phase_sets.as_mut_ptr());
+        hapcut2(
+            frag_ptrs.as_ptr(),
+            vcf_ptrs.as_ptr(),
+            fragments,
+            snps,
+            hap1.as_mut_ptr(),
+            phase_sets.as_mut_ptr(),
+        );
     }
 }
 
-pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall: f64) {
-
+pub fn calculate_mec(
+    flist: &Vec<Fragment>,
+    varlist: &mut VarList,
+    max_p_miscall: f64,
+) -> Result<()> {
     let hap_ixs = vec![0, 1];
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
@@ -207,7 +281,6 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall
     }
 
     for f in 0..flist.len() {
-
         let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
 
         for &hap_ix in &hap_ixs {
@@ -219,7 +292,11 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall
                         continue; // only care about phased variants.
                     }
 
-                    let hap_allele = if hap_ix == 0 {var.genotype.0} else {var.genotype.1};
+                    let hap_allele = if hap_ix == 0 {
+                        var.genotype.0
+                    } else {
+                        var.genotype.1
+                    };
 
                     // read allele matches haplotype allele
                     if call.allele != hap_allele {
@@ -229,7 +306,11 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall
             }
         }
 
-        let min_error_hap = if mismatched_vars[0].len() < mismatched_vars[1].len() { 0 } else { 1 };
+        let min_error_hap = if mismatched_vars[0].len() < mismatched_vars[1].len() {
+            0
+        } else {
+            1
+        };
 
         for &ix in &mismatched_vars[min_error_hap] {
             varlist.lst[ix].mec += 1;
@@ -252,10 +333,20 @@ pub fn calculate_mec(flist: &Vec<Fragment>, varlist: &mut VarList, max_p_miscall
     for mut var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
-                var.mec_frac_block = *block_mec.get(&ps).unwrap() as f64 / *block_total.get(&ps).unwrap() as f64;
-                var.mec_frac_variant = var.mec as f64 / var.allele_counts.iter().sum::<usize>() as f64;
+                var.mec_frac_block = *block_mec
+                    .get(&ps)
+                    .chain_err(|| "Error retrieving MEC for phase set.")?
+                    as f64
+                    / *block_total
+                        .get(&ps)
+                        .chain_err(|| "Error retrieving MEC for phase set.")?
+                        as f64;
+                var.mec_frac_variant =
+                    var.mec as f64 / var.allele_counts.iter().sum::<usize>() as f64;
             }
             None => {}
         }
     }
+
+    Ok(())
 }
