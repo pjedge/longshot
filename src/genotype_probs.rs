@@ -5,6 +5,11 @@ use bio::stats::*;
 use errors::*;
 use std::collections::HashMap;
 use util::*;
+use variants_and_fragments::{Fragment,VarList};
+
+pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file_path:&String){
+    return
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Genotype(pub u8, pub u8);

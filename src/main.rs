@@ -43,7 +43,7 @@ use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::ExtractFragmentParameters;
-use genotype_probs::GenotypePriors;
+use genotype_probs::{GenotypePriors,print_allele_skew_data};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::AlignmentType;
@@ -617,6 +617,19 @@ fn run() -> Result<()> {
                 writeln!(fragment_file, "{}", u8_to_string(&line_u8)?)
                     .chain_err(|| "Error writing to fragment file.")?;
             }
+
+            // print allele skew information to the debug directory
+
+
+            let sfn = match Path::new(&debug_dir).join(&"allele_skew.txt").to_str() {
+                Some(s) => s.to_owned(),
+                None => {
+                    bail!("Invalid unicode provided for variant debug directory");
+                }
+            };
+            //let skew_file_path = Path::new(&sfn);
+            print_allele_skew_data(&flist, &varlist, &sfn)
+
         }
         &None => {}
     }
