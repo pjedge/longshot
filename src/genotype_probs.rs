@@ -2,13 +2,99 @@
 //!  genotype priors.
 
 use bio::stats::*;
+use bio::alphabets::dna::*;
 use errors::*;
 use std::collections::HashMap;
 use util::*;
 use variants_and_fragments::{Fragment,VarList};
+use std::fs::File;
+use std::io::prelude::*;
+use std::path::Path;
 
-pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file_path:&String){
-    return
+pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file:&String, window_size: usize, max_p_miscall:f64){
+
+    assert!(window_size <= 21);
+    assert!(window_size % 2 == 1);
+
+    let amt_to_shave = (21 - window_size) / 2;
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
+
+    // key is (sequence_context, ref, var)
+    let mut counts: HashMap<(String, String, String), usize> = HashMap::new();
+
+    for ref fragment in flist {
+        for ref call in &fragment.calls {
+
+            if call.qual >= ln_max_p_miscall {
+                continue;
+            }
+
+            if varlist.lst[call.var_ix].alleles.len() != 2 {
+                continue;
+            }
+
+            let sequence_context: String = match fragment.reverse_strand {
+                true => {
+                    let mut sc: Vec<u8> = varlist.lst[call.var_ix].sequence_context.as_bytes().to_vec();
+                    sc[10] = 'N' as u8;
+                    String::from_utf8(revcomp(&sc[amt_to_shave..21-amt_to_shave].to_vec())).unwrap()
+                },
+                false => {
+                    let mut sc: Vec<u8> = varlist.lst[call.var_ix].sequence_context.as_bytes().to_vec();
+                    sc[10] = 'N' as u8;
+                    String::from_utf8(sc[amt_to_shave..21-amt_to_shave].to_vec()).unwrap()
+                }
+            };
+
+
+            let ref_allele = match fragment.reverse_strand {
+                true => {
+                    match varlist.lst[call.var_ix].alleles[0].as_ref() {
+                        "A" => 'T'.to_string(),
+                        "T" => 'A'.to_string(),
+                        "G" => 'C'.to_string(),
+                        "C" => 'G'.to_string(),
+                        _ => panic!("Invalid reference base")
+                    }
+                }
+                false => {
+                    varlist.lst[call.var_ix].alleles[0].clone()
+                }
+            };
+
+            let var_allele = match fragment.reverse_strand {
+                true => {
+                    match varlist.lst[call.var_ix].alleles[1].as_ref() {
+                        "A" => 'T'.to_string(),
+                        "T" => 'A'.to_string(),
+                        "G" => 'C'.to_string(),
+                        "C" => 'G'.to_string(),
+                        _ => panic!("Invalid variant base")
+                    }
+                }
+                false => {
+                    varlist.lst[call.var_ix].alleles[1].clone()
+                }
+            };
+
+
+            // iterate the counts for this observation in the counts hashmap
+            *counts
+                .entry((sequence_context, ref_allele.clone(), var_allele.clone()))
+                .or_insert(0) += 1;
+
+        }
+    }
+
+    let file_path = Path::new(skew_file);
+    let vcf_display = file_path.display();
+    // Open a file in write-only mode, returns `io::Result<File>`
+    let mut file = File::create(&file_path)
+        .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string())).unwrap();
+
+    for (&(ref sc, ref r, ref v), &count) in &counts {
+        writeln!(file,"{}\t{}\t{}\t{}",sc,r,v,count).unwrap();
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

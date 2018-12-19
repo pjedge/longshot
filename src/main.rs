@@ -628,7 +628,7 @@ fn run() -> Result<()> {
                 }
             };
             //let skew_file_path = Path::new(&sfn);
-            print_allele_skew_data(&flist, &varlist, &sfn)
+            print_allele_skew_data(&flist, &varlist, &sfn, 11, max_p_miscall);
 
         }
         &None => {}

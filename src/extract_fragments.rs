@@ -829,6 +829,7 @@ pub fn extract_fragment(
         id: id,
         calls: vec![],
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
+        reverse_strand: bam_record.is_reverse()
     };
 
     if bam_record.is_quality_check_failed()

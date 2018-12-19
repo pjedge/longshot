@@ -25,6 +25,7 @@ pub struct Fragment {
     pub id: String,
     pub calls: Vec<FragCall>,
     pub p_read_hap: [LogProb; 2],
+    pub reverse_strand: bool
 }
 
 //pub struct VarIx {
