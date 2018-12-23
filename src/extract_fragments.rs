@@ -45,8 +45,6 @@ static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 pub struct ExtractFragmentParameters {
     /// minimum mapping quality to use (extract haplotype information for) a read
     pub min_mapq: u8,
-    /// type of alignment algorithm to use (viterbi, forward algorithm, numerically stable forward algorithm)
-    pub alignment_type: AlignmentType,    //
     /// band width for the alignment algorithm
     pub band_width: usize,
     /// the length of unique and exact-matching "anchor" sequences to left and right of alignment window.
@@ -654,7 +652,7 @@ fn extract_var_cluster(
     var_cluster: Vec<Var>,
     anchors: AnchorPositions,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
+    align_params: &AlignmentParameters,
 ) -> Vec<FragCall> {
     let mut calls: Vec<FragCall> = vec![];
 
@@ -719,26 +717,12 @@ fn extract_var_cluster(
         }
 
         // we now want to score hap_window
-        let score: LogProb = match extract_params.alignment_type {
-            AlignmentType::ForwardAlgorithmNumericallyStable => forward_algorithm_numerically_stable(
-                &read_window,
-                &hap_window,
-                align_params.ln(),
-                extract_params.band_width,
-            ),
-            AlignmentType::ForwardAlgorithmNonNumericallyStable => forward_algorithm_non_numerically_stable(
-                &read_window,
-                &hap_window,
-                align_params,
-                extract_params.band_width,
-            ),
-            AlignmentType::ViterbiMaxScoringAlignment => viterbi_max_scoring_alignment(
-                &read_window,
-                &hap_window,
-                align_params.ln(),
-                extract_params.band_width,
-            ),
-        };
+        let score: LogProb = forward_algorithm_higher_order_non_numerically_stable(
+            &read_window,
+            &hap_window,
+            &align_params,
+            extract_params.band_width,
+        );
 
         assert!(score > LogProb::ln_zero());
 
@@ -815,7 +799,7 @@ pub fn extract_fragment(
     ref_seq: &Vec<char>,
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
+    align_params: &AlignmentParameters,
     old_frag: Option<Fragment>,
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
@@ -1035,7 +1019,7 @@ pub fn extract_fragments(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
+    align_params: &AlignmentParameters,
     old_flist: Option<Vec<Fragment>>,
 ) -> Result<Vec<Fragment>> {
     let t_names = parse_target_names(&bam_file)?;

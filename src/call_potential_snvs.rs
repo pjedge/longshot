@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use bio::io::fasta;
 //,HashSet};
-use bio::stats::LogProb;
+use bio::stats::{LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
@@ -80,7 +80,7 @@ pub fn call_potential_snvs(
     max_coverage: u32,
     min_mapq: u8,
     max_p_miscall: f64,
-    ln_align_params: LnAlignmentParameters,
+    _ln_align_params: LnAlignmentParameters,
     potential_snv_cutoff: LogProb,
 ) -> Result<VarList> {
 
@@ -354,7 +354,12 @@ pub fn call_potential_snvs(
                     0u8
                 };
 
-                let qual = ln_align_params.emission_probs.not_equal;
+                ///////////////////////////////////////////////////////
+                //TODO
+                // this needs to be replaced with a permanent solution
+                ///////////////////////////////////////////////////////
+                let qual = LogProb::from(Prob(0.01));
+                ///////////////////////////////////////////////////////
 
                 let call = FragCall {
                     frag_ix: None,                                    // index into fragment list

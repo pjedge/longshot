@@ -14,51 +14,33 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::Read;
 use util::*;
-
-/// represents the 3 states for the sequence alignment Pair-HMM
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AlignmentState {
-    Match,
-    Insertion,
-    Deletion,
-}
-
-/// represents a transition between two states in the sequence alignment Pair-HMM
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StateTransition {
-    pub prev_state: AlignmentState,
-    pub current_state: AlignmentState,
-}
+use std::collections::HashMap;
 
 /// represents counts of different transitions from state-to-state in the Pair-HMM
 ///
 /// the counts in this struct are used to keep track of the different alignment transitions that
 /// are observed in the BAM file. These counts can be used to help us directly estimate alignment parameters
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct TransitionCounts {
-    match_from_match: usize,
-    insertion_from_match: usize,
-    deletion_from_match: usize,
-    insertion_from_insertion: usize,
-    match_from_insertion: usize,
-    deletion_from_deletion: usize,
-    match_from_deletion: usize,
+    pub p: HashMap<(String, String), usize>
 }
 
 /// represents counts of different emission events (aligned bases being equal or not equal) in the BAM
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct EmissionCounts {
-    equal: usize,
-    not_equal: usize,
+    pub p: HashMap<(String, (String, String)), usize>
 }
 
 /// a struct to hold counts of transition events and emission events from the BAM file
 ///
 /// together these counts represent all of the counts necessary to estimate the HMM parameters
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct AlignmentCounts {
+    num_states: usize,
     transition_counts: TransitionCounts,
     emission_counts: EmissionCounts,
+    state_lst: Vec<String>,
+    kmer_len: usize
 }
 
 impl TransitionCounts {
@@ -69,22 +51,28 @@ impl TransitionCounts {
     /// The transition counts out of a single state (e.g. insertion -> other state) are converted
     /// into a fraction of the total transition counts out of that state.
     fn to_probs(&self) -> TransitionProbs {
-        let total_from_match: f64 = self.match_from_match as f64
-            + self.insertion_from_match as f64
-            + self.deletion_from_match as f64;
-        let total_from_insertion: f64 =
-            self.insertion_from_insertion as f64 + self.match_from_insertion as f64;
-        let total_from_deletion: f64 =
-            self.deletion_from_deletion as f64 + self.match_from_deletion as f64;
+        // make a hashtable mapping string to usize
+        // this will hold the total outgoing for each state
+        let mut start_state_counts: HashMap<String, usize> = HashMap::new();
+        let mut trans_probs: HashMap<(String,String), f64> = HashMap::new();
 
+        // iterate over all of the transition counts
+        // add the count of the transitions to the hash for the starting state
+        for (&(ref state1, ref state2), &count) in &self.p {
+            *start_state_counts.entry(state1.clone()).or_insert(0) += count;
+        }
+        // this means that for each starting state we have the total count of outgoing transitions
+
+        // then iterate over the transition counts again
+        // for each transition, divide the count by the total for that starting state
+        for (&(ref state1, ref state2), &count) in &self.p {
+            let frac = count as f64 / *start_state_counts.get(&state1.clone()).unwrap() as f64;
+            trans_probs.insert((state1.clone(),state2.clone()), frac);
+
+        }
+        // return as a TransitionProbs
         TransitionProbs {
-            match_from_match: self.match_from_match as f64 / total_from_match,
-            insertion_from_match: self.insertion_from_match as f64 / total_from_match,
-            deletion_from_match: self.deletion_from_match as f64 / total_from_match,
-            insertion_from_insertion: self.insertion_from_insertion as f64 / total_from_insertion,
-            match_from_insertion: self.match_from_insertion as f64 / total_from_insertion,
-            deletion_from_deletion: self.deletion_from_deletion as f64 / total_from_deletion,
-            match_from_deletion: self.match_from_deletion as f64 / total_from_deletion,
+            p: trans_probs
         }
     }
 
@@ -93,13 +81,10 @@ impl TransitionCounts {
     /// this function allows us to create separate ```TransitionCount``` structs for each newly
     /// observed read, and then just add those counts onto a grand total count for the BAM file.
     fn add(&mut self, other: TransitionCounts) {
-        self.match_from_match += other.match_from_match;
-        self.insertion_from_match += other.insertion_from_match;
-        self.deletion_from_match += other.deletion_from_match;
-        self.insertion_from_insertion += other.insertion_from_insertion;
-        self.match_from_insertion += other.match_from_insertion;
-        self.deletion_from_deletion += other.deletion_from_deletion;
-        self.match_from_deletion += other.match_from_deletion;
+        for (&(ref state1, ref state2), &count) in &other.p {
+            *self.p.entry((state1.clone(), state2.clone()))
+                .or_insert(0) += count;
+        }
     }
 }
 
@@ -112,13 +97,28 @@ impl EmissionCounts {
     /// The insertion and deletion emission probabilities are just fixed to 1.0.
     /// This probably isn't ideal, but it works alright in practice.
     fn to_probs(&self) -> EmissionProbs {
-        let total: f64 = self.equal as f64 + self.not_equal as f64;
+        // make a hashtable mapping string to usize
+        // this will hold the total counts of symbol pairs observed at a state
+        let mut state_counts: HashMap<String, usize> = HashMap::new();
+        let mut emit_probs: HashMap<(String,String), f64> = HashMap::new();
 
+        // iterate over all of the emission counts
+        // add the count of the pair of emitted symbols to the count for the state their emitted from
+        for (&(ref state, (ref symbol1, ref symbol2)), &count) in &self.p {
+            *state_counts.entry(state.clone()).or_insert(0) += count;
+        }
+        // this means that for each state we have the total count of emitted symbol pairs
+
+        // then iterate over the emission counts again
+        // for each emission, divide the count by the total emitted for that state
+        for (&(ref state, (ref symbol1, ref symbol2)), &count) in &self.p {
+            let frac = (count as f64) / (*state_counts.get(&state.clone()).unwrap() as f64);
+            emit_probs.insert((symbol1.clone(),symbol2.clone()), frac);
+        }
+
+        // return as a TransitionProbs
         EmissionProbs {
-            equal: self.equal as f64 / total,
-            not_equal: self.not_equal as f64 / total / 3.0, // 3 possible bases to mismatch to
-            insertion: 1.0,
-            deletion: 1.0,
+            probs: emit_probs
         }
     }
 
@@ -127,8 +127,10 @@ impl EmissionCounts {
     /// this function allows us to create separate ```EmissionCount``` structs for each newly
     /// observed read, and then just add those counts onto a grand total count for the BAM file.
     fn add(&mut self, other: EmissionCounts) {
-        self.equal += other.equal;
-        self.not_equal += other.not_equal;
+        for (&(ref state, (ref symbol1, ref symbol2)), &count) in &other.p {
+            *self.p.entry((state.clone(),(symbol1.clone(), symbol2.clone())))
+                .or_insert(0) += count;
+        }
     }
 }
 
@@ -137,8 +139,11 @@ impl AlignmentCounts {
     /// and emission counts into probabilities
     fn to_parameters(&self) -> AlignmentParameters {
         AlignmentParameters {
+            num_states: self.num_states,
             transition_probs: self.transition_counts.to_probs(),
             emission_probs: self.emission_counts.to_probs(),
+            state_lst: self.state_lst.clone(),
+            kmer_len: self.kmer_len
         }
     }
 }
@@ -186,27 +191,12 @@ pub fn count_alignment_events(
     cigarpos_list: &Vec<CigarPos>,
     ref_seq: &Vec<char>,
     read_seq: &Vec<char>,
+    kmer_len: usize,
     max_cigar_indel: u32,
 ) -> Result<(TransitionCounts, EmissionCounts)> {
 
-    // initialize TransitionCounts and EmissionCounts with all counts set to 0
-    let mut transition_counts = TransitionCounts {
-        match_from_match: 0,
-        insertion_from_match: 0,
-        deletion_from_match: 0,
-        insertion_from_insertion: 0,
-        match_from_insertion: 0,
-        deletion_from_deletion: 0,
-        match_from_deletion: 0,
-    };
-
-    let mut emission_counts = EmissionCounts {
-        equal: 0,
-        not_equal: 0,
-    };
-
-    // assume the initial state is MATCH
-    let mut state: AlignmentState = AlignmentState::Match;
+    let mut aln_seq = vec![];
+    let mut aln_ref = vec![];
 
     // for each cigar operation in the BAM record
     for cigarpos in cigarpos_list {
@@ -223,31 +213,11 @@ pub fn count_alignment_events(
                         break; // break if we've reached the end of the read or reference
                     }
 
-                    // we add the transition from the current state
-                    // to the new state (which is match)
-                    match state {
-                        AlignmentState::Match => {
-                            transition_counts.match_from_match += 1;
-                        }
-                        AlignmentState::Deletion => {
-                            transition_counts.match_from_deletion += 1;
-                        }
-                        AlignmentState::Insertion => {
-                            transition_counts.match_from_insertion += 1;
-                        }
-                    }
-
-                    // we have transitioned to a match so set the current state to match
-                    state = AlignmentState::Match;
-
                     // check if the aligned bases match or mismatch and use these to iterate the
                     // emission counts (whether bases match or mismatch)
                     if ref_seq[ref_pos] != 'N' && read_seq[read_pos] != 'N' {
-                        if ref_seq[ref_pos] == read_seq[read_pos] {
-                            emission_counts.equal += 1;
-                        } else {
-                            emission_counts.not_equal += 1;
-                        }
+                        aln_seq.push(read_seq[read_pos]);
+                        aln_ref.push(ref_seq[ref_pos]);
                     }
 
                     // it's a match operation so both read and reference move forward one position
@@ -271,25 +241,11 @@ pub fn count_alignment_events(
                         break; // break if we've reached the end of the read or reference
                     }
 
-                    // we add the transition from the current state
-                    // to the new state (which is insertion)
-                    match state {
-                        AlignmentState::Insertion => {
-                            transition_counts.insertion_from_insertion += 1;
-                        }
-                        AlignmentState::Match => {
-                            transition_counts.insertion_from_match += 1;
-                        }
-                        AlignmentState::Deletion => {
-                            // MINIMAP2 sometimes goes directly from insertion <-> deletion
-                            // we will just add an implicit deletion -> match -> insertion
-                            transition_counts.match_from_deletion += 1;
-                            transition_counts.insertion_from_match += 1;
-                        }
+                    if read_seq[read_pos] != 'N' {
+                        aln_seq.push(read_seq[read_pos]);
+                        aln_ref.push('-');
                     }
 
-                    // we have transitioned to an insertion so set the current state as insertion
-                    state = AlignmentState::Insertion;
                     // this is an insertion so only the read position is moved forward
                     read_pos += 1;
                 }
@@ -309,25 +265,11 @@ pub fn count_alignment_events(
                     if ref_pos >= ref_seq.len() - 1 || read_pos >= read_seq.len() - 1 {
                         break; // break if we've reached the end of the read or reference
                     }
-                    // we add the transition from the current state
-                    // to the new state (which is deletion)
-                    match state {
-                        AlignmentState::Deletion => {
-                            transition_counts.deletion_from_deletion += 1;
-                        }
-                        AlignmentState::Match => {
-                            transition_counts.deletion_from_match += 1;
-                        }
-                        AlignmentState::Insertion => {
-                            // MINIMAP2 sometimes goes directly from insertion <-> deletion
-                            // we will just add an implicit Insertion -> match -> deletion
-                            transition_counts.match_from_insertion += 1;
-                            transition_counts.deletion_from_match += 1;
-                        }
-                    }
 
-                    // we have transitioned to deletion so set the current state to deletion
-                    state = AlignmentState::Deletion;
+                    if ref_seq[ref_pos] != 'N' {
+                        aln_seq.push('-');
+                        aln_ref.push(ref_seq[ref_pos]);
+                    }
                     // this is a deletion so only the reference position is moved forward
                     ref_pos += 1;
                 }
@@ -340,7 +282,138 @@ pub fn count_alignment_events(
         }
     }
 
-    return Ok((transition_counts, emission_counts));
+    assert_eq!(aln_seq.len(), aln_ref.len());
+
+    // iterate over the BAM alignment as a pair of strings
+    // e.g.
+    // AA--ACTTCC
+    // AATGGCT-CC
+
+    let mut prev_state = "-".to_string();
+    let mut tcounts: HashMap<(String,String),usize> = HashMap::new();
+    let mut ecounts: HashMap<(String,(String,String)),usize> = HashMap::new();
+
+    for i in 0..aln_seq.len()-kmer_len+1 {
+        // iterate over the aligned kmers in the alignment
+        // e.g. the first pair of aligned 3-mers in the above alignment is
+        // (AA-,AAT) and the second is (A--, ATG)
+        let kmer1 = aln_seq[i..i+kmer_len].to_vec();
+        let kmer2 = aln_ref[i..i+kmer_len].to_vec();
+        let mut state = vec![];
+
+        // figure out what the HMM state is for this pair of aligned kmers
+        // e.g. (AA-, AAT) -> MMD (match match deletion)
+        //      (--A, TGG) -> DDM (deletion deletion match)
+        for j in 0..kmer_len {
+            if kmer1[j] != '-' && kmer2[j] != '-' {
+                state.push('M');
+            }else if kmer1[j] == '-' && kmer2[j] != '-' {
+                state.push('D');
+            }else if kmer1[j] != '-' && kmer2[j] == '-' {
+                state.push('I');
+            } else {
+                panic!("error building emitted kmers from BAM alignment.")
+            }
+        }
+
+        // convert emitted kmers and state to strings
+        let kmer1_str: String = kmer1.into_iter().collect();
+        let kmer2_str: String = kmer2.into_iter().collect();
+        let state_str: String = state.into_iter().collect();
+
+        // add the emission of these two aligned kmers, in the current state, to the emission counts
+        *ecounts
+            .entry((state_str.clone(),(kmer1_str.clone(), kmer2_str.clone())))
+            .or_insert(0) += 1;
+
+        if i > 0 {
+        // add the transition from the previous state, to the current state, to the transition counts
+        *tcounts
+            .entry((prev_state.clone(), state_str.clone()))
+                       .or_insert(0) += 1;
+        }
+
+        // assign the current state to the previous state for next iteration
+        prev_state = state_str.clone();
+    }
+
+    return Ok((TransitionCounts{p:tcounts}, EmissionCounts{p:ecounts}));
+}
+
+fn get_all_kmers_vec(len: usize) -> Vec<Vec<char>> {
+    if len == 0 {
+        return vec![vec![]];
+    }
+
+    // we're defining the set of all kmers recursively. The set of all kmers of length k
+    // is equal to the set of kmers length k-1, with the 5 ending symbols added to each one
+    let kmers_prefixes = get_all_kmers_vec(len-1);
+
+    let mut kmer_lst = vec![];
+
+    // for each of the possible kmer prefixes, add the 5 possible suffix symbols to each one.
+    for prefix in kmers_prefixes {
+        let mut prefix_A = prefix.clone(); prefix_A.push('A');
+        let mut prefix_C = prefix.clone(); prefix_C.push('C');
+        let mut prefix_G = prefix.clone(); prefix_G.push('G');
+        let mut prefix_T = prefix.clone(); prefix_T.push('T');
+        let mut prefix_gap = prefix.clone(); prefix_gap.push('-');
+
+        kmer_lst.push(prefix_A);
+        kmer_lst.push(prefix_C);
+        kmer_lst.push(prefix_G);
+        kmer_lst.push(prefix_T);
+        kmer_lst.push(prefix_gap);
+    }
+
+    kmer_lst
+}
+
+
+fn get_all_kmers(len: usize) -> Vec<String> {
+    let mut kmer_lst: Vec<String> = vec![];
+
+    for kmer_vec in get_all_kmers_vec(len).iter() {
+        kmer_lst.push(kmer_vec.into_iter().collect::<String>());
+    }
+
+    kmer_lst
+}
+
+fn get_all_states_vec(len: usize) -> Vec<Vec<char>> {
+    if len == 0 {
+        return vec![vec![]];
+    }
+
+    // we're defining the set of all states recursively. The set of all states of length k
+    // is equal to the set of states length k-1, with the 5 ending symbols added to each one
+    let states_prefixes = get_all_states_vec(len-1);
+
+    let mut state_lst = vec![];
+
+    // for each of the possible state prefixes, add the 5 possible suffix symbols to each one.
+    for prefix in states_prefixes {
+        let mut prefix_M = prefix.clone(); prefix_M.push('M');
+        let mut prefix_D = prefix.clone(); prefix_D.push('D');
+        let mut prefix_I = prefix.clone(); prefix_I.push('I');
+
+        state_lst.push(prefix_M);
+        state_lst.push(prefix_D);
+        state_lst.push(prefix_I);
+    }
+
+    state_lst
+}
+
+
+fn get_all_states(len: usize) -> Vec<String> {
+    let mut state_lst: Vec<String> = vec![];
+
+    for state_vec in get_all_states_vec(len).iter() {
+        state_lst.push(state_vec.into_iter().collect::<String>());
+    }
+
+    state_lst
 }
 
 //************************************************************************************************
@@ -377,6 +450,7 @@ pub fn estimate_alignment_parameters(
     bam_file: &String,
     fasta_file: &String,
     interval: &Option<GenomicInterval>,
+    kmer_len: usize,
     min_mapq: u8,
     max_cigar_indel: u32,
 ) -> Result<AlignmentParameters> {
@@ -389,20 +463,50 @@ pub fn estimate_alignment_parameters(
 
     // initial transition and emission counts
     // set everything to 1 so that it's impossible to have e.g. divide by 0 errors
-    let mut transition_counts = TransitionCounts {
-        match_from_match: 1,
-        insertion_from_match: 1,
-        deletion_from_match: 1,
-        insertion_from_insertion: 1,
-        match_from_insertion: 1,
-        deletion_from_deletion: 1,
-        match_from_deletion: 1,
-    };
+    let mut init_trans: HashMap<(String,String),usize> = HashMap::new();
+    let mut init_emit: HashMap<(String, (String,String)), usize> = HashMap::new();
 
-    let mut emission_counts = EmissionCounts {
-        equal: 1,
-        not_equal: 1,
-    };
+    let possible_states: Vec<String> = get_all_states(kmer_len);
+    let possible_kmers: Vec<String> = get_all_kmers(kmer_len);
+
+    for kmer1 in &possible_kmers {
+        for kmer2 in &possible_kmers {
+
+            let mut invalid = false;
+            let mut state: Vec<char> = vec![];
+
+            for (c1,c2) in kmer1.chars().zip(kmer2.chars()) {
+                if c1 != '-' && c2 != '-' {
+                    state.push('M');
+                } else if c1 != '-' && c2 == '-' {
+                    state.push('I');
+                } else if c1 == '-' && c2 != '-' {
+                    state.push('D');
+                } else {
+                    invalid = true;
+                }
+            }
+
+            if invalid {
+                continue;
+            }
+
+            let state_str: String = state.into_iter().collect();
+
+            init_emit.insert((state_str.clone(),(kmer1.clone(),kmer2.clone())),1);
+        }
+    }
+
+
+    let mut emission_counts = EmissionCounts {p: init_emit.clone()};
+
+    for state1 in &possible_states {
+        for state2 in &possible_states {
+            init_trans.insert((state1.clone(),state2.clone()),1);
+        }
+    }
+
+    let mut transition_counts = TransitionCounts {p: init_trans.clone()};
 
     // interval_lst has either the single specified genomic region, or list of regions covering all chromosomes
     // for more information about this design decision, see get_interval_lst implementation in util.rs
@@ -453,7 +557,7 @@ pub fn estimate_alignment_parameters(
 
             // count the emission and transition events directly from the record's CIGAR and sequences
             let (read_transition_counts, read_emission_counts) =
-                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, max_cigar_indel)
+                count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, kmer_len, max_cigar_indel)
                     .chain_err(|| "Error counting cigar alignment events.")?;
 
             // add emission and transition counts to the running total
@@ -466,8 +570,11 @@ pub fn estimate_alignment_parameters(
 
     // place the transition and emission counts together in an AlignmentCounts struct
     let alignment_counts = AlignmentCounts {
+        num_states: possible_states.len(),
         transition_counts: transition_counts,
         emission_counts: emission_counts,
+        state_lst: possible_states.clone(),
+        kmer_len: kmer_len
     };
 
     // convert the alignment counts from the BAM into probabilities
@@ -478,54 +585,156 @@ pub fn estimate_alignment_parameters(
     eprintln!("");
 
     eprintln!("{} Transition Probabilities:", SPACER);
-    eprintln!(
-        "{} match -> match:          {:.3}",
-        SPACER, params.transition_probs.match_from_match
-    );
-    eprintln!(
-        "{} match -> insertion:      {:.3}",
-        SPACER, params.transition_probs.insertion_from_match
-    );
-    eprintln!(
-        "{} match -> deletion:       {:.3}",
-        SPACER, params.transition_probs.deletion_from_match
-    );
-    eprintln!(
-        "{} deletion -> match:       {:.3}",
-        SPACER, params.transition_probs.match_from_deletion
-    );
-    eprintln!(
-        "{} deletion -> deletion:    {:.3}",
-        SPACER, params.transition_probs.deletion_from_deletion
-    );
-    eprintln!(
-        "{} insertion -> match:      {:.3}",
-        SPACER, params.transition_probs.match_from_insertion
-    );
-    eprintln!(
-        "{} insertion -> insertion:  {:.3}",
-        SPACER, params.transition_probs.insertion_from_insertion
-    );
+    for (&(ref state1, ref state2), &prob)in &params.transition_probs.p {
+        eprintln!(
+            "{} {} -> {}:          {:.10}",
+            SPACER, state1, state2, prob
+        );
+    }
+
     eprintln!("");
 
     eprintln!("{} Emission Probabilities:", SPACER);
-    eprintln!(
-        "{} match (equal):           {:.3}",
-        SPACER, params.emission_probs.equal
-    );
-    eprintln!(
-        "{} match (not equal):       {:.3}",
-        SPACER, params.emission_probs.not_equal
-    );
-    eprintln!(
-        "{} insertion:               {:.3}",
-        SPACER, params.emission_probs.insertion
-    );
-    eprintln!(
-        "{} deletion:                {:.3}",
-        SPACER, params.emission_probs.deletion
-    );
+    for (&(ref kmer1, ref kmer2), &prob) in &params.emission_probs.probs {
+        eprintln!(
+            "{} ({},{}):          {:.10}",
+            SPACER, kmer1, kmer2, prob
+        );
+    }
+
     eprintln!("");
 
     Ok(params)
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_all_states0() {
+        let states: Vec<String> = get_all_states(0);
+        let expected = vec![
+            "".to_string()
+        ];
+        assert_eq!(states, expected);
+    }
+
+    #[test]
+    fn test_get_all_states1() {
+        let states: Vec<String> = get_all_states(1);
+        let expected = vec![
+            "M".to_string(),
+            "D".to_string(),
+            "I".to_string()
+        ];
+        assert_eq!(states, expected);
+    }
+
+    #[test]
+    fn test_get_all_states2() {
+        let states: Vec<String> = get_all_states(2);
+        let expected = vec![
+            "MM".to_string(),
+            "MD".to_string(),
+            "MI".to_string(),
+            "DM".to_string(),
+            "DD".to_string(),
+            "DI".to_string(),
+            "IM".to_string(),
+            "ID".to_string(),
+            "II".to_string(),
+        ];
+        assert_eq!(states, expected);
+    }
+
+    #[test]
+    fn test_get_all_states3() {
+        let states: Vec<String> = get_all_states(3);
+        let expected = vec![
+            "MMM".to_string(),
+            "MMD".to_string(),
+            "MMI".to_string(),
+            "MDM".to_string(),
+            "MDD".to_string(),
+            "MDI".to_string(),
+            "MIM".to_string(),
+            "MID".to_string(),
+            "MII".to_string(),
+            "DMM".to_string(),
+            "DMD".to_string(),
+            "DMI".to_string(),
+            "DDM".to_string(),
+            "DDD".to_string(),
+            "DDI".to_string(),
+            "DIM".to_string(),
+            "DID".to_string(),
+            "DII".to_string(),
+            "IMM".to_string(),
+            "IMD".to_string(),
+            "IMI".to_string(),
+            "IDM".to_string(),
+            "IDD".to_string(),
+            "IDI".to_string(),
+            "IIM".to_string(),
+            "IID".to_string(),
+            "III".to_string()
+        ];
+        assert_eq!(states, expected);
+    }
+
+    #[test]
+    fn test_get_all_kmers0() {
+        let kmers: Vec<String> = get_all_kmers(0);
+        let expected = vec![
+            "".to_string()
+        ];
+        assert_eq!(kmers, expected);
+    }
+
+    #[test]
+    fn test_get_all_kmers1() {
+        let kmers: Vec<String> = get_all_kmers(1);
+        let expected = vec![
+            "A".to_string(),
+            "C".to_string(),
+            "G".to_string(),
+            "T".to_string(),
+            "-".to_string(),
+        ];
+        assert_eq!(kmers, expected);
+    }
+
+
+    #[test]
+    fn test_get_all_kmers2() {
+        let kmers: Vec<String> = get_all_kmers(2);
+        let expected = vec![
+            "AA".to_string(),
+            "AC".to_string(),
+            "AG".to_string(),
+            "AT".to_string(),
+            "A-".to_string(),
+            "CA".to_string(),
+            "CC".to_string(),
+            "CG".to_string(),
+            "CT".to_string(),
+            "C-".to_string(),
+            "GA".to_string(),
+            "GC".to_string(),
+            "GG".to_string(),
+            "GT".to_string(),
+            "G-".to_string(),
+            "TA".to_string(),
+            "TC".to_string(),
+            "TG".to_string(),
+            "TT".to_string(),
+            "T-".to_string(),
+            "-A".to_string(),
+            "-C".to_string(),
+            "-G".to_string(),
+            "-T".to_string(),
+            "--".to_string(),
+        ];
+        assert_eq!(kmers, expected);
+    }
 }

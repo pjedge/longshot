@@ -46,7 +46,6 @@ use extract_fragments::ExtractFragmentParameters;
 use genotype_probs::GenotypePriors;
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
-use realignment::AlignmentType;
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
 use std::fs::File;
@@ -101,6 +100,8 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
     // READ COMMAND LINE ARGUMENTS
     /***********************************************************************************************/
+
+    let kmer_len = 3;
 
     eprintln!("");
 
@@ -438,20 +439,6 @@ fn run() -> Result<()> {
         gq: dn_gq as f64,
     };
 
-    let alignment_type = match (
-        parse_flag(&input_args, "Numerically stable alignment")?,
-        parse_flag(&input_args, "Max alignment")?,
-    ) {
-        (false, false) => AlignmentType::ForwardAlgorithmNonNumericallyStable,
-        (true, false) => AlignmentType::ForwardAlgorithmNumericallyStable,
-        (false, true) => AlignmentType::ViterbiMaxScoringAlignment,
-        (true, true) => {
-            bail!(
-                "Numerically stable alignment option and max alignment options are incompatible."
-            );
-        }
-    };
-
     let band_width: usize = parse_usize(&input_args, "Band width")?;
     //let use_poa = parse_flag(&input_args, "Use POA");
     let min_cov: u32 = parse_u32(&input_args, "Min coverage")?;
@@ -486,7 +473,6 @@ fn run() -> Result<()> {
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq,
-        alignment_type,
         band_width,
         anchor_length,
         variant_cluster_max_size: variant_cluster_max_size,
@@ -499,6 +485,7 @@ fn run() -> Result<()> {
         &bamfile_name,
         &fasta_file,
         &interval,
+        kmer_len,
         min_mapq,
         max_cigar_indel as u32,
     ).chain_err(|| "Error estimating alignment parameters.")?;
@@ -585,7 +572,7 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         extract_fragment_parameters,
-        alignment_parameters,
+        &alignment_parameters,
         None,
     ).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
