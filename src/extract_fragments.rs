@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use util::*;
 use variants_and_fragments::*;
 
-static VERBOSE: bool = false;
+static VERBOSE: bool = true;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 
 /// Stores a set of parameters necessary for extracting haplotype fragments, to make it easier
@@ -717,14 +717,14 @@ fn extract_var_cluster(
         }
 
         // we now want to score hap_window
-        let score: LogProb = forward_algorithm_higher_order_non_numerically_stable(
+        let score: LogProb = forward_algorithm_higher_order_numerically_stable(
             &read_window,
             &hap_window,
-            &align_params,
+            &align_params.ln(),
             extract_params.band_width,
         );
 
-        assert!(score > LogProb::ln_zero());
+        //assert!(score > LogProb::ln_zero());
 
         for var in 0..n_vars {
             allele_scores[var][hap[var] as usize] =

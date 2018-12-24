@@ -40,7 +40,8 @@ struct AlignmentCounts {
     transition_counts: TransitionCounts,
     emission_counts: EmissionCounts,
     state_lst: Vec<String>,
-    kmer_len: usize
+    kmer_len: usize,
+    valid_prev_states: Vec<Vec<usize>>
 }
 
 impl TransitionCounts {
@@ -58,7 +59,7 @@ impl TransitionCounts {
 
         // iterate over all of the transition counts
         // add the count of the transitions to the hash for the starting state
-        for (&(ref state1, ref state2), &count) in &self.p {
+        for (&(ref state1, ref _state2), &count) in &self.p {
             *start_state_counts.entry(state1.clone()).or_insert(0) += count;
         }
         // this means that for each starting state we have the total count of outgoing transitions
@@ -104,7 +105,7 @@ impl EmissionCounts {
 
         // iterate over all of the emission counts
         // add the count of the pair of emitted symbols to the count for the state their emitted from
-        for (&(ref state, (ref symbol1, ref symbol2)), &count) in &self.p {
+        for (&(ref state, (ref _symbol1, ref _symbol2)), &count) in &self.p {
             *state_counts.entry(state.clone()).or_insert(0) += count;
         }
         // this means that for each state we have the total count of emitted symbol pairs
@@ -143,7 +144,8 @@ impl AlignmentCounts {
             transition_probs: self.transition_counts.to_probs(),
             emission_probs: self.emission_counts.to_probs(),
             state_lst: self.state_lst.clone(),
-            kmer_len: self.kmer_len
+            kmer_len: self.kmer_len,
+            valid_prev_states: self.valid_prev_states.clone()
         }
     }
 }
@@ -353,16 +355,16 @@ fn get_all_kmers_vec(len: usize) -> Vec<Vec<char>> {
 
     // for each of the possible kmer prefixes, add the 5 possible suffix symbols to each one.
     for prefix in kmers_prefixes {
-        let mut prefix_A = prefix.clone(); prefix_A.push('A');
-        let mut prefix_C = prefix.clone(); prefix_C.push('C');
-        let mut prefix_G = prefix.clone(); prefix_G.push('G');
-        let mut prefix_T = prefix.clone(); prefix_T.push('T');
+        let mut prefix_a = prefix.clone(); prefix_a.push('A');
+        let mut prefix_c = prefix.clone(); prefix_c.push('C');
+        let mut prefix_g = prefix.clone(); prefix_g.push('G');
+        let mut prefix_t = prefix.clone(); prefix_t.push('T');
         let mut prefix_gap = prefix.clone(); prefix_gap.push('-');
 
-        kmer_lst.push(prefix_A);
-        kmer_lst.push(prefix_C);
-        kmer_lst.push(prefix_G);
-        kmer_lst.push(prefix_T);
+        kmer_lst.push(prefix_a);
+        kmer_lst.push(prefix_c);
+        kmer_lst.push(prefix_g);
+        kmer_lst.push(prefix_t);
         kmer_lst.push(prefix_gap);
     }
 
@@ -393,13 +395,13 @@ fn get_all_states_vec(len: usize) -> Vec<Vec<char>> {
 
     // for each of the possible state prefixes, add the 5 possible suffix symbols to each one.
     for prefix in states_prefixes {
-        let mut prefix_M = prefix.clone(); prefix_M.push('M');
-        let mut prefix_D = prefix.clone(); prefix_D.push('D');
-        let mut prefix_I = prefix.clone(); prefix_I.push('I');
+        let mut prefix_m = prefix.clone(); prefix_m.push('M');
+        let mut prefix_d = prefix.clone(); prefix_d.push('D');
+        let mut prefix_i = prefix.clone(); prefix_i.push('I');
 
-        state_lst.push(prefix_M);
-        state_lst.push(prefix_D);
-        state_lst.push(prefix_I);
+        state_lst.push(prefix_m);
+        state_lst.push(prefix_d);
+        state_lst.push(prefix_i);
     }
 
     state_lst
@@ -568,13 +570,44 @@ pub fn estimate_alignment_parameters(
         }
     }
 
+    let mut valid_prev_states: Vec<Vec<usize>> = vec![vec![]; possible_states.len()];
+
+    for i in 0..possible_states.len() {
+        let mut state_vec: Vec<char> = possible_states[i].chars().collect();
+        state_vec.pop();
+
+        let mut state_vec_m = state_vec.clone();
+        state_vec_m.insert(0, 'M');
+        let state_vec_m_str: String = state_vec_m.iter().collect();
+
+        let mut state_vec_d = state_vec.clone();
+        state_vec_d.insert(0, 'D');
+        let state_vec_d_str: String = state_vec_d.iter().collect();
+
+        let mut state_vec_i = state_vec.clone();
+        state_vec_i.insert(0, 'I');
+        let state_vec_i_str: String = state_vec_i.iter().collect();
+
+        for j in 0..possible_states.len() {
+            if possible_states[j] == state_vec_m_str {
+                valid_prev_states[i].push(j)
+            } else if possible_states[j] == state_vec_d_str {
+                valid_prev_states[i].push(j)
+            } else if possible_states[j] == state_vec_i_str {
+                valid_prev_states[i].push(j)
+            }
+        }
+        assert!(valid_prev_states[i].len() == 3)
+    }
+
     // place the transition and emission counts together in an AlignmentCounts struct
     let alignment_counts = AlignmentCounts {
         num_states: possible_states.len(),
         transition_counts: transition_counts,
         emission_counts: emission_counts,
         state_lst: possible_states.clone(),
-        kmer_len: kmer_len
+        kmer_len: kmer_len,
+        valid_prev_states: valid_prev_states.clone()
     };
 
     // convert the alignment counts from the BAM into probabilities
@@ -608,7 +641,7 @@ pub fn estimate_alignment_parameters(
 }
 
 mod tests {
-    use super::*;
+    //use super::*;
 
     #[test]
     fn test_get_all_states0() {
