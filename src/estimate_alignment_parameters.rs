@@ -67,9 +67,31 @@ impl TransitionCounts {
         // then iterate over the transition counts again
         // for each transition, divide the count by the total for that starting state
         for (&(ref state1, ref state2), &count) in &self.p {
-            let frac = count as f64 / *start_state_counts.get(&state1.clone()).unwrap() as f64;
-            trans_probs.insert((state1.clone(),state2.clone()), frac);
 
+            let mut prev = 'M';
+            let mut invalid = false;
+            for c in state1.chars() {
+                if c == 'I' && prev == 'D' || c == 'D' && prev == 'I' {
+                    invalid = true;
+                    break;
+                }
+                prev = c;
+            }
+
+            prev = 'M';
+            for c in state2.chars() {
+                if c == 'I' && prev == 'D' || c == 'D' &&prev == 'I' {
+                    invalid = true;
+                    break;
+                }
+                prev = c;
+            }
+            if invalid {
+                trans_probs.insert((state1.clone(),state2.clone()), 0.0);
+            } else {
+                let frac = count as f64 / *start_state_counts.get(&state1.clone()).unwrap() as f64;
+                trans_probs.insert((state1.clone(),state2.clone()), frac);
+            }
         }
         // return as a TransitionProbs
         TransitionProbs {
@@ -92,29 +114,59 @@ impl TransitionCounts {
 impl EmissionCounts {
     /// converts EmissionCounts to EmissionProbs
     ///
-    /// Using this function, HMM emission counts that are empirically observed and counted in the
-    /// BAM file can be converted into probabilities that can be used for sequence alignment.
-    /// The emission counts for equal and not equal bases are turned into a fraction of the total.
-    /// The insertion and deletion emission probabilities are just fixed to 1.0.
-    /// This probably isn't ideal, but it works alright in practice.
     fn to_probs(&self) -> EmissionProbs {
-        // make a hashtable mapping string to usize
-        // this will hold the total counts of symbol pairs observed at a state
-        let mut state_counts: HashMap<String, usize> = HashMap::new();
+        // we want the emission count for a pair of aligned kmers
+        // the emission probability should be the probability of observing the last two symbols/bases
+        // given the kmer-state and the prefixes of the kmers ignoring the last symbols
+        // E.G. for  AAT
+        //           AA-
+        //           MMI
+        // we want the probability of observing "T" aligned to "-" in the last spot, given that
+        // the state is MMI and the prefixes of the kmers is "AA" aligned to "AA"
+        // state_counts maps (state, (kmer_prefix, kmer_prefix)) to counts
+        //
+        let mut state_counts: HashMap<(String,(String,String)), usize> = HashMap::new();
         let mut emit_probs: HashMap<(String,String), f64> = HashMap::new();
 
         // iterate over all of the emission counts
         // add the count of the pair of emitted symbols to the count for the state their emitted from
-        for (&(ref state, (ref _symbol1, ref _symbol2)), &count) in &self.p {
-            *state_counts.entry(state.clone()).or_insert(0) += count;
+        for (&(ref state, (ref symbol1, ref symbol2)), &count) in &self.p {
+            let mut prefix1 = symbol1.clone();
+            prefix1.pop();
+            let mut prefix2 = symbol2.clone();
+            //prefix2.pop();
+            *state_counts.entry((state.clone(),(prefix1,prefix2))).or_insert(0) += count;
         }
         // this means that for each state we have the total count of emitted symbol pairs
 
         // then iterate over the emission counts again
         // for each emission, divide the count by the total emitted for that state
         for (&(ref state, (ref symbol1, ref symbol2)), &count) in &self.p {
-            let frac = (count as f64) / (*state_counts.get(&state.clone()).unwrap() as f64);
-            emit_probs.insert((symbol1.clone(),symbol2.clone()), frac);
+
+            let mut prev = 'M';
+            let mut invalid = false;
+            for c in state.chars() {
+                if c == 'I' && prev == 'D' || c == 'D' && prev == 'I' {
+                    invalid = true;
+                }
+                prev = c;
+            }
+
+            let mut prefix1 = symbol1.clone();
+            let last1 = prefix1.pop().unwrap();
+            let mut prefix2 = symbol2.clone();
+            //let last2 = prefix2.pop().unwrap();
+            let frac = (count as f64) / (*state_counts.get(&(state.clone(),(prefix1, prefix2))).unwrap() as f64);
+
+            if invalid{
+                emit_probs.insert((symbol1.clone(),symbol2.clone()), 0.0);
+            } else {
+                //if prefix1 != "-".to_string() && prefix2 != "-".to_string() {
+                    emit_probs.insert((symbol1.clone(), symbol2.clone()), frac);
+                //} else {
+                //    emit_probs.insert((symbol1.clone(), symbol2.clone()), 1.0);
+                //}
+            }
         }
 
         // return as a TransitionProbs
@@ -508,6 +560,7 @@ pub fn estimate_alignment_parameters(
         }
     }
 
+
     let mut transition_counts = TransitionCounts {p: init_trans.clone()};
 
     // interval_lst has either the single specified genomic region, or list of regions covering all chromosomes
@@ -618,21 +671,53 @@ pub fn estimate_alignment_parameters(
     eprintln!("");
 
     eprintln!("{} Transition Probabilities:", SPACER);
+    let mut transition_probs_key = vec![];
     for (&(ref state1, ref state2), &prob)in &params.transition_probs.p {
+        transition_probs_key.push((state1.clone(),state2.clone()));
+    }
+    transition_probs_key.sort();
+    transition_probs_key.dedup();
+
+    for &(ref state1, ref state2) in transition_probs_key.iter() {
         eprintln!(
             "{} {} -> {}:          {:.10}",
-            SPACER, state1, state2, prob
+            SPACER, state1, state2, params.transition_probs.p.get(&(state1.clone(),state2.clone())).unwrap()
         );
     }
 
     eprintln!("");
+    let mut emission_probs_key = vec![];
 
     eprintln!("{} Emission Probabilities:", SPACER);
     for (&(ref kmer1, ref kmer2), &prob) in &params.emission_probs.probs {
-        eprintln!(
-            "{} ({},{}):          {:.10}",
-            SPACER, kmer1, kmer2, prob
-        );
+        let mut kmerpop1 = kmer1.clone(); kmerpop1.pop();
+        let mut kmerpop2 = kmer2.clone(); kmerpop2.pop();
+
+        emission_probs_key.push((kmerpop1,kmerpop2));
+    }
+    emission_probs_key.sort();
+    emission_probs_key.dedup();
+
+    for &(ref kmerpop1, ref kmerpop2) in emission_probs_key.iter() {
+
+        for b1 in ['A','C','G','T','-'].iter() {
+            for b2 in ['A','C','G','T','-'].iter() {
+                let mut kmer1 = kmerpop1.clone();
+                kmer1.push(*b2);
+                let mut kmer2 = kmerpop2.clone();
+                kmer2.push(*b1);
+
+                match &params.emission_probs.probs.get(&(kmer1.clone(), kmer2.clone())) {
+                    Some(p) => {
+                        eprintln!(
+                            "{} ({},{}):          {:.10}",
+                            SPACER, kmer1, kmer2, p
+                        );
+                    },
+                    None => {}
+                }
+            }
+        }
     }
 
     eprintln!("");
