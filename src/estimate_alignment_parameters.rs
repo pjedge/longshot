@@ -181,7 +181,7 @@ impl AlignmentCounts {
 ///
 /// #Errors
 /// Can throw an error if ```cigarpos_list``` contains a cigar operation that should already have
-///   been filtered out (Pad,Back,Softclip,Hardclip).
+///   been filtered out (Pad,Softclip,Hardclip).
 pub fn count_alignment_events(
     cigarpos_list: &Vec<CigarPos>,
     ref_seq: &Vec<char>,
@@ -332,7 +332,7 @@ pub fn count_alignment_events(
                     ref_pos += 1;
                 }
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                 );

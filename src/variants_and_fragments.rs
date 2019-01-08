@@ -10,6 +10,7 @@ use rust_htslib::bcf;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use util::*;
+use rust_htslib::bcf::Read as bcfread;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
@@ -141,7 +142,7 @@ pub fn parse_vcf_potential_variants(
         // get the alleles from the vcf record as well
 
         let rid = record.rid().chain_err(|| "Error accessing vcf RID")?;
-        let chrom: String = u8_to_string(vcfh.header.rid2name(rid))?;
+        let chrom: String = u8_to_string(vcfh.header().rid2name(rid))?;
 
         if !chrom2tid.contains_key(&chrom) {
             eprintln!(

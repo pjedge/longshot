@@ -133,11 +133,6 @@ pub fn create_augmented_cigarlist(
                     "'deletion' (D) found before any operation describing read sequence".to_owned()
                 ));
             }
-            &Cigar::Back(_) => {
-                bail!(ErrorKind::UnsupportedCigarOperation(
-                    "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
-                ));
-            }
             &Cigar::RefSkip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "'reference skip' (N) found before any operation describing read sequence".to_owned()
@@ -171,7 +166,7 @@ pub fn create_augmented_cigarlist(
                     read_pos: qpos,
                 });
             }
-            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) | &Cigar::Back(_) => {}
+            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) => {}
         }
 
         // move the reference and query positions forward
@@ -203,11 +198,6 @@ pub fn create_augmented_cigarlist(
             }
             &Cigar::HardClip(_) => {
                 j += 1;
-            }
-            &Cigar::Back(_) => {
-                bail!(ErrorKind::UnsupportedCigarOperation(
-                    "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
-                ));
             }
         }
     }
@@ -336,7 +326,7 @@ pub fn find_anchors(
                     break;
                 }
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -437,7 +427,7 @@ pub fn find_anchors(
                 match_len_left = 0;
                 seen_indel_left = true;
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -543,7 +533,7 @@ pub fn find_anchors(
                 match_len_right = 0;
                 seen_indel_right = true;
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -1229,7 +1219,6 @@ mod tests {
                     Cigar::Del(_) |
                     Cigar::RefSkip(_) => {}
                     Cigar::Pad(_) |
-                    Cigar::Back(_) |
                     Cigar::SoftClip(_) |
                     Cigar::HardClip(_) => {
                         panic!("CIGAR operation found in cigarpos_list that should have been removed already.".to_owned());

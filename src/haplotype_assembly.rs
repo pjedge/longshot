@@ -82,7 +82,7 @@ pub fn separate_bam_reads_by_haplotype(
     let h2_bam_file = format!("{}.hap2.bam", &hap_bam_prefix);
     let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
 
-    let header = bam::Header::from_template(&bam_ix.header);
+    let header = bam::Header::from_template(&bam_ix.header());
     let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header)
         .chain_err(|| ErrorKind::BamWriterOpenError(h1_bam_file))?;
     let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header)
