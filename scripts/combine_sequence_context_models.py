@@ -1,5 +1,4 @@
 from __future__ import print_function
-# test
 # Author : Peter Edge
 # Email  : pedge@eng.ucsd.edu
 
