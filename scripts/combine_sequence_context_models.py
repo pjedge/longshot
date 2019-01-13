@@ -14,13 +14,13 @@ def combine_models(modelfiles):
         with open(modelfile,'r') as mf:
             for line in mf:
                 el = line.strip().split()
-                assert(len(el) == 4)
-                key = tuple(el[:3])
-                value = int(el[3])
+                assert(len(el) == 5)
+                key = tuple(el[:4])
+                value = int(el[4])
                 count_dict[key] += value
 
     for k,v in count_dict.items():
-        line = "{} {} {} {}".format(*k,v)
+        line = "{} {} {} {} {}".format(*k,v)
         print(line)
 
 if __name__ == '__main__':

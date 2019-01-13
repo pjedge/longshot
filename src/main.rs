@@ -313,11 +313,17 @@ fn run() -> Result<()> {
             .value_name("string")
             .help("Build a sequence context model and output the data to this file.")
             .display_order(185))
+        .arg(Arg::with_name("Sequence context model window size")
+            .long("sequence_context_model_window_size")
+            .value_name("int")
+            .help("Use a window of this size for the sequence context model. Should be an odd number.")
+            .display_order(186)
+            .default_value(&"9"))
         .arg(Arg::with_name("Sequence Context Sample Frequency")
             .long("sequence_context_sample_frequency")
             .value_name("float")
             .help("When building the sequence context model, sample sites at this frequency.")
-            .display_order(186)
+            .display_order(187)
             .default_value(&"0.01"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
@@ -374,6 +380,8 @@ fn run() -> Result<()> {
     let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
     let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
     let het_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous Indel Rate")?;
+    let sequence_context_model_window_size = parse_usize(&input_args, "Sequence context model window size")?;
+
     let sample_name: String = input_args
         .value_of(&"Sample ID")
         .chain_err(|| "Sample ID not defined.")?
@@ -830,7 +838,7 @@ fn run() -> Result<()> {
                 None,
             ).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
-            print_allele_skew_data(&flist, &varlist, &sequence_context_model.to_string(), 11, max_p_miscall);
+            print_allele_skew_data(&flist, &varlist, &sequence_context_model.to_string(), sequence_context_model_window_size, max_p_miscall);
 
         },
         _ => {bail!("Either output VCF or output sequence context model should be defined but not both.");}
