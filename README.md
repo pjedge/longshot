@@ -27,7 +27,7 @@ To build Longshot, type:
 cargo build --release
 ```
 This will compile the code with optimizations in release mode, and the binary will be
-in ```target/release/longshot```. It will automatically install Rust dependencies for reaper,
+in ```target/release/longshot```. It will automatically install Rust dependencies for longshot,
 such rust-bio and rust-htslib. The build process should take around 3 minutes on a typical desktop computer.
 
 To run unit tests, type:
