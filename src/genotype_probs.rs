@@ -19,8 +19,8 @@ pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file
     let amt_to_shave = (21 - window_size) / 2;
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
-    // key is (sequence_context, ref, var)
-    let mut counts: HashMap<(String, String, String), usize> = HashMap::new();
+    // key is (sequence_context, ref, var, call)
+    let mut counts: HashMap<(String, String, String, u8), usize> = HashMap::new();
 
     for ref fragment in flist {
         for ref call in &fragment.calls {
@@ -80,7 +80,7 @@ pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file
 
             // iterate the counts for this observation in the counts hashmap
             *counts
-                .entry((sequence_context, ref_allele.clone(), var_allele.clone()))
+                .entry((sequence_context, ref_allele.clone(), var_allele.clone(), call.allele))
                 .or_insert(0) += 1;
 
         }
@@ -92,8 +92,8 @@ pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file
     let mut file = File::create(&file_path)
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string())).unwrap();
 
-    for (&(ref sc, ref r, ref v), &count) in &counts {
-        writeln!(file,"{}\t{}\t{}\t{}",sc,r,v,count).unwrap();
+    for (&(ref sc, ref r, ref v, ref a), &count) in &counts {
+        writeln!(file,"{}\t{}\t{}\t{}\t{}",sc,r,v,a,count).unwrap();
     }
 }
 

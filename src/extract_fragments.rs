@@ -637,7 +637,22 @@ fn generate_haps(var_cluster: &Vec<Var>) -> Vec<Vec<u8>> {
     generate_haps_k_onward(var_cluster, 0)
 }
 
-///
+fn revcomp_chars(seq: &Vec<char>) -> Result<Vec<char>> {
+    let mut rc: Vec<char> = vec![];
+    for b in seq.iter().rev() {
+        let cb = match b {
+            'A' => 'T',
+            'C' => 'G',
+            'G' => 'C',
+            'T' => 'A',
+            'N' => 'N',
+            _ => {bail!("Invalid base observed when attempting to reverse")}
+        };
+        rc.push(cb);
+    }
+    Ok(rc)
+}
+
 fn extract_var_cluster(
     read_seq: &Vec<char>,
     ref_seq: &Vec<char>,
@@ -645,7 +660,7 @@ fn extract_var_cluster(
     anchors: AnchorPositions,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-) -> Vec<FragCall> {
+) -> Result<Vec<FragCall>> {
     let mut calls: Vec<FragCall> = vec![];
 
     //let ref_window = ref_seq[(anchors.left_anchor_ref as usize)..
@@ -653,9 +668,13 @@ fn extract_var_cluster(
     //        .to_vec();
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
-    let read_window: Vec<char> = read_seq
+    let mut read_window: Vec<char> = read_seq
         [(anchors.left_anchor_read as usize)..(anchors.right_anchor_read as usize) + 1]
         .to_vec();
+
+    if sequence_bias_model != None {
+        read_window = revcomp_chars(&read_window)?;
+    }
 
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: Vec<u8> = vec![0u8; var_cluster.len()];
@@ -690,12 +709,15 @@ fn extract_var_cluster(
         assert!(hap.len() > 0);
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
+
+        let mut var_positions: Vec<usize> = vec![] // positions of the variants on the hap sequence
+
         for var in 0..n_vars {
             while i < var_cluster[var].pos0 {
                 hap_window.push(ref_seq[i]);
                 i += 1;
             }
-
+            var_positions.push(i);
             for c in var_cluster[var].alleles[hap[var] as usize].chars() {
                 hap_window.push(c);
             }
@@ -706,6 +728,15 @@ fn extract_var_cluster(
         while i <= anchors.right_anchor_ref as usize {
             hap_window.push(ref_seq[i]);
             i += 1;
+        }
+
+        if sequence_bias_model != None {
+            hap_window = revcomp_chars(&hap_window)?;
+            var_positions.reverse();
+
+            for mut pos in var_positions.iter_mut() {
+                pos = hap_window.len() - pos - 1;
+            }
         }
 
         // we now want to score hap_window
@@ -795,7 +826,7 @@ fn extract_var_cluster(
         eprintln!("--------------------------------------");
     }
 
-    calls
+    Ok(calls)
 }
 
 pub fn extract_fragment(
@@ -1012,7 +1043,7 @@ pub fn extract_fragment(
             anchors,
             extract_params,
             align_params,
-        ) {
+        ).chain_err(||"Error while extracting variant cluster")? {
             fragment.calls.push(call);
         }
     }
