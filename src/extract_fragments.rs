@@ -25,6 +25,7 @@
 use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use bio::stats::{LogProb, PHREDProb, Prob};
+use bio::alphabets::dna::*;
 use errors::*;
 use realignment::*;
 use rust_htslib::bam;
@@ -637,6 +638,19 @@ fn generate_haps(var_cluster: &Vec<Var>) -> Vec<Vec<u8>> {
     generate_haps_k_onward(var_cluster, 0)
 }
 
+fn complement_char(b: char) -> Result<char> {
+    let c = match b {
+            'A' => 'T',
+            'C' => 'G',
+            'G' => 'C',
+            'T' => 'A',
+            'N' => 'N',
+            _ => {bail!("Invalid base observed when attempting to complement!")}
+        }
+    Ok(c)
+}
+
+
 fn revcomp_chars(seq: &Vec<char>) -> Result<Vec<char>> {
     let mut rc: Vec<char> = vec![];
     for b in seq.iter().rev() {
@@ -646,7 +660,7 @@ fn revcomp_chars(seq: &Vec<char>) -> Result<Vec<char>> {
             'G' => 'C',
             'T' => 'A',
             'N' => 'N',
-            _ => {bail!("Invalid base observed when attempting to reverse")}
+            _ => {bail!("Invalid base observed when attempting to reverse complement!")}
         };
         rc.push(cb);
     }
@@ -656,6 +670,7 @@ fn revcomp_chars(seq: &Vec<char>) -> Result<Vec<char>> {
 fn extract_var_cluster(
     read_seq: &Vec<char>,
     ref_seq: &Vec<char>,
+    is_reverse: bool,
     var_cluster: Vec<Var>,
     anchors: AnchorPositions,
     extract_params: ExtractFragmentParameters,
@@ -672,9 +687,9 @@ fn extract_var_cluster(
         [(anchors.left_anchor_read as usize)..(anchors.right_anchor_read as usize) + 1]
         .to_vec();
 
-    if sequence_bias_model != None {
-        read_window = revcomp_chars(&read_window)?;
-    }
+    //if is_reverse && sequence_bias_model != None {
+    //    read_window = revcomp_chars(&read_window)?;
+    //}
 
     let mut max_score: LogProb = LogProb::ln_zero();
     let mut max_hap: Vec<u8> = vec![0u8; var_cluster.len()];
@@ -710,7 +725,8 @@ fn extract_var_cluster(
         let mut hap_window: Vec<char> = Vec::with_capacity(window_capacity);
         let mut i: usize = anchors.left_anchor_ref as usize;
 
-        let mut var_positions: Vec<usize> = vec![] // positions of the variants on the hap sequence
+        // index on the hap sequence of the variants
+        let mut var_positions: Vec<usize> = vec![]
 
         for var in 0..n_vars {
             while i < var_cluster[var].pos0 {
@@ -730,13 +746,120 @@ fn extract_var_cluster(
             i += 1;
         }
 
-        if sequence_bias_model != None {
-            hap_window = revcomp_chars(&hap_window)?;
-            var_positions.reverse();
+        // if we're not using a sequence bias model then var_probs is none
+        // otherwise it represents the tuned probabilities that we will use for Emission Probabilities
+        // specifically at variant sites to ameliorate sequence context biases
+        // contains tuples of (usize,char,char,LogProb) representing
+        // (index of variant occurrence on hap_window,
+        //  haplotype ("hap") base,
+        //  non-haplotype ("non-hap") base,
+        //  special emission probability for emitting variant base at variant position)
+        var_probs: Option<Vec<Option<(usize, char, char, LogProb)>>> = match sequence_bias_model {
+            Some(model) => {
+                let amt_to_shave = (21 - sequence_context_window_size) / 2;
 
-            for mut pos in var_positions.iter_mut() {
-                pos = hap_window.len() - pos - 1;
-            }
+                let mut has_indel = false;
+                for var in &var_cluster {
+                    if !(var.alleles.len() == 2
+                        && var.alleles[0].len() == 1
+                        && var.alleles[1].len() == 1) {
+                        has_indel = true;
+                    }
+                }
+                if has_indel {
+                    eprintln!("{} WARNING: Variant cluster containing triallelic site or indel variant\
+                               will NOT be recalibrated using the sequence context model.", print_time());
+
+                    None
+                } else {
+
+                    // the "hap" base is either the ref or alt base, and refers to that base which
+                    // is on the currently considered short haplotype sequence at the variant position.
+                    // the "non-hap" base is the other base (ref or alt) that isn't the hap base.
+
+                    // we are going to decide an emission probability for the non-hap base
+                    // based on the stranded sequence context
+
+                    // EXAMPLE:
+                    // considering a variant with reference allele C and alternate allele T
+                    // the reference sequence context around the variant looks like AGGC[C/T]TTTT
+                    // The reverse complement is is AAAA[G/A]GCCT
+
+                    // now suppose we are considering a read sequence AGGC[T]TTTT from the reverse strand.
+                    // It is AAAA[A]GCCT in its native orientation.
+                    // When we realign the read sequence to the reference sequence, we first convert the sequence context
+                    // AGGCNTTTT to AAAANGCCT to match the read's strandedness and ask our
+                    // sequence context model "what is the probability of emitting an A given that the
+                    // real base is a G and the sequence context is AAAANGCCT" and call this value P. We then use this
+                    // probability P as the realignment emission probability for observing base T over C
+                    // (since the PairHMM realignment procedure is not stranded) at the variant position only.
+                    // if this probability is large (e.g. 0.25), due to sequence context bias, then this means the
+                    // probability of observing the read given that it came from the reference sequence
+                    // is significantly higher and the allele quality will be lower
+
+                    // When we realign the read sequence to the "alternate" sequence, we again convert the sequence context
+                    // AGGCNTTTT to AAAANGCCT to match the read's strandedness. We ask our
+                    // sequence context model "what is the probability of emitting an G given that the
+                    // real base is an A and the sequence context is AAAANGCCT" and call this value P. We then use this
+                    // probability P as the realignment emission probability for observing base C over T
+                    // (since the PairHMM realignment procedure is not stranded) at the variant position only.
+
+                    let mut vp: Vec<(usize)> = vec![];
+                    for v in 0..n_vars {
+                        // the position on hap sequence of the variant
+                        let pos = var_positions[v];
+                        let var = var_cluster[v]; // the variant itself
+
+                        // the reference and alternate bases, respectively
+                        refbase = var.alleles[0].chars().nth(0);
+                        altbase = var.alleles[1].chars().nth(0);
+
+                        // the hap and non-hap bases
+                        hapbase = var_cluster[var].alleles[hap[var] as usize].chars().nth(0);
+                        nonhapbase = if hapbase == refbase {
+                            altbase
+                        } else {
+                            refbase
+                        }
+
+                        // convert the sequence context, hap base, and the non-hap base to their stranded forms
+                        // i.e. if the strand is reversed, then get their reverse complement
+                        // we want to decide an emission probability for the "non-hap" base based on
+                        // observations of the stranded sequence context
+                        let stranded_sequence_context: String = match is_reverse {
+                            true => {
+                                let mut sc: Vec<u8> = var_cluster[var].sequence_context.as_bytes().to_vec();
+                                sc[10] = 'N' as u8;
+                                String::from_utf8(revcomp(&sc[amt_to_shave..21-amt_to_shave].to_vec())).unwrap()
+                            },
+                            false => {
+                                let mut sc: Vec<u8> = varlist.lst[call.var_ix].sequence_context.as_bytes().to_vec();
+                                sc[10] = 'N' as u8;
+                                String::from_utf8(sc[amt_to_shave..21-amt_to_shave].to_vec()).unwrap()
+                            }
+                        };
+
+                        let (stranded_hapbase, stranded_nonhapbase): (char,char) = match is_reverse {
+                            true => {
+                                (complement_char(hapbase)?, complement_char(nonhapbase)?)
+                            },
+                            false => {
+                                (hapbase, nonhapbase)
+                            }
+                        };
+
+                        // we want the probability of emitting the non-hap base,
+                        // given the sequence context and given that the sequence is actually the hap base
+                        // it must be corrected for the strandedness of the sequence
+                        match model.get((stranded_sequence_context, stranded_hapbase, stranded_nonhapbase)) {
+                            Some(p) => {vp.push(Some((pos, hapbase, nonhapbase, p)))},
+                            None => {vp.push(None)}
+                        }
+                    }
+                    vp
+                }
+            },
+            None => {None}
         }
 
         // we now want to score hap_window
@@ -744,18 +867,21 @@ fn extract_var_cluster(
             AlignmentType::ForwardAlgorithmNumericallyStable => forward_algorithm_numerically_stable(
                 &read_window,
                 &hap_window,
+                var_probs,
                 align_params.ln(),
                 extract_params.band_width,
             ),
             AlignmentType::ForwardAlgorithmNonNumericallyStable => forward_algorithm_non_numerically_stable(
                 &read_window,
                 &hap_window,
+                var_probs,
                 align_params,
                 extract_params.band_width,
             ),
             AlignmentType::ViterbiMaxScoringAlignment => viterbi_max_scoring_alignment(
                 &read_window,
                 &hap_window,
+                var_probs,
                 align_params.ln(),
                 extract_params.band_width,
             ),
@@ -1039,6 +1165,7 @@ pub fn extract_fragment(
         for call in extract_var_cluster(
             &read_seq,
             ref_seq,
+            bam_record.is_reverse(),
             var_cluster,
             anchors,
             extract_params,
