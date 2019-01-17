@@ -19,6 +19,10 @@ extern crate core;
 extern crate rand;
 #[macro_use]
 extern crate error_chain;
+extern crate csv;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 
 // import modules
 mod call_genotypes;
@@ -36,6 +40,7 @@ mod variants_and_fragments;
 //mod spoa;
 
 // use declarations
+//use std::collections::HashMap;
 use bio::stats::{LogProb, PHREDProb, Prob};
 use call_genotypes::*;
 use clap::{App, Arg};
@@ -43,7 +48,7 @@ use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::ExtractFragmentParameters;
-use genotype_probs::{GenotypePriors,print_allele_skew_data};
+use genotype_probs::{GenotypePriors,print_allele_skew_data,parse_sequence_bias_model_file,SequenceContextModel};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::AlignmentType;
@@ -308,23 +313,34 @@ fn run() -> Result<()> {
             .help("Specify the transition/transversion rate for genotype prior estimation")
             .display_order(184)
             .default_value(&"0.5"))
-        .arg(Arg::with_name("Sequence Context Model")
-            .long("sequence_context_model")
+        .arg(Arg::with_name("Input sequence context model")
+            .long("input_sequence_context_model")
+            .value_name("string")
+            .help("Read in a sequence context model and use it to derive custom emission probabilities for SNVs.")
+            .display_order(185))
+        .arg(Arg::with_name("Sequence context model minimum observation count")
+            .long("sequence_context_model_min_obs_count")
+            .value_name("int")
+            .help("When reading a sequence context model, require this many observations to derive an emission probability.")
+            .display_order(186)
+            .default_value(&"500"))
+        .arg(Arg::with_name("Output sequence context model")
+            .long("output_sequence_context_model")
             .value_name("string")
             .help("Build a sequence context model and output the data to this file.")
-            .display_order(185))
-        .arg(Arg::with_name("Sequence context model window size")
-            .long("sequence_context_model_window_size")
-            .value_name("int")
-            .help("Use a window of this size for the sequence context model. Should be an odd number.")
-            .display_order(186)
-            .default_value(&"9"))
+            .display_order(187))
         .arg(Arg::with_name("Sequence Context Sample Frequency")
             .long("sequence_context_sample_frequency")
             .value_name("float")
-            .help("When building the sequence context model, sample sites at this frequency.")
-            .display_order(187)
+            .help("When building a sequence context model, sample sites at this frequency.")
+            .display_order(188)
             .default_value(&"0.01"))
+        .arg(Arg::with_name("Sequence context model window size")
+            .long("sequence_context_model_window_size")
+            .value_name("int")
+            .help("Use a window of this size for the sequence context model (reading and writing). Should be an odd number.")
+            .display_order(189)
+            .default_value(&"9"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -354,11 +370,15 @@ fn run() -> Result<()> {
     let interval: Option<GenomicInterval> =
         parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
 
-    let maybe_sequence_context_model = input_args
-        .value_of("Sequence Context Model");
+    let maybe_output_sequence_context_model = input_args
+        .value_of("Output sequence context model");
+    let maybe_input_sequence_context_model = input_args
+        .value_of("Input sequence context model");
+    let sequence_context_min_obs_count: usize = parse_usize(&input_args, "Sequence context model minimum observation count")?;
+
     let sequence_context_sample_frequency: f64 = parse_positive_f64(&input_args, "Sequence Context Sample Frequency")?;
 
-    match (&maybe_output_vcf_file, &maybe_sequence_context_model) {
+    match (&maybe_output_vcf_file, &maybe_output_sequence_context_model) {
         (&Some(_), &Some(_)) => {bail!("Cannot define both an output VCF and an output sequence context model.");},
         (&None, &None) => {bail!("Output VCF file not defined.");},
         _ => {}
@@ -391,7 +411,7 @@ fn run() -> Result<()> {
 
     // if we're building a sequence context model then the variants aren't necessarily "real"
     // and we shouldn't use the slower multi-variant cluster realigment methods
-    let variant_cluster_max_size: usize = if maybe_output_vcf_file == None && maybe_sequence_context_model != None {
+    let variant_cluster_max_size: usize = if maybe_output_vcf_file == None && maybe_output_sequence_context_model != None {
         1
     } else {
         parse_usize(&input_args, "Variant cluster max size")?
@@ -545,8 +565,19 @@ fn run() -> Result<()> {
         ts_tv_ratio,
     ).chain_err(|| "Error estimating genotype priors.")?;
 
-    match (maybe_output_vcf_file, maybe_sequence_context_model) {
+    match (maybe_output_vcf_file, maybe_output_sequence_context_model) {
         (Some(output_vcf_file_str), None) => {
+
+            let sequence_context_model: Option<SequenceContextModel> = match maybe_input_sequence_context_model {
+                Some(model_filename) => {
+                    Some(parse_sequence_bias_model_file(
+                        model_filename.to_string(),
+                        sequence_context_model_window_size,
+                        sequence_context_min_obs_count
+                    ))
+                },
+                None => {None}
+            };
 
             let output_vcf_file = output_vcf_file_str.to_string();
 
@@ -625,7 +656,8 @@ fn run() -> Result<()> {
                 &interval,
                 extract_fragment_parameters,
                 alignment_parameters,
-                None,
+                &sequence_context_model,
+            None,
             ).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
             // if we're printing out variant "debug" information, print out a fragment file to that debug directory
@@ -835,6 +867,7 @@ fn run() -> Result<()> {
                 &interval,
                 extract_fragment_parameters,
                 alignment_parameters,
+                &None,
                 None,
             ).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 

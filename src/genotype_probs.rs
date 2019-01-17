@@ -4,12 +4,79 @@
 use bio::stats::*;
 use bio::alphabets::dna::*;
 use errors::*;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use util::*;
 use variants_and_fragments::{Fragment,VarList};
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
+use csv;
+
+
+pub struct SequenceContextModel {
+    /// window size W (odd number) around the variant to consider for sequence context bias
+    pub sequence_context_window_size: usize,
+    /// maps stranded sequence context (string of bases length W, middle base should be 'N'),
+    /// the correct base, and the error base to f64 probability of emitting error base over correct
+    /// base given sequence context
+    pub emission_probs: HashMap<(String, char, char), f64>
+}
+
+// code modified from this stack overflow question:
+// https://stackoverflow.com/questions/43887908/how-to-read-and-process-a-pipe-delimited-file-in-rust
+#[derive(Debug, Deserialize)]
+struct Record {
+    sequence_context: String,
+    correct_base: char,
+    error_base: char,
+    allele: u8,
+    observed_count: usize
+}
+
+pub fn parse_sequence_bias_model_file(filename: String, sequence_context_window_size: usize,
+                                  minimum_observation_count: usize) -> SequenceContextModel {
+    let file = File::open(filename).expect("Couldn't open input");
+    let mut csv_file = csv::ReaderBuilder::new()
+        .delimiter(b' ')
+        .has_headers(false)
+        .from_reader(file);
+
+    let mut observed_sequences: HashSet<String> = HashSet::new();
+    let mut counts: HashMap<(String, char, char, u8),usize> = HashMap::new();
+    for record in csv_file.deserialize() {
+        let record: Record = record.expect("Could not parse input file");
+        let key = (record.sequence_context.clone(), record.correct_base, record.error_base, record.allele);
+        *counts.entry(key).or_insert(0) += record.observed_count;
+        observed_sequences.insert(record.sequence_context.clone());
+    }
+
+    let mut emission_probs: HashMap<(String, char, char),f64> = HashMap::new();
+
+    for sequence_context in &observed_sequences {
+        for b1 in ['A','C','G','T'].iter() {
+            for b2 in ['A','C','G','T'].iter() {
+                let maybe_counts_0 = counts.get(&(sequence_context.clone(),*b1,*b2,0 as u8));
+                let maybe_counts_1 = counts.get(&(sequence_context.clone(),*b1,*b2,1 as u8));
+
+                match (maybe_counts_0, maybe_counts_1) {
+                    (Some(counts_0),Some(counts_1)) => {
+                        if counts_0 + counts_1 > minimum_observation_count {
+                            let prob = *counts_1 as f64 / (*counts_0 + *counts_1) as f64;
+                            //eprintln!("{} {} {} {}", sequence_context.clone(),*b1,*b2, prob);
+                            emission_probs.insert((sequence_context.clone(),*b1,*b2), prob);
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    SequenceContextModel {
+        sequence_context_window_size,
+        emission_probs
+    }
+}
 
 pub fn print_allele_skew_data(flist: &Vec<Fragment>, varlist:&VarList, skew_file:&String, window_size: usize, max_p_miscall:f64){
 

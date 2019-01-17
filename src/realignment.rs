@@ -106,6 +106,7 @@ impl AlignmentParameters {
 pub fn forward_algorithm_non_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
+    var_probs: &Option<Vec<(usize,char,char,f64)>>,
     params: AlignmentParameters,
     min_band_width: usize,
 ) -> (LogProb) {
@@ -170,11 +171,32 @@ pub fn forward_algorithm_non_numerically_stable(
             let middle_from_lower = lower_prev[j - 1] * t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] * t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] * t.match_from_deletion;
-            let match_emission: f64 = if v[i - 1] == w[j - 1] {
+
+            let mut match_emission = if v[i - 1] == w[j - 1] {
                 e.equal
             } else {
                 e.not_equal
             };
+
+            match var_probs {
+                Some(vp) => {
+                    for (pos,hapbase,nonhapbase,p) in vp.iter() {
+                        if pos > &(j-1) {
+                            continue;
+                        }
+                        //eprintln!("i-1={}; v[i-1]={}; j-1={}; w[j-1]={}; pos={}; hapbase={}; nonhapbase={}", i-1,v[i-1],j-1,w[j-1], pos, hapbase, nonhapbase);
+
+                        if *pos == j-1 && w[j-1] == *hapbase && v[i-1] == *nonhapbase {
+                            match_emission = *p;
+                            //eprintln!("Using custom emission probability {}", *p);
+                            break;
+                        }
+                    }
+                }
+                None => {
+                }
+            }
+
             middle_curr[j] =
                 match_emission * (middle_from_lower + middle_continue + middle_from_upper);
         }
@@ -193,13 +215,14 @@ pub fn forward_algorithm_non_numerically_stable(
     if middle_prev[w.len()] != 0.0 {
         LogProb::from(Prob(middle_prev[w.len()]))
     } else {
-        forward_algorithm_numerically_stable(v, w, params.ln(), band_width)
+        forward_algorithm_numerically_stable(v, w, var_probs, params.ln(), band_width)
     }
 }
 
 pub fn forward_algorithm_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
+    var_probs: &Option<Vec<(usize,char,char,f64)>>,
     params: LnAlignmentParameters,
     min_band_width: usize,
 ) -> (LogProb) {
@@ -262,11 +285,28 @@ pub fn forward_algorithm_numerically_stable(
             let middle_continue = middle_prev[j - 1] + t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] + t.match_from_deletion;
             let options3 = [middle_from_lower, middle_continue, middle_from_upper];
-            let match_emission: LogProb = if v[i - 1] == w[j - 1] {
+            let mut match_emission: LogProb = if v[i - 1] == w[j - 1] {
                 e.equal
             } else {
                 e.not_equal
             };
+
+            match var_probs {
+                Some(vp) => {
+                    for (pos,hapbase,nonhapbase,p) in vp.iter() {
+                        if pos > &(j-1) {
+                            continue;
+                        }
+                        if *pos == j-1 && w[j-1] == *hapbase && v[i-1] == *nonhapbase {
+                            match_emission = LogProb::from(Prob(*p));
+                            break;
+                        }
+                    }
+                }
+                None => {
+                }
+            }
+
             middle_curr[j] = match_emission + LogProb::ln_sum_exp(&options3);
         }
 
@@ -287,6 +327,7 @@ pub fn forward_algorithm_numerically_stable(
 pub fn viterbi_max_scoring_alignment(
     v: &Vec<char>,
     w: &Vec<char>,
+    var_probs: &Option<Vec<(usize,char,char,f64)>>,
     params: LnAlignmentParameters,
     min_band_width: usize,
 ) -> LogProb {
@@ -363,11 +404,28 @@ pub fn viterbi_max_scoring_alignment(
                     max_option = option;
                 }
             }
-            let match_emission: LogProb = if v[i - 1] == w[j - 1] {
+            let mut match_emission: LogProb = if v[i - 1] == w[j - 1] {
                 e.equal
             } else {
                 e.not_equal
             };
+
+            match var_probs {
+                Some(vp) => {
+                    for (pos,hapbase,nonhapbase,p) in vp.iter() {
+                        if pos > &(j-1) {
+                            continue;
+                        }
+                        if *pos == j-1 && w[j-1] == *hapbase && v[i-1] == *nonhapbase {
+                            match_emission = LogProb::from(Prob(*p));
+                            break;
+                        }
+                    }
+                }
+                None => {
+                }
+            }
+
             middle_curr[j] = match_emission + max_option;
         }
 
