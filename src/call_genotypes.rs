@@ -834,7 +834,7 @@ pub fn call_genotypes_with_haplotypes(
         let b10 = |x: LogProb| (*PHREDProb::from(x) / -10.0) as f64;
 
         // termination criteria for the likelihoods
-        if ((b10(total_likelihood) - b10(prev_likelihood)) / b10(prev_likelihood)).abs() < ll_delta
+        if ((b10(total_likelihood) - b10(prev_likelihood)) / b10(prev_likelihood)) < ll_delta
         {
             break;
         }
