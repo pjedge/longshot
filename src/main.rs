@@ -37,6 +37,8 @@ mod print_output;
 mod realignment;
 mod util;
 mod variants_and_fragments;
+mod fishers_exact_test;
+
 //mod spoa;
 
 // use declarations
@@ -47,8 +49,9 @@ use clap::{App, Arg};
 use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
-use extract_fragments::ExtractFragmentParameters;
-use genotype_probs::{GenotypePriors,print_allele_skew_data,parse_sequence_bias_model_file,SequenceContextModel};
+use extract_fragments::{ExtractFragmentParameters};
+use fishers_exact_test::fishers_exact;
+use genotype_probs::{Genotype, GenotypePriors,print_allele_skew_data,parse_sequence_bias_model_file,SequenceContextModel};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::AlignmentType;
@@ -313,6 +316,12 @@ fn run() -> Result<()> {
             .help("Specify the transition/transversion rate for genotype prior estimation")
             .display_order(184)
             .default_value(&"0.5"))
+        .arg(Arg::with_name("Strand Bias P-value cutoff")
+            .long("strand_bias_pvalue_cutoff")
+            .value_name("float")
+            .help("Remove a variant if the allele observations are biased toward one strand (forward or reverse) according to Fisher's exact test. Use this cutoff for the two-tailed P-value.")
+            .display_order(183)
+            .default_value(&"0.01"))
         .arg(Arg::with_name("Input sequence context model")
             .long("input_sequence_context_model")
             .value_name("string")
@@ -392,6 +401,7 @@ fn run() -> Result<()> {
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
     let min_allele_qual: f64 = parse_positive_f64(&input_args, "Min allele quality")?;
+    let strand_bias_pvalue_cutoff: f64 = parse_positive_f64(&input_args, "Strand Bias P-value cutoff")?;
     let hap_assignment_qual: f64 = parse_positive_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
     let potential_snv_cutoff_phred =
@@ -715,6 +725,31 @@ fn run() -> Result<()> {
             );
             call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall)
                 .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
+
+
+
+            // use Fishers exact test to check if allele observations are biased toward one strand or the other
+            for mut var in &mut varlist.lst {
+                if !var.alleles.len() == 2 {
+                    continue;
+                }
+                let counts: [u32;4] = [var.allele_counts_forward[0] as u32, var.allele_counts_reverse[0]  as u32,
+                                       var.allele_counts_forward[1] as u32, var.allele_counts_reverse[1] as u32];
+                let fishers_exact_pvalues = fishers_exact(&counts);
+
+                //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
+
+                if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
+                    var.valid = false;
+                    var.genotype = Genotype(0,0);
+                    var.gq = 0.0;
+                }
+            }
+
+
+            for f in 0..flist.len() {
+                &flist[f].calls.retain(|&c| varlist.lst[c.var_ix].valid);
+            }
 
             print_variant_debug(
                 &mut varlist,

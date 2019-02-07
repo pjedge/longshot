@@ -45,8 +45,11 @@ pub struct Var {
     pub dp: usize,
     // depth of coverage
     pub allele_counts: Vec<usize>, // indices match up with those of Var.alleles
+    pub allele_counts_forward: Vec<usize>, // indices match up with those of Var.alleles
+    pub allele_counts_reverse: Vec<usize>, // indices match up with those of Var.alleles
     pub ambiguous_count: usize,
     pub qual: f64,
+    pub valid: bool,
     pub filter: String,
     pub genotype: Genotype,
     pub gq: f64,
@@ -169,8 +172,11 @@ pub fn parse_vcf_potential_variants(
             alleles: alleles.clone(),
             dp: 0,
             allele_counts: vec![0; alleles.len()],
+            allele_counts_forward: vec![0; alleles.len()],
+            allele_counts_reverse: vec![0; alleles.len()],
             ambiguous_count: 0,
             qual: 0.0,
+            valid: true,
             filter: ".".to_string(),
             genotype: Genotype(0, 0),
             gq: 0.0,
@@ -645,6 +651,7 @@ mod tests {
             allele_counts: vec![20, 20],
             ambiguous_count: 0,
             qual: 0.0,
+            valid: true,
             filter: ".".to_string(),
             genotype: Genotype(0, 1),
             gq: 0.0,
@@ -1328,6 +1335,7 @@ mod tests {
             allele_counts: vec![20, 20],
             ambiguous_count: 0,
             qual: 0.0,
+            valid: true,
             filter: ".".to_string(),
             genotype: Genotype(0, 1),
             gq: 0.0,

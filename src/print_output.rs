@@ -39,6 +39,8 @@ pub fn print_vcf(
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
+##INFO=<ID=FC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele on the Forward Strand\">
+##INFO=<ID=RC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele on the Reverse Strand\">
 ##INFO=<ID=MC,Number=1,Type=Integer,Description=\"Minimum Error Correction (MEC) for this single variant\">
 ##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
 ##INFO=<ID=MB,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant's haplotype block.\">
@@ -101,6 +103,23 @@ pub fn print_vcf(
             .map(|x| x.to_string())
             .collect::<Vec<String>>()
             .join(",");
+
+        let forward_counts_str = var
+            .allele_counts_forward
+            .clone()
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>()
+            .join(",");
+
+        let reverse_counts_str = var
+            .allele_counts_reverse
+            .clone()
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>()
+            .join(",");
+
         let mut post_vec: Vec<String> = vec![];
         for g in var.possible_genotypes() {
             post_vec.push(format!("{:.2}", *PHREDProb::from(var.genotype_post.get(g))));
@@ -131,7 +150,7 @@ pub fn print_vcf(
             as usize;
 
         writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};FC={};RC={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
                        var.chrom,
                        var.pos0 + 1,
                        var.alleles[0],
@@ -141,6 +160,8 @@ pub fn print_vcf(
                        var.dp,
                        allele_counts_str,
                        var.ambiguous_count,
+                       forward_counts_str,
+                       reverse_counts_str,
                        var.mec,
                        var.mec_frac_variant,
                        var.mec_frac_block,

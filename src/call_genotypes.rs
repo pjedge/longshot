@@ -57,10 +57,14 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 /// ```counts_amb``` is the number of ambiquous alleles that fell beneath the quality cutoff.
 fn count_alleles(
     pileup: &Vec<FragCall>,
+    flist: &Vec<Fragment>,
     num_alleles: usize,
     max_p_miscall: f64,
-) -> (Vec<usize>, usize) {
+) -> (Vec<usize>, Vec<usize>, Vec<usize>, usize) {
     let mut counts: Vec<usize> = vec![0; num_alleles]; // counts for each allele
+    let mut counts_forward: Vec<usize> = vec![0; num_alleles]; // counts for each allele from reads on forward strand
+    let mut counts_reverse: Vec<usize> = vec![0; num_alleles]; // counts for each allele from reads on reverse strand
+
     let mut count_amb = 0; // ambiguous allele count
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
@@ -68,13 +72,18 @@ fn count_alleles(
         if call.qual < ln_max_p_miscall {
             // allele call meets cutoff
             counts[call.allele as usize] += 1;
+            if flist[call.frag_ix.unwrap()].reverse_strand {
+                counts_reverse[call.allele as usize] += 1;
+            } else {
+                counts_forward[call.allele as usize] += 1;
+            }
         } else {
             // allele is ambiguously called
             count_amb += 1;
         }
     }
 
-    (counts, count_amb) // return counts
+    (counts, counts_forward, counts_reverse, count_amb) // return counts
 }
 
 /// Calculates the posterior probabilities for a pileup-based genotyping calculation (without using
@@ -179,6 +188,7 @@ pub fn call_genotypes_no_haplotypes(
 
     // for each variant in the VarList
     for i in 0..varlist.lst.len() {
+
         let pileup = &pileup_lst[i];
         let var = &mut varlist.lst[i];
 
@@ -197,7 +207,7 @@ pub fn call_genotypes_no_haplotypes(
         let genotype_qual: f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
         // count the number of alleles (for annotating the VCF fields)
-        let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
+        let (allele_counts, allele_counts_forward, allele_counts_reverse, ambig_count) = count_alleles(&pileup, flist,var.alleles.len(), max_p_miscall);
         let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
 
         // UPDATE THE VARIANT FIELDS
@@ -213,6 +223,8 @@ pub fn call_genotypes_no_haplotypes(
 
         var.genotype = max_g;
         var.allele_counts = allele_counts;
+        var.allele_counts_forward = allele_counts_forward;
+        var.allele_counts_reverse = allele_counts_reverse;
         var.ambiguous_count = ambig_count;
         var.unphased_genotype = max_g;
         var.gq = genotype_qual;
