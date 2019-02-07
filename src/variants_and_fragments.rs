@@ -1,6 +1,6 @@
 //! Data structures to represent variants and haplotype fragments defined over those variants.
 
-use bio::stats::LogProb;
+use bio::stats::{PHREDProb,LogProb};
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
 use genotype_probs::*;
@@ -58,6 +58,7 @@ pub struct Var {
     pub genotype_post: GenotypeProbs, // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
+    pub strand_bias_pvalue: PHREDProb, // fisher's exact test strand bias Pvalue
     pub mec: usize,            // mec for variant
     pub mec_frac_variant: f64, // mec fraction for this variant
     pub mec_frac_block: f64,   // mec fraction for this haplotype block
@@ -184,6 +185,7 @@ pub fn parse_vcf_potential_variants(
             unphased_gq: 0.0,
             genotype_post: GenotypeProbs::uniform(alleles.len()),
             phase_set: None,
+            strand_bias_pvalue: PHREDProb(0.0),
             mec: 0,
             mec_frac_variant: 0.0, // mec fraction for this variant
             mec_frac_block: 0.0,   // mec fraction for this haplotype block

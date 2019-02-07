@@ -6,7 +6,7 @@ use std::char;
 
 use bio::io::fasta;
 //,HashSet};
-use bio::stats::{LogProb,Prob};
+use bio::stats::{PHREDProb,LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
@@ -388,6 +388,7 @@ pub fn call_potential_snvs(
                     unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
+                    strand_bias_pvalue: PHREDProb(0.0),
                     mec: 0,
                     mec_frac_variant: 0.0, // mec fraction for this variant
                     mec_frac_block: 0.0,   // mec fraction for this haplotype block
@@ -652,6 +653,7 @@ pub fn select_random_potential_snvs(
                         unphased_gq: 0.0,
                         genotype_post: GenotypeProbs::uniform(2),
                         phase_set: None,
+                        strand_bias_pvalue: PHREDProb(0.0),
                         mec: 0,
                         mec_frac_variant: 0.0, // mec fraction for this variant
                         mec_frac_block: 0.0,   // mec fraction for this haplotype block

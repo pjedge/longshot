@@ -758,6 +758,10 @@ fn run() -> Result<()> {
                 let fishers_exact_pvalues = fishers_exact(&counts).chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
 
                 //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
+                var.strand_bias_pvalue = PHREDProb::from(Prob(fishers_exact_pvalues.two_tail_pvalue));
+                if *var.strand_bias_pvalue > 500.0 {
+                    var.strand_bias_pvalue = PHREDProb(500.0);
+                }
 
                 if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
                     var.valid = false;
