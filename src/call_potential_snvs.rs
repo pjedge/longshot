@@ -6,7 +6,7 @@ use std::char;
 
 use bio::io::fasta;
 //,HashSet};
-use bio::stats::{PHREDProb,LogProb,Prob};
+use bio::stats::{LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
@@ -354,8 +354,6 @@ pub fn call_potential_snvs(
             let p_total = LogProb::ln_sum_exp(&[p00,p01,p11]);
             //let post_00 = p00 - p_total;
             let snv_qual = LogProb::ln_add_exp(p01,p11) - p_total; //LogProb::ln_one_minus_exp(&post_00);
-
-            println!("{} {} ref={} var={} qual={}",target_names[tid].clone(),pos+1,ref_count,var_count,*PHREDProb::from(snv_qual));
 
             next_valid_pos = (pos + 1) as u32;
 
