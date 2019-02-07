@@ -220,7 +220,7 @@ fn run() -> Result<()> {
             .short("L")
             .value_name("float")
             .help("Terminate the haplotype/genotype iteration when the relative change in log-likelihood falls below this amount. Setting a larger value results in faster termination but potentially less accurate results.")
-            .display_order(98)
+            .display_order(99)
             .default_value(&"0.0001"))
         .arg(Arg::with_name("Anchor length")
                 .short("l")
