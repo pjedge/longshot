@@ -23,6 +23,7 @@ extern crate csv;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate fishers_exact;
 
 // import modules
 mod call_genotypes;
@@ -37,7 +38,6 @@ mod print_output;
 mod realignment;
 mod util;
 mod variants_and_fragments;
-mod fishers_exact_test;
 
 //mod spoa;
 
@@ -50,7 +50,7 @@ use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::{ExtractFragmentParameters};
-use fishers_exact_test::fishers_exact;
+use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors,print_allele_skew_data,parse_sequence_bias_model_file,SequenceContextModel};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
@@ -755,7 +755,7 @@ fn run() -> Result<()> {
                 }
                 let counts: [u32;4] = [var.allele_counts_forward[0] as u32, var.allele_counts_reverse[0]  as u32,
                                        var.allele_counts_forward[1] as u32, var.allele_counts_reverse[1] as u32];
-                let fishers_exact_pvalues = fishers_exact(&counts);
+                let fishers_exact_pvalues = fishers_exact(&counts).chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
 
                 //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
 
