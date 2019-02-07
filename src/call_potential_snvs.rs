@@ -3,16 +3,14 @@
 extern crate rust_htslib;
 
 use std::char;
-use std::collections::HashMap;
 
 use bio::io::fasta;
 //,HashSet};
-use bio::stats::LogProb;
+use bio::stats::{PHREDProb,LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
 
-use call_genotypes::calculate_genotype_posteriors_no_haplotypes;
 use errors::*;
 //use std::str;
 //use bio::alignment::Alignment;
@@ -78,14 +76,16 @@ pub fn call_potential_snvs(
     genotype_priors: &GenotypePriors,
     min_coverage: u32,
     max_coverage: u32,
+    min_alt_count: usize,
+    min_alt_frac: f64,
     min_mapq: u8,
-    max_p_miscall: f64,
     ln_align_params: LnAlignmentParameters,
     potential_snv_cutoff: LogProb,
 ) -> Result<VarList> {
 
     // the list of target (contig) names from the bam file
     let target_names = parse_target_names(&bam_file)?;
+    let bases = ['A','C','G','T','N'];
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file)
         .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
@@ -96,11 +96,25 @@ pub fn call_potential_snvs(
     let mut ref_seq: Vec<char> = vec![]; // this vector will be used to hold the reference sequence
     let mut prev_tid = 4294967295;
 
-    // the 4 bases as String type
-    let a_str = "A".to_string();
-    let c_str = "C".to_string();
-    let g_str = "G".to_string();
-    let t_str = "T".to_string();
+    let mut genotype_priors_table: [[(LogProb,LogProb,LogProb); 4]; 4] = [[(LogProb::ln_zero(),LogProb::ln_zero(),LogProb::ln_zero()); 4]; 4];
+
+    for i in 0..4 {
+        for j in 0..4 {
+            if i == j {
+                continue;
+            }
+            let ref_allele = bases[i].to_string();
+            let var_allele = bases[j].to_string();
+
+            let priors: GenotypeProbs = genotype_priors
+                .get_all_priors(&vec![ref_allele, var_allele])
+                .chain_err(|| "Error getting all genotype priors while calculating genotypes.")?;
+
+            genotype_priors_table[i][j] = (priors.get(Genotype(0,0)),
+                                           priors.get(Genotype(0,1)),
+                                           priors.get(Genotype(1,1)));
+        }
+    }
 
     // the strategy used for iterating over the BAM entries is as follows:
     // if a genomic region was specified, then ```get_interval_lst``` puts that genomic region into a vector (interval_lst)
@@ -143,7 +157,10 @@ pub fn call_potential_snvs(
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
                 fasta
-                    .read_all(&chrom, &mut ref_seq_u8)
+                    .fetch_all(&chrom)
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                fasta
+                    .read(&mut ref_seq_u8)
                     .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
                 next_valid_pos = 0;
@@ -172,26 +189,24 @@ pub fn call_potential_snvs(
             }
             let sequence_context: String = (ref_seq[l_window..r_window]).iter().collect::<String>();
 
-            let ref_base_str = (ref_seq[pileup.pos() as usize]).to_string();
+            let mut counts = [0 as usize; 5]; // A,C,G,T,N
 
-            if ref_base_str.contains("N") {
+            // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
+            let mut depth: usize = 0;
+            let pos: usize = pileup.pos() as usize;
+            let ref_allele = (ref_seq[pos] as char).to_ascii_uppercase();
+
+            if ref_allele == 'N' {
                 continue;
             }
 
             // the dna_vec conversion function should remove any non-ACGT bases
             assert!(
-                ref_base_str == a_str
-                    || ref_base_str == c_str
-                    || ref_base_str == g_str
-                    || ref_base_str == t_str
+                ref_allele == 'A'
+                    || ref_allele == 'C'
+                    || ref_allele == 'G'
+                    || ref_allele == 'T'
             );
-
-            //let mut counts = [0; 5]; // A,C,G,T,N
-            let mut counts: HashMap<(String, String), usize> = HashMap::new();
-            // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
-            let mut depth: usize = 0;
-            let mut pileup_alleles: Vec<(String, String)> = vec![];
-            let pos: usize = pileup.pos() as usize;
 
             let mut passing_reads: usize = 0; // total number of reads in this pileup at any mapq
             let mut mq10: f64 = 0.0; // total number of reads in this pileup with mapq >= 10
@@ -241,13 +256,10 @@ pub fn call_potential_snvs(
 
                 // handle the base/indel observed on the read
                 if !alignment.is_del() && !alignment.is_refskip() {
-                    let ref_allele;
-                    let var_allele;
 
                     match alignment.indel() {
                         Indel::None => {
                             // read is NOT an indel (a base is observed)
-                            ref_allele = (ref_seq[pos] as char).to_string().to_uppercase();
 
                             let base: char =
                                 alignment.record().seq()
@@ -255,50 +267,20 @@ pub fn call_potential_snvs(
                                         ErrorKind::IndexedBamPileupQueryPositionError
                                     })?] as char;
 
-                            var_allele = base.to_string().to_uppercase();
-                        }
-                        Indel::Ins(l) => {
-                            // read is an insertion
-                            let start = alignment
-                                .qpos()
-                                .chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?;
-                            let end = start + l as usize + 1;
-                            // don't want to convert whole seq to bytes...
-                            let mut var_char: Vec<char> = vec![];
-
-                            let record_len = alignment.record().seq().len();
-
-                            for i in start..end {
-                                if i < record_len {
-                                    var_char.push(alignment.record().seq()[i] as char);
-                                } else {
-                                    var_char.push('N');
-                                }
-                            }
-
-                            ref_allele = match ref_seq.get(pos) {
-                                Some(&r) => (r as char).to_string().to_uppercase(),
-                                None => "N".to_string(),
+                            let b = match base {
+                                'A' | 'a' => 0,
+                                'C' | 'c' => 1,
+                                'G' | 'g' => 2,
+                                'T' | 't' => 3,
+                                'N' | 'n' => 4,
+                                _ => panic!("Invalid base read from BAM file."),
                             };
 
-                            var_allele = var_char.into_iter().collect::<String>().to_uppercase();
-                        }
-                        Indel::Del(l) => {
-                            // read is a deletion
-                            let start = pos;
-                            let end: usize = pos + l as usize + 1;
+                            counts[b] += 1;
 
-                            ref_allele = ref_seq[start..end].iter().collect();
-                            var_allele = (ref_seq[pos] as char).to_string().to_uppercase();
                         }
+                        _ => {}
                     }
-
-                    // add the ref and var alleles to a vector representing the pileup
-                    pileup_alleles.push((ref_allele.clone(), var_allele.clone()));
-                    // iterate the counts for this observation in the counts hashmap
-                    *counts
-                        .entry((ref_allele.clone(), var_allele.clone()))
-                        .or_insert(0) += 1;
                 }
             }
 
@@ -317,82 +299,73 @@ pub fn call_potential_snvs(
                 continue;
             }
 
-            let mut snv_max_count: u32 = 0;
-            let mut snv_ref_allele = 'N'.to_string();
-            let mut snv_var_allele = 'N'.to_string();
 
-            // iterate over all the counts in the hashmap.
-            for (&(ref r, ref v), &count) in &counts {
-                if has_non_acgt(&r) || has_non_acgt(&v) {
-                    continue;
+            let mut var_count = 0;
+            let mut ref_count = 0;
+            let mut var_allele = 'N';
+            let mut ref_allele_ix = 0;
+            let mut var_allele_ix = 0;
+
+            for i in 0..5 {
+                //base_cov += counts[i];
+                if bases[i] == ref_allele {
+                    ref_count = counts[i];
+                    ref_allele_ix = i;
                 }
-
-                if r.len() == 1 && v.len() == 1 {
-                    // potential SNV
-                    if count > snv_max_count as usize && (r, v) != (&ref_base_str, &ref_base_str) {
-                        snv_max_count = count as u32;
-                        snv_ref_allele = r.clone();
-                        snv_var_allele = v.clone();
-                    }
+                if counts[i] > var_count && bases[i] != ref_allele {
+                    var_count = counts[i];
+                    var_allele = bases[i];
+                    var_allele_ix = i;
                 }
             }
 
-            // vectors contain entries with (call, qual)
-            // call is '0' or '1' (or potentially '2'...)
-            // qual is a LogProb probability of miscall
-            let mut snv_pileup_calls: Vec<FragCall> = vec![];
-            //let mut indel_pileup_calls: Vec<(char, LogProb)> = vec![];
+            let alt_frac: f64 = (var_count as f64) / (depth as f64);
 
-            // iterate over the observed alleles and count which ones match the most common one
-            // (snv_var_allele)
-            for (ref_allele, var_allele) in pileup_alleles {
-                let a = if (ref_allele.clone(), var_allele.clone())
-                    == (snv_ref_allele.clone(), snv_var_allele.clone())
-                {
-                    1u8
-                } else {
-                    0u8
-                };
+            if var_count < min_alt_count || alt_frac < min_alt_frac {
+                continue;
+            }
 
-                let qual = ln_align_params.emission_probs.not_equal;
-
-                let call = FragCall {
-                    frag_ix: None,                                    // index into fragment list
-                    var_ix: 0,                                        // index into variant list
-                    allele: a,                                        // allele call
-                    qual: qual, // LogProb probability the call is an error
-                    one_minus_qual: LogProb::ln_one_minus_exp(&qual), // LogProb probability the call is correct
-                };
-                snv_pileup_calls.push(call);
+            if var_allele == 'N' {
+                continue;
             }
 
             // use a basic genotype likelihood calculation to call SNVs
             // snv_qual is the LogProb probability of a non-reference base observation
-            let alleles = vec![snv_ref_allele.clone(), snv_var_allele.clone()];
-            let snv_qual = if !snv_ref_allele.contains("N") && !snv_var_allele.contains("N") {
-                let snv_post = calculate_genotype_posteriors_no_haplotypes(
-                    &snv_pileup_calls,
-                    &genotype_priors,
-                    &alleles,
-                    max_p_miscall,
-                ).chain_err(|| "Error getting genotype posteriors for calling potential SNVs.")?;
-                LogProb::ln_one_minus_exp(&snv_post.get(Genotype(0, 0)))
-            } else {
-                LogProb::ln_zero()
-            };
 
-            let (ref_allele, var_allele, qual) = (snv_ref_allele, snv_var_allele, snv_qual);
+            let (prior_00, prior_01, prior_11) = genotype_priors_table[ref_allele_ix][var_allele_ix];
+
+            // we dereference these so that they are f64 but in natural log space
+            // we want to be able to multiply them by some integer (raise to power),
+            // representing multiplying the independent probability that many times
+            let p_miscall = *ln_align_params.emission_probs.not_equal;
+            let p_call = *LogProb::ln_one_minus_exp(&ln_align_params.emission_probs.not_equal);
+            let ln_half = *LogProb::from(Prob(0.5)); // ln(0.5)
+            let ln_two = *LogProb::from(Prob(2.0)); // ln(2)
+            let p_het = *LogProb::ln_add_exp(LogProb(ln_half + p_call), LogProb(ln_half + p_miscall));
+
+            // raise the probability of observing allele to the power of number of times we observed that allele
+            // fastest way of multiplying probabilities for independent events, where the
+            // probabilities are all the same (either quality score or 1 - quality score)
+            let p00 = LogProb(*prior_00 + p_call * ref_count as f64 + p_miscall * var_count as f64);
+            let p01 = LogProb(ln_two + *prior_01 + p_het * (ref_count + var_count) as f64);
+            let p11 = LogProb(*prior_11 + p_call * var_count as f64 + p_miscall * ref_count as f64);
+
+            // calculate the posterior probability of 0/0 genotype
+            let p_total = LogProb::ln_sum_exp(&[p00,p01,p11]);
+            //let post_00 = p00 - p_total;
+            let snv_qual = LogProb::ln_add_exp(p01,p11) - p_total; //LogProb::ln_one_minus_exp(&post_00);
+
+            println!("{} {} ref={} var={} qual={}",target_names[tid].clone(),pos+1,ref_count,var_count,*PHREDProb::from(snv_qual));
 
             next_valid_pos = (pos + 1) as u32;
 
             // check if SNV meets our quality criteria for a potential SNV
             // if it does, make a new variant and add it to the list of potential SNVs.
-            if qual > potential_snv_cutoff
-                && !ref_allele.contains("N")
-                && !var_allele.contains("N")
-                && (ref_allele.clone(), var_allele.clone())
-                    != (ref_base_str.clone(), ref_base_str.clone())
+            if snv_qual > potential_snv_cutoff
+                && ref_allele != 'N'
+                && var_allele != 'N'
             {
+
                 let tid: usize = pileup.tid() as usize;
                 let new_var = Var {
                     ix: 0,
@@ -401,7 +374,7 @@ pub fn call_potential_snvs(
                     tid: tid,
                     chrom: target_names[tid].clone(),
                     pos0: pos,
-                    alleles: vec![ref_allele.clone(), var_allele.clone()],
+                    alleles: vec![ref_allele.to_string(), var_allele.to_string()],
                     dp: depth,
                     allele_counts: vec![0, 0],
                     ambiguous_count: 0,
@@ -428,7 +401,7 @@ pub fn call_potential_snvs(
                 };
 
                 // we don't want potential SNVs that are inside a deletion, for instance.
-                next_valid_pos = pileup.pos() + ref_allele.len() as u32;
+                next_valid_pos = pileup.pos() + 1;
 
                 varlist.push(new_var);
             }
