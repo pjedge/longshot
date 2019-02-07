@@ -1346,7 +1346,10 @@ pub fn extract_fragments(
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
                 fasta
-                    .read_all(&chrom, &mut ref_seq_u8)
+                    .fetch_all(&chrom)
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                fasta
+                    .read(&mut ref_seq_u8)
                     .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }

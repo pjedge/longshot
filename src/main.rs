@@ -106,6 +106,7 @@ fn main() {
 /// - if a file/directory already exists and -F option isn't set (e.g. vcf output or vcf debug directory)
 /// - input bam file isn't indexed
 fn run() -> Result<()> {
+
     /***********************************************************************************************/
     // READ COMMAND LINE ARGUMENTS
     /***********************************************************************************************/
@@ -113,7 +114,7 @@ fn run() -> Result<()> {
     eprintln!("");
 
     let input_args = App::new("Longshot")
-        .version("0.2.0")
+        .version("0.3.0")
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
         .arg(Arg::with_name("Input BAM")
@@ -171,7 +172,7 @@ fn run() -> Result<()> {
             .value_name("int")
             .help("Minimum coverage (of reads passing filters) to consider position as a potential SNV.")
             .display_order(78)
-            .default_value("0"))
+            .default_value("6"))
         .arg(Arg::with_name("Max coverage")
                 .short("C")
                 .long("max_cov")
@@ -206,7 +207,21 @@ fn run() -> Result<()> {
             .value_name("float")
             .help("Consider a site as a potential SNV if the original PHRED-scaled QUAL score for 0/0 genotype is below this amount (a larger value considers more potential SNV sites).")
             .display_order(96)
-            .default_value("30.0"))
+            .default_value("20.0"))
+        .arg(Arg::with_name("Potential SNV Min Alt Count")
+            .long("min_alt_count")
+            .short("e")
+            .value_name("int")
+            .help("Require a potential SNV to have at least this many alternate allele observations.")
+            .display_order(97)
+            .default_value("3"))
+        .arg(Arg::with_name("Potential SNV Min Alt Fraction")
+            .long("min_alt_frac")
+            .short("E")
+            .value_name("float")
+            .help("Require a potential SNV to have at least this fraction of alternate allele observations.")
+            .display_order(98)
+            .default_value("0.125"))
         .arg(Arg::with_name("Haplotype Convergence Delta")
             .long("hap_converge_delta")
             .short("L")
@@ -405,7 +420,11 @@ fn run() -> Result<()> {
     let hap_assignment_qual: f64 = parse_positive_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
     let potential_snv_cutoff_phred =
-        parse_positive_f64(&input_args, "Haplotype assignment quality")?;
+        parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
+    let potential_snv_min_alt_count: usize =
+        parse_usize(&input_args, "Potential SNV Min Alt Count")?;
+    let potential_snv_min_alt_frac: f64 =
+        parse_positive_f64(&input_args, "Potential SNV Min Alt Fraction")?;
     let hom_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous SNV Rate")?;
     let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
     let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
@@ -620,8 +639,9 @@ fn run() -> Result<()> {
                 &genotype_priors,
                 min_cov,
                 max_cov,
+                potential_snv_min_alt_count,
+                potential_snv_min_alt_frac,
                 min_mapq,
-                max_p_miscall,
                 alignment_parameters.ln(),
                 potential_snv_cutoff,
             ).chain_err(|| "Error calling potential SNVs.")?;
