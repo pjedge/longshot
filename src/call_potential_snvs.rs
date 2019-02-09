@@ -6,7 +6,7 @@ use std::char;
 
 use bio::io::fasta;
 //,HashSet};
-use bio::stats::{LogProb,Prob};
+use bio::stats::{PHREDProb,LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
@@ -367,7 +367,6 @@ pub fn call_potential_snvs(
                 let tid: usize = pileup.tid() as usize;
                 let new_var = Var {
                     ix: 0,
-                    old_ix: None,
                     // these will be set automatically,
                     tid: tid,
                     chrom: target_names[tid].clone(),
@@ -375,6 +374,8 @@ pub fn call_potential_snvs(
                     alleles: vec![ref_allele.to_string(), var_allele.to_string()],
                     dp: depth,
                     allele_counts: vec![0, 0],
+                    allele_counts_forward: vec![0, 0],
+                    allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
                     qual: 0.0,
                     filter: ".".to_string(),
@@ -384,6 +385,7 @@ pub fn call_potential_snvs(
                     unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
+                    strand_bias_pvalue: PHREDProb(0.0),
                     mec: 0,
                     mec_frac_variant: 0.0, // mec fraction for this variant
                     mec_frac_block: 0.0,   // mec fraction for this haplotype block
@@ -395,7 +397,7 @@ pub fn call_potential_snvs(
                     mq40_frac,
                     mq50_frac,
                     sequence_context,
-                    called: false,
+                    valid: true
                 };
 
                 // we don't want potential SNVs that are inside a deletion, for instance.

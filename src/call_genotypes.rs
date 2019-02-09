@@ -36,7 +36,7 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
     for fragment in flist {
         for call in fragment.clone().calls {
             // push the fragment call to the pileup for the variant that the fragment call covers
-            pileup_lst[call.var_ix].push(call);
+            pileup_lst[call.var_ix as usize].push(call);
         }
     }
     pileup_lst
@@ -57,10 +57,13 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 /// ```counts_amb``` is the number of ambiquous alleles that fell beneath the quality cutoff.
 fn count_alleles(
     pileup: &Vec<FragCall>,
+    flist: &Vec<Fragment>,
     num_alleles: usize,
     max_p_miscall: f64,
-) -> (Vec<usize>, usize) {
-    let mut counts: Vec<usize> = vec![0; num_alleles]; // counts for each allele
+) -> (Vec<u32>, u32) {
+    let mut counts: Vec<u16> = vec![0; num_alleles]; // counts for each allele
+    let mut counts_forward: Vec<u16> = vec![0; num_alleles]; // counts for each allele from reads on forward strand
+    let mut counts_reverse: Vec<u16> = vec![0; num_alleles]; // counts for each allele from reads on reverse strand
     let mut count_amb = 0; // ambiguous allele count
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
@@ -68,13 +71,18 @@ fn count_alleles(
         if call.qual < ln_max_p_miscall {
             // allele call meets cutoff
             counts[call.allele as usize] += 1;
+            if flist[call.frag_ix.unwrap()].reverse_strand {
+                counts_reverse[call.allele as usize] += 1;
+            } else {
+                counts_forward[call.allele as usize] += 1;
+            }
         } else {
             // allele is ambiguously called
             count_amb += 1;
         }
     }
 
-    (counts, count_amb) // return counts
+    (counts, counts_forward, counts_reverse, count_amb) // return counts
 }
 
 /// Calculates the posterior probabilities for a pileup-based genotyping calculation (without using
@@ -197,15 +205,15 @@ pub fn call_genotypes_no_haplotypes(
         let genotype_qual: f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
         // count the number of alleles (for annotating the VCF fields)
-        let (allele_counts, ambig_count) = count_alleles(&pileup, var.alleles.len(), max_p_miscall);
-        let allele_total: usize = allele_counts.iter().sum::<usize>() + ambig_count;
+        let (allele_counts, counts_forward, counts_reverse, ambig_count) = count_alleles(&pileup, flist,var.alleles.len(), max_p_miscall);
+        let allele_total: u32 = allele_counts.iter().sum::<u32>() + ambig_count;
 
         // UPDATE THE VARIANT FIELDS
-        if var.dp < allele_total {
-            var.dp = allele_total; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
+        if var.dp < allele_total as u32 {
+            var.dp = allele_total as u32; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
         }
 
-        var.qual = *PHREDProb::from(posts.get(Genotype(0, 0)));
+        var.qual = *PHREDProb::from(posts.get(Genotype(0, 0))) as f32;
 
         if var.qual > MAX_VCF_QUAL {
             var.qual = MAX_VCF_QUAL; // don't let the variant quality exceed upper bound
@@ -213,6 +221,8 @@ pub fn call_genotypes_no_haplotypes(
 
         var.genotype = max_g;
         var.allele_counts = allele_counts;
+        var.allele_counts_forward = counts_forward;
+        var.allele_counts_reverse = counts_reverse;
         var.ambiguous_count = ambig_count;
         var.unphased_genotype = max_g;
         var.gq = genotype_qual;
@@ -796,7 +806,6 @@ pub fn call_genotypes_with_haplotypes(
             var.genotype = max_g;
             var.gq = genotype_qual;
             var.filter = "PASS".to_string();
-            var.called = true;
 
             if var.qual > MAX_VCF_QUAL {
                 var.qual = MAX_VCF_QUAL;
