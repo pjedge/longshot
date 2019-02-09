@@ -332,7 +332,7 @@ pub fn count_alignment_events(
                     ref_pos += 1;
                 }
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                 );

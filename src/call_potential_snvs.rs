@@ -10,6 +10,7 @@ use bio::stats::{PHREDProb,LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
+use half::f16;
 
 use errors::*;
 //use std::str;
@@ -173,17 +174,22 @@ pub fn call_potential_snvs(
                 continue;
             }
 
-            // we want to save the sequence context (21 bp window around variant on reference)
+            // ex pos = 10
+            // l_window = 6
+            // r_window = 15
+            // l..r = 6,7,8,9,10,11,12,13,14
+
+            // we want to save the sequence context (9 bp window around variant on reference)
             // this will be printed to the VCF later and may help diagnose variant calling
             // issues e.g. if the variant occurs inside a large homopolymer or etc.
             // get the position 10 bases to the left
-            let l_window = if pileup.pos() >= 10 {
-                pileup.pos() as usize - 10
+            let l_window = if pileup.pos() >= 4 {
+                pileup.pos() as usize - 4
             } else {
                 0
             };
             // get the position 11 bases to the right
-            let mut r_window = pileup.pos() as usize + 11;
+            let mut r_window = pileup.pos() as usize + 5;
             if r_window >= ref_seq.len() {
                 r_window = ref_seq.len();
             }
@@ -368,34 +374,34 @@ pub fn call_potential_snvs(
                 let new_var = Var {
                     ix: 0,
                     // these will be set automatically,
-                    tid: tid,
+                    tid: tid as u16,
                     chrom: target_names[tid].clone(),
                     pos0: pos,
                     alleles: vec![ref_allele.to_string(), var_allele.to_string()],
-                    dp: depth,
+                    dp: depth as u16,
                     allele_counts: vec![0, 0],
                     allele_counts_forward: vec![0, 0],
                     allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
-                    qual: 0.0,
+                    qual: f16::from_f64(0.0),
                     filter: ".".to_string(),
                     genotype: Genotype(0, 0),
-                    gq: 0.0,
+                    gq: f16::from_f64(0.0),
                     unphased_genotype: Genotype(0, 0),
-                    unphased_gq: 0.0,
+                    unphased_gq: f16::from_f64(0.0),
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
                     strand_bias_pvalue: PHREDProb(0.0),
                     mec: 0,
-                    mec_frac_variant: 0.0, // mec fraction for this variant
-                    mec_frac_block: 0.0,   // mec fraction for this haplotype block
-                    mean_allele_qual: 0.0,
-                    dp_any_mq: passing_reads,
-                    mq10_frac,
-                    mq20_frac,
-                    mq30_frac,
-                    mq40_frac,
-                    mq50_frac,
+                    mec_frac_variant: f16::from_f64(0.0), // mec fraction for this variant
+                    mec_frac_block: f16::from_f64(0.0),   // mec fraction for this haplotype block
+                    mean_allele_qual: f16::from_f64(0.0),
+                    dp_any_mq: passing_reads as u16,
+                    mq10_frac: f16::from_f64(mq10_frac),
+                    mq20_frac: f16::from_f64(mq20_frac),
+                    mq30_frac: f16::from_f64(mq30_frac),
+                    mq40_frac: f16::from_f64(mq40_frac),
+                    mq50_frac: f16::from_f64(mq50_frac),
                     sequence_context,
                     valid: true
                 };

@@ -26,6 +26,7 @@ use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
+use half::f16;
 use realignment::*;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
@@ -132,11 +133,6 @@ pub fn create_augmented_cigarlist(
                     "'deletion' (D) found before any operation describing read sequence".to_owned()
                 ));
             }
-            &Cigar::Back(_) => {
-                bail!(ErrorKind::UnsupportedCigarOperation(
-                    "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
-                ));
-            }
             &Cigar::RefSkip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "'reference skip' (N) found before any operation describing read sequence".to_owned()
@@ -170,7 +166,7 @@ pub fn create_augmented_cigarlist(
                     read_pos: qpos,
                 });
             }
-            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) | &Cigar::Back(_) => {}
+            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) => {}
         }
 
         // move the reference and query positions forward
@@ -202,11 +198,6 @@ pub fn create_augmented_cigarlist(
             }
             &Cigar::HardClip(_) => {
                 j += 1;
-            }
-            &Cigar::Back(_) => {
-                bail!(ErrorKind::UnsupportedCigarOperation(
-                    "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
-                ));
             }
         }
     }
@@ -335,7 +326,7 @@ pub fn find_anchors(
                     break;
                 }
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -436,7 +427,7 @@ pub fn find_anchors(
                 match_len_left = 0;
                 seen_indel_left = true;
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -542,7 +533,7 @@ pub fn find_anchors(
                 match_len_right = 0;
                 seen_indel_right = true;
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -1070,7 +1061,7 @@ pub fn extract_fragments(
 
     for i in 0..flist.len() {
         for j in 0..flist[i].calls.len() {
-            let vix = flist[i].calls[j].var_ix;
+            let vix = flist[i].calls[j].var_ix as usize;
             let qual = flist[i].calls[j].qual;
             var_qual_sum[vix] = LogProb::ln_add_exp(var_qual_sum[vix], qual);
             var_num_alleles[vix] += 1;
@@ -1079,7 +1070,7 @@ pub fn extract_fragments(
 
     for (i, ref mut var) in varlist.lst.iter_mut().enumerate() {
         let q = var_qual_sum[i] - LogProb::from(Prob(var_num_alleles[i] as f64)); // q is LogProb of mean allele qual
-        var.mean_allele_qual = *PHREDProb::from(q);
+        var.mean_allele_qual = f16::from_f64(*PHREDProb::from(q));
     }
 
     Ok(flist)

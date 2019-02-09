@@ -11,11 +11,12 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use util::*;
 use half::f16;
+use rust_htslib::bcf::Read as bcfread;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub frag_ix: Option<u32>,  // index into fragment list
-    pub var_ix: u32,           // index into variant list
+    pub frag_ix: Option<usize>,  // index into fragment list
+    pub var_ix: usize,           // index into variant list
     pub allele: u8,              // allele call
     pub qual: LogProb,           // LogProb probability the call is an error
     pub one_minus_qual: LogProb, // LogProb probability the call is correct
@@ -35,10 +36,10 @@ pub struct Fragment {
 
 #[derive(Debug, Clone)]
 pub struct Var {
-    pub ix: u32,
+    pub ix: usize,
     pub tid: u16,
     pub chrom: String,
-    pub pos0: u32,
+    pub pos0: usize,
     pub alleles: Vec<String>, // ref allele is alleles[0] and each that follows is a variant allele
     pub dp: u16,
     // depth of coverage
@@ -60,7 +61,7 @@ pub struct Var {
     pub mec_frac_variant: f16, // mec fraction for this variant
     pub mec_frac_block: f16,   // mec fraction for this haplotype block
     pub mean_allele_qual: f16,
-    pub dp_any_mq: usize,
+    pub dp_any_mq: u16,
     pub mq10_frac: f16,
     pub mq20_frac: f16,
     pub mq30_frac: f16,
@@ -143,7 +144,7 @@ pub fn parse_vcf_potential_variants(
         // get the alleles from the vcf record as well
 
         let rid = record.rid().chain_err(|| "Error accessing vcf RID")?;
-        let chrom: String = u8_to_string(vcfh.header.rid2name(rid))?;
+        let chrom: String = u8_to_string(vcfh.header().rid2name(rid))?;
 
         if !chrom2tid.contains_key(&chrom) {
             eprintln!(
@@ -162,7 +163,7 @@ pub fn parse_vcf_potential_variants(
             ix: 0,
             tid: *chrom2tid
                 .get(&chrom)
-                .chain_err(|| "Error accessing tid from chrom2tid data structure")?,
+                .chain_err(|| "Error accessing tid from chrom2tid data structure")? as u16,
             chrom: chrom.clone(),
             pos0: record.pos() as usize,
             alleles: alleles.clone(),
@@ -171,25 +172,25 @@ pub fn parse_vcf_potential_variants(
             allele_counts_forward: vec![0; alleles.len()],
             allele_counts_reverse: vec![0; alleles.len()],
             ambiguous_count: 0,
-            qual: 0.0,
+            qual: f16::from_f64(0.0),
             filter: ".".to_string(),
             genotype: Genotype(0, 0),
-            gq: 0.0,
+            gq: f16::from_f64(0.0),
             unphased_genotype: Genotype(0, 0),
-            unphased_gq: 0.0,
+            unphased_gq: f16::from_f64(0.0),
             genotype_post: GenotypeProbs::uniform(alleles.len()),
             phase_set: None,
             strand_bias_pvalue: PHREDProb(0.0),
             mec: 0,
-            mec_frac_variant: 0.0, // mec fraction for this variant
-            mec_frac_block: 0.0,   // mec fraction for this haplotype block
-            mean_allele_qual: 0.0,
+            mec_frac_variant: f16::from_f64(0.0), // mec fraction for this variant
+            mec_frac_block: f16::from_f64(0.0),   // mec fraction for this haplotype block
+            mean_allele_qual: f16::from_f64(0.0),
             dp_any_mq: 0,
-            mq10_frac: 0.0,
-            mq20_frac: 0.0,
-            mq30_frac: 0.0,
-            mq40_frac: 0.0,
-            mq50_frac: 0.0,
+            mq10_frac: f16::from_f64(0.0),
+            mq20_frac: f16::from_f64(0.0),
+            mq30_frac: f16::from_f64(0.0),
+            mq40_frac: f16::from_f64(0.0),
+            mq50_frac: f16::from_f64(0.0),
             sequence_context: "None".to_string(),
             valid: true
         };
@@ -342,7 +343,7 @@ impl VarList {
         })?[index_pos];
 
         while i < self.lst.len()
-            && self.lst[i].tid == interval.tid as usize
+            && self.lst[i].tid == interval.tid as u16
             && self.lst[i].pos0 + self.lst[i].longest_allele_len()? <= interval.end_pos as usize
         {
             if self.lst[i].pos0 >= interval.start_pos as usize {
@@ -501,7 +502,7 @@ impl VarList {
         new_v.allele_counts = vec![0; new_allele_lst.len()];
         new_v.alleles = new_allele_lst.clone();
         new_v.genotype = Genotype(0, 0);
-        new_v.gq = 0.0;
+        new_v.gq = f16::from_f64(0.0);
         new_v.genotype_post = GenotypeProbs::uniform(new_v.alleles.len());
         new_v.phase_set = None;
 
@@ -567,7 +568,7 @@ pub fn var_filter(
     max_depth: u32,
 ) {
     for i in 0..varlist.lst.len() {
-        if varlist.lst[i].qual < density_qual {
+        if varlist.lst[i].qual < f16::from_f64(density_qual) {
             continue;
         }
 
@@ -576,7 +577,7 @@ pub fn var_filter(
             if varlist.lst[j].pos0 - varlist.lst[i].pos0 > density_dist {
                 break;
             }
-            if varlist.lst[j].qual < density_qual {
+            if varlist.lst[j].qual < f16::from_f64(density_qual) {
                 continue;
             }
             count += 1;
@@ -589,7 +590,7 @@ pub fn var_filter(
     }
 
     for i in 0..varlist.lst.len() {
-        if varlist.lst[i].dp > max_depth as usize {
+        if varlist.lst[i].dp > max_depth as u16 {
             if varlist.lst[i].filter == ".".to_string()
                 || varlist.lst[i].filter == "PASS".to_string()
             {
