@@ -1,6 +1,6 @@
 //! Data structures to represent variants and haplotype fragments defined over those variants.
 
-use bio::stats::LogProb;
+use bio::stats::{PHREDProb,LogProb};
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
 use genotype_probs::*;
@@ -10,11 +10,12 @@ use rust_htslib::bcf;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use util::*;
+use half::f16;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub frag_ix: Option<usize>,  // index into fragment list
-    pub var_ix: usize,           // index into variant list
+    pub frag_ix: Option<u32>,  // index into fragment list
+    pub var_ix: u32,           // index into variant list
     pub allele: u8,              // allele call
     pub qual: LogProb,           // LogProb probability the call is an error
     pub one_minus_qual: LogProb, // LogProb probability the call is correct
@@ -25,6 +26,7 @@ pub struct Fragment {
     pub id: String,
     pub calls: Vec<FragCall>,
     pub p_read_hap: [LogProb; 2],
+    pub reverse_strand: bool
 }
 
 //pub struct VarIx {
@@ -33,38 +35,39 @@ pub struct Fragment {
 
 #[derive(Debug, Clone)]
 pub struct Var {
-    pub ix: usize,
-    pub old_ix: Option<usize>,
-    // index of this variant in the global var list
-    pub tid: usize,
+    pub ix: u32,
+    pub tid: u16,
     pub chrom: String,
-    pub pos0: usize,
+    pub pos0: u32,
     pub alleles: Vec<String>, // ref allele is alleles[0] and each that follows is a variant allele
-    pub dp: usize,
+    pub dp: u16,
     // depth of coverage
-    pub allele_counts: Vec<usize>, // indices match up with those of Var.alleles
-    pub ambiguous_count: usize,
-    pub qual: f64,
+    pub allele_counts: Vec<u16>, // indices match up with those of Var.alleles
+    pub allele_counts_forward: Vec<u16>, // indices match up with those of Var.alleles
+    pub allele_counts_reverse: Vec<u16>, // indices match up with those of Var.alleles
+    pub ambiguous_count: u16,
+    pub qual: f16,
     pub filter: String,
     pub genotype: Genotype,
-    pub gq: f64,
+    pub gq: f16,
     pub unphased_genotype: Genotype,
-    pub unphased_gq: f64,
+    pub unphased_gq: f16,
     pub genotype_post: GenotypeProbs, // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
-    pub mec: usize,            // mec for variant
-    pub mec_frac_variant: f64, // mec fraction for this variant
-    pub mec_frac_block: f64,   // mec fraction for this haplotype block
-    pub mean_allele_qual: f64,
+    pub strand_bias_pvalue: PHREDProb, // fisher's exact test strand bias Pvalue
+    pub mec: u16,            // mec for variant
+    pub mec_frac_variant: f16, // mec fraction for this variant
+    pub mec_frac_block: f16,   // mec fraction for this haplotype block
+    pub mean_allele_qual: f16,
     pub dp_any_mq: usize,
-    pub mq10_frac: f64,
-    pub mq20_frac: f64,
-    pub mq30_frac: f64,
-    pub mq40_frac: f64,
-    pub mq50_frac: f64,
+    pub mq10_frac: f16,
+    pub mq20_frac: f16,
+    pub mq30_frac: f16,
+    pub mq40_frac: f16,
+    pub mq50_frac: f16,
     pub sequence_context: String,
-    pub called: bool, //pub pileup: Option(Vec<PileupElement>)
+    pub valid: bool
 }
 
 impl Var {
@@ -157,8 +160,6 @@ pub fn parse_vcf_potential_variants(
 
         let new_var = Var {
             ix: 0,
-            old_ix: None,
-            // these will be set automatically,
             tid: *chrom2tid
                 .get(&chrom)
                 .chain_err(|| "Error accessing tid from chrom2tid data structure")?,
@@ -167,6 +168,8 @@ pub fn parse_vcf_potential_variants(
             alleles: alleles.clone(),
             dp: 0,
             allele_counts: vec![0; alleles.len()],
+            allele_counts_forward: vec![0; alleles.len()],
+            allele_counts_reverse: vec![0; alleles.len()],
             ambiguous_count: 0,
             qual: 0.0,
             filter: ".".to_string(),
@@ -176,6 +179,7 @@ pub fn parse_vcf_potential_variants(
             unphased_gq: 0.0,
             genotype_post: GenotypeProbs::uniform(alleles.len()),
             phase_set: None,
+            strand_bias_pvalue: PHREDProb(0.0),
             mec: 0,
             mec_frac_variant: 0.0, // mec fraction for this variant
             mec_frac_block: 0.0,   // mec fraction for this haplotype block
@@ -187,7 +191,7 @@ pub fn parse_vcf_potential_variants(
             mq40_frac: 0.0,
             mq50_frac: 0.0,
             sequence_context: "None".to_string(),
-            called: false,
+            valid: true
         };
         varlist.push(new_var);
     }
@@ -354,12 +358,6 @@ impl VarList {
         }
 
         Ok(vlst)
-    }
-
-    pub fn backup_indices(&mut self) {
-        for ref mut var in &mut self.lst {
-            var.old_ix = Some(var.ix);
-        }
     }
 
     fn combine_variant_group(var_group: &mut Vec<Var>) -> Var {

@@ -19,6 +19,8 @@ extern crate core;
 extern crate rand;
 #[macro_use]
 extern crate error_chain;
+extern crate fishers_exact;
+extern crate half;
 
 // import modules
 mod call_genotypes;
@@ -43,7 +45,8 @@ use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::ExtractFragmentParameters;
-use genotype_probs::GenotypePriors;
+use fishers_exact::fishers_exact;
+use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::AlignmentType;
@@ -56,6 +59,8 @@ use util::*;
 use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
+use half::f16;
+
 //use variants_and_fragments::parse_VCF_potential_variants;
 //use haplotype_assembly::separate_reads_by_haplotype;
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
@@ -324,6 +329,12 @@ fn run() -> Result<()> {
             .help("Specify the transition/transversion rate for genotype grior estimation")
             .display_order(184)
             .default_value(&"0.5"))
+        .arg(Arg::with_name("Strand Bias P-value cutoff")
+            .long("strand_bias_pvalue_cutoff")
+            .value_name("float")
+            .help("Remove a variant if the allele observations are biased toward one strand (forward or reverse) according to Fisher's exact test. Use this cutoff for the two-tailed P-value.")
+            .display_order(185)
+            .default_value(&"0.01"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -361,6 +372,7 @@ fn run() -> Result<()> {
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
     let min_allele_qual: f64 = parse_positive_f64(&input_args, "Min allele quality")?;
+    let strand_bias_pvalue_cutoff: f64 = parse_positive_f64(&input_args, "Strand Bias P-value cutoff")?;
     let hap_assignment_qual: f64 = parse_positive_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
     let potential_snv_cutoff_phred =
@@ -566,11 +578,6 @@ fn run() -> Result<()> {
         potential_snv_cutoff,
     ).chain_err(|| "Error calling potential SNVs.")?;
 
-    // back up the variant indices
-    // they will be needed later when we try to re-use fragment alleles that don't change
-    // as the variant list expands
-    varlist.backup_indices();
-
     print_variant_debug(
         &mut varlist,
         &interval,
@@ -605,8 +612,7 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         extract_fragment_parameters,
-        alignment_parameters,
-        None,
+        alignment_parameters
     ).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
     // if we're printing out variant "debug" information, print out a fragment file to that debug directory
@@ -651,6 +657,35 @@ fn run() -> Result<()> {
     );
     call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall)
         .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
+
+
+    // use Fishers exact test to check if allele observations are biased toward one strand or the other
+    for mut var in &mut varlist.lst {
+        if !var.alleles.len() == 2 {
+            continue;
+        }
+        let counts: [u32;4] = [var.allele_counts_forward[0] as u32, var.allele_counts_reverse[0]  as u32,
+            var.allele_counts_forward[1] as u32, var.allele_counts_reverse[1] as u32];
+        let fishers_exact_pvalues = fishers_exact(&counts).chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
+
+        //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
+        var.strand_bias_pvalue = PHREDProb::from(Prob(fishers_exact_pvalues.two_tail_pvalue));
+        if *var.strand_bias_pvalue > 500.0 {
+            var.strand_bias_pvalue = PHREDProb(500.0);
+        }
+
+        if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
+            var.valid = false;
+            var.genotype = Genotype(0,0);
+            var.gq = f16::from_f64(0.0);
+        }
+    }
+
+
+    for f in 0..flist.len() {
+        &flist[f].calls.retain(|&c| varlist.lst[c.var_ix as usize].valid);
+    }
+
 
     print_variant_debug(
         &mut varlist,

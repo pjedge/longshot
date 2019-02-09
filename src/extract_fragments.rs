@@ -32,7 +32,6 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
-use std::collections::HashMap;
 use util::*;
 use variants_and_fragments::*;
 
@@ -815,8 +814,7 @@ pub fn extract_fragment(
     ref_seq: &Vec<char>,
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
-    old_frag: Option<Fragment>,
+    align_params: AlignmentParameters
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -829,6 +827,7 @@ pub fn extract_fragment(
         id: id,
         calls: vec![],
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
+        reverse_strand: bam_record.is_reverse()
     };
 
     if bam_record.is_quality_check_failed()
@@ -923,95 +922,7 @@ pub fn extract_fragment(
 
     // now extract alleles for the variant cluster
 
-    let mut old_frag_ix = 0; // hold onto index in old fragment
-                             // save reallocation of this hashmap for every variant
-    let mut new_var_ix: HashMap<usize, usize> =
-        HashMap::with_capacity(extract_params.variant_cluster_max_size);
-
     for (anchors, var_cluster) in cluster_lst {
-        if IGNORE_INDEL_ONLY_CLUSTERS {
-            let mut seen_snv = false;
-            for var in var_cluster.iter() {
-                if seen_snv {
-                    break;
-                }
-                for allele in var.alleles[1..].iter() {
-                    if allele.len() == var.alleles[0].len() {
-                        let mut diff = 0;
-                        for (c1, c2) in allele.chars().zip(var.alleles[0].chars()) {
-                            if c1 != c2 {
-                                diff += 1;
-                            }
-                        }
-                        if diff == 1 {
-                            seen_snv = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if !seen_snv {
-                continue;
-            }
-        }
-
-        // some new variants may have been added after performing POA multiple sequence alignment.
-        // if these new variants are too close to existing variant cluster, they will all need to be
-        // realigned. otherwise, if this "variant cluster" didn't change, just reuse the old fragment calls
-        match &old_frag {
-            &Some(ref old_f) => {
-                // if var.called is true, then this variant existed before POA
-                let mut changed = false;
-                for ref var in &var_cluster {
-                    if !var.called {
-                        // this is a new variant from POA
-                        assert_eq!(var.old_ix, None);
-                        changed = true;
-                        break;
-                    }
-                }
-
-                // the fragment cluster didn't change, so convert the old varlist indices to new ones
-                // and just re-use the calls without realigning anything.
-                if !changed {
-                    // map old varlist indices to new ones
-                    assert!(new_var_ix.is_empty()); // shouldn't ever have to clear this hashmap
-
-                    for ref var in &var_cluster {
-                        match var.old_ix {
-                            Some(old_ix) => {
-                                new_var_ix.insert(old_ix, var.ix);
-                            }
-                            None => panic!(
-                                "Attempted to reuse fragment call in an unchanged variant \
-                                 cluster, but var.old_ix was None."
-                            ),
-                        }
-                    }
-
-                    // convert the varlist indices in the old calls and push them to the fragment
-                    while !new_var_ix.is_empty() {
-                        let call = old_f.calls[old_frag_ix];
-
-                        match new_var_ix.remove(&call.var_ix) {
-                            Some(new_ix) => {
-                                let mut new_call = call.clone();
-                                new_call.var_ix = new_ix;
-                                fragment.calls.push(new_call);
-                            }
-                            None => {}
-                        }
-
-                        old_frag_ix += 1;
-                    }
-
-                    // skip to the next var_cluster or else we would double-add the fragment calls!
-                    continue;
-                }
-            }
-            &None => {}
-        }
 
         // extract the calls for the fragment
         for call in extract_var_cluster(
@@ -1035,8 +946,7 @@ pub fn extract_fragments(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
-    old_flist: Option<Vec<Fragment>>,
+    align_params: AlignmentParameters
 ) -> Result<Vec<Fragment>> {
     let t_names = parse_target_names(&bam_file)?;
 
@@ -1059,7 +969,7 @@ pub fn extract_fragments(
             .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
             .chain_err(|| "Error seeking BAM file while extracting fragments.")?;
 
-        for (i, r) in bam_ix.records().enumerate() {
+        for (_, r) in bam_ix.records().enumerate() {
             let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
             if record.is_quality_check_failed()
@@ -1071,14 +981,6 @@ pub fn extract_fragments(
             {
                 continue;
             }
-
-            let old_frag: Option<Fragment> = match &old_flist {
-                &Some(ref fl) => {
-                    assert_eq!(fl[i].id, u8_to_string(record.qname())?);
-                    Some(fl[i].clone())
-                }
-                &None => None,
-            };
 
             let tid: usize = record.tid() as usize;
             let chrom: String = t_names[tid].clone();
@@ -1139,8 +1041,7 @@ pub fn extract_fragments(
                 &ref_seq,
                 &t_names,
                 extract_params,
-                align_params,
-                old_frag,
+                align_params
             ).chain_err(|| "Error extracting fragment from read.")?;
 
             match frag {
