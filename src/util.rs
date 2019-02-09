@@ -8,7 +8,7 @@ use rust_htslib::bam;
 use rust_htslib::bam::Read;
 
 pub static INDEX_FREQ: usize = 1000;
-pub static MAX_VCF_QUAL: f32 = 500.0;
+pub static MAX_VCF_QUAL: f64 = 500.0;
 
 pub fn print_time() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()

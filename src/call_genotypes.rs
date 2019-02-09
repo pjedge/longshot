@@ -15,6 +15,7 @@ use haplotype_assembly::{call_hapcut2, generate_flist_buffer};
 use print_output::*;
 use util::{DensityParameters, GenomicInterval, MAX_VCF_QUAL};
 use variants_and_fragments::*;
+use half::f16;
 
 /// Takes a vector of fragments and returns a vector of "allele pileups"
 ///
@@ -60,7 +61,7 @@ fn count_alleles(
     flist: &Vec<Fragment>,
     num_alleles: usize,
     max_p_miscall: f64,
-) -> (Vec<u32>, u32) {
+) -> (Vec<u16>,Vec<u16>,Vec<u16>, u16) {
     let mut counts: Vec<u16> = vec![0; num_alleles]; // counts for each allele
     let mut counts_forward: Vec<u16> = vec![0; num_alleles]; // counts for each allele from reads on forward strand
     let mut counts_reverse: Vec<u16> = vec![0; num_alleles]; // counts for each allele from reads on reverse strand
@@ -71,7 +72,7 @@ fn count_alleles(
         if call.qual < ln_max_p_miscall {
             // allele call meets cutoff
             counts[call.allele as usize] += 1;
-            if flist[call.frag_ix.unwrap()].reverse_strand {
+            if flist[call.frag_ix.unwrap() as usize].reverse_strand {
                 counts_reverse[call.allele as usize] += 1;
             } else {
                 counts_forward[call.allele as usize] += 1;
@@ -206,17 +207,17 @@ pub fn call_genotypes_no_haplotypes(
 
         // count the number of alleles (for annotating the VCF fields)
         let (allele_counts, counts_forward, counts_reverse, ambig_count) = count_alleles(&pileup, flist,var.alleles.len(), max_p_miscall);
-        let allele_total: u32 = allele_counts.iter().sum::<u32>() + ambig_count;
+        let allele_total: u16 = allele_counts.iter().sum::<u16>() + ambig_count;
 
         // UPDATE THE VARIANT FIELDS
-        if var.dp < allele_total as u32 {
-            var.dp = allele_total as u32; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
+        if var.dp < allele_total as u16 {
+            var.dp = allele_total as u16; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
         }
 
-        var.qual = *PHREDProb::from(posts.get(Genotype(0, 0))) as f32;
+        var.qual = f16::from_f64(*PHREDProb::from(posts.get(Genotype(0, 0))));
 
-        if var.qual > MAX_VCF_QUAL {
-            var.qual = MAX_VCF_QUAL; // don't let the variant quality exceed upper bound
+        if var.qual > f16::from_f64(MAX_VCF_QUAL) {
+            var.qual = f16::from_f64(MAX_VCF_QUAL); // don't let the variant quality exceed upper bound
         }
 
         var.genotype = max_g;
@@ -225,14 +226,14 @@ pub fn call_genotypes_no_haplotypes(
         var.allele_counts_reverse = counts_reverse;
         var.ambiguous_count = ambig_count;
         var.unphased_genotype = max_g;
-        var.gq = genotype_qual;
-        var.unphased_gq = genotype_qual;
-        if var.gq > MAX_VCF_QUAL {
-            var.gq = MAX_VCF_QUAL; // don't let the genotype quality exceed upper bound
+        var.gq = f16::from_f64(genotype_qual);
+        var.unphased_gq = f16::from_f64(genotype_qual);
+        if var.gq > f16::from_f64(MAX_VCF_QUAL) {
+            var.gq = f16::from_f64(MAX_VCF_QUAL); // don't let the genotype quality exceed upper bound
         }
 
-        if var.unphased_gq > MAX_VCF_QUAL {
-            var.unphased_gq = MAX_VCF_QUAL; // don't let the unphased quality exceed upper bound
+        if var.unphased_gq > f16::from_f64(MAX_VCF_QUAL) {
+            var.unphased_gq = f16::from_f64(MAX_VCF_QUAL); // don't let the unphased quality exceed upper bound
         }
 
         var.phase_set = None; // set phase set to none since phase information was not used
@@ -293,7 +294,7 @@ pub fn call_genotypes_with_haplotypes(
     sample_name: &String,
     ll_delta: f64,
 ) -> Result<()> {
-    let min_hap_gq: f64 = 1.0;
+    let min_hap_gq: f16 = f16::from_f64(1.0);
 
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
@@ -312,7 +313,7 @@ pub fn call_genotypes_with_haplotypes(
 
     for i in 0..flist.len() {
         for call in &flist[i].calls {
-            var_frags[call.var_ix].push(i);
+            var_frags[call.var_ix as usize].push(i);
         }
     }
 
@@ -381,7 +382,7 @@ pub fn call_genotypes_with_haplotypes(
                 for call in &flist[f].calls {
                     if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
-                        if call.allele == haps[*hap_ix][call.var_ix] {
+                        if call.allele == haps[*hap_ix][call.var_ix as usize] {
                             pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
@@ -555,7 +556,7 @@ pub fn call_genotypes_with_haplotypes(
                 for call in &flist[f].calls {
                     if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
-                        if call.allele == haps[*hap_ix][call.var_ix] {
+                        if call.allele == haps[*hap_ix][call.var_ix as usize] {
                             pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
@@ -577,9 +578,9 @@ pub fn call_genotypes_with_haplotypes(
         for hap_ix in &hap_ixs {
             for f in 0..flist.len() {
                 for call in &flist[f].calls {
-                    if var_phased[call.var_ix] && call.qual < ln_max_p_miscall {
+                    if var_phased[call.var_ix as usize] && call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
-                        if call.allele == haps[*hap_ix][call.var_ix] {
+                        if call.allele == haps[*hap_ix][call.var_ix as usize] {
                             p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + &call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
@@ -604,7 +605,7 @@ pub fn call_genotypes_with_haplotypes(
             for v_r in ixslice {
                 let v = *v_r;
 
-                let var = &mut varlist.lst[v];
+                let var = &mut varlist.lst[v as usize];
 
                 assert_eq!(v, var.ix);
 
@@ -622,30 +623,30 @@ pub fn call_genotypes_with_haplotypes(
                 // we should simply multiply in the values
                 // if it is in var phased we do the whole divide out, multiply in stuff
                 for g in var.possible_genotypes() {
-                    for call in &pileup_lst[v] {
+                    for call in &pileup_lst[v as usize] {
                         if call.qual >= ln_max_p_miscall {
                             continue; // allele call fails allele quality cutoff
                         }
 
                         // get the value of the read likelihood given each haplotype
                         let (mut p_read_h0, mut p_read_h1) = match call.frag_ix {
-                            Some(frag_ix) => (p_read_hap[0][frag_ix], p_read_hap[1][frag_ix]),
+                            Some(frag_ix) => (p_read_hap[0][frag_ix as usize], p_read_hap[1][frag_ix as usize]),
                             None => panic!("ERROR: Fragment index is missing in pileup iteration."),
                         };
 
-                        if var_phased[v] {
+                        if var_phased[v as usize] {
                             // for each haplotype allele
                             // if that allele on the haplotype changes in g = [g1,g2],
                             // then we divide out the old value and multiply in the new value
 
                             // haplotype 0 at site j will change under this genotype
                             // therefore p_read_h0 needs to change
-                            if haps[0][v] != g.0 as u8 {
-                                if haps[0][v] == call.allele && g.0 != call.allele {
+                            if haps[0][v as usize] != g.0 as u8 {
+                                if haps[0][v as usize] == call.allele && g.0 != call.allele {
                                     // fragment call matched old h0 but doesn't match new h0
                                     // divide out the p(call), and multiply in p(miscall)
                                     p_read_h0 = p_read_h0 - call.one_minus_qual + call.qual;
-                                } else if haps[0][v] != call.allele && g.0 == call.allele {
+                                } else if haps[0][v as usize] != call.allele && g.0 == call.allele {
                                     // fragment call didn't match old h0 but matches new h0
                                     // divide out the p(miscall), and multiply in p(call)
                                     p_read_h0 = p_read_h0 - call.qual + call.one_minus_qual;
@@ -654,12 +655,12 @@ pub fn call_genotypes_with_haplotypes(
 
                             // haplotype 1 at site j will change under this genotype
                             // therefore p_read_h1 needs to change
-                            if haps[1][v] != g.1 as u8 {
-                                if haps[1][v] == call.allele && g.1 != call.allele {
+                            if haps[1][v as usize] != g.1 as u8 {
+                                if haps[1][v as usize] == call.allele && g.1 != call.allele {
                                     // fragment call matched old h1 but doesn't match new h1
                                     // divide out the p(call), and multiply in p(miscall)
                                     p_read_h1 = p_read_h1 - call.one_minus_qual + call.qual;
-                                } else if haps[1][v] != call.allele && g.1 == call.allele {
+                                } else if haps[1][v as usize] != call.allele && g.1 == call.allele {
                                     // fragment call didn't match old h1 but matches new h1
                                     // divide out the p(miscall), and multiply in p(call)
                                     p_read_h1 = p_read_h1 - call.qual + call.one_minus_qual;
@@ -679,11 +680,11 @@ pub fn call_genotypes_with_haplotypes(
                             }
                         }
 
-                        if var_phased[v] {
+                        if var_phased[v as usize] {
                             match call.frag_ix {
                                 Some(frag_ix) => {
                                     p_reads_g[g.0 as usize][g.1 as usize]
-                                        .push((frag_ix, p_read_h0, p_read_h1));
+                                        .push((frag_ix as usize, p_read_h0, p_read_h1));
                                 }
                                 None => panic!("Fragment index in pileup call is None."),
                             }
@@ -704,13 +705,13 @@ pub fn call_genotypes_with_haplotypes(
                 // TODO: should we reassign var.gq here?
 
                 // we need to track if any changes occured for termination
-                if haps[0][v] != max_g.0 || haps[1][v] != max_g.1 {
+                if haps[0][v as usize] != max_g.0 || haps[1][v as usize] != max_g.1 {
                     changed = true;
 
                     // if this variant was phased with HapCUT2 and used in calculating P(read | h),
                     // then we need to update the P(read | h1) and P(read | h2) values that changed
                     // when we changed h1 and h2
-                    if var_phased[v] {
+                    if var_phased[v as usize] {
                         for &(frag_ix, p_read_h0, p_read_h1) in
                             &p_reads_g[max_g.0 as usize][max_g.1 as usize]
                         {
@@ -721,8 +722,8 @@ pub fn call_genotypes_with_haplotypes(
                 }
 
                 // update the haplotype vectors with the max scoring phased genotype
-                haps[0][v] = max_g.0;
-                haps[1][v] = max_g.1;
+                haps[0][v as usize] = max_g.0;
+                haps[1][v as usize] = max_g.1;
             }
 
             // if the haplotypes have not changed in this iteration, then we break
@@ -761,7 +762,7 @@ pub fn call_genotypes_with_haplotypes(
                 for call in &flist[f].calls {
                     if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
-                        if call.allele == haps[*hap_ix][call.var_ix] {
+                        if call.allele == haps[*hap_ix][call.var_ix as usize] {
                             pr[*hap_ix] = pr[*hap_ix] + &call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
@@ -800,19 +801,19 @@ pub fn call_genotypes_with_haplotypes(
             //    var.dp = allele_total;
             //}
 
-            var.qual = *PHREDProb::from(var.genotype_post.get(Genotype(0, 0)));
+            var.qual = f16::from_f64(*PHREDProb::from(var.genotype_post.get(Genotype(0, 0))));
             //var.allele_counts = allele_counts;
             //var.ambiguous_count = ambig_count;
             var.genotype = max_g;
-            var.gq = genotype_qual;
+            var.gq = f16::from_f64(genotype_qual);
             var.filter = "PASS".to_string();
 
-            if var.qual > MAX_VCF_QUAL {
-                var.qual = MAX_VCF_QUAL;
+            if var.qual > f16::from_f64(MAX_VCF_QUAL) {
+                var.qual = f16::from_f64(MAX_VCF_QUAL);
             }
 
-            if var.gq > MAX_VCF_QUAL {
-                var.gq = MAX_VCF_QUAL;
+            if var.gq > f16::from_f64(MAX_VCF_QUAL) {
+                var.gq = f16::from_f64(MAX_VCF_QUAL);
             }
         }
 
