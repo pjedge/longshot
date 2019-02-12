@@ -8,7 +8,7 @@ use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use rust_htslib::bcf;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use util::*;
 use half::f16;
 use rust_htslib::bcf::Read as bcfread;

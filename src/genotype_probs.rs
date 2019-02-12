@@ -3,7 +3,7 @@
 
 use bio::stats::*;
 use errors::*;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use util::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

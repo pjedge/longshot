@@ -6,7 +6,7 @@ use half::f16;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use std::char::from_digit;
-use std::collections::{HashMap, HashSet};
+use hashbrown::{HashMap, HashSet};
 use util::*;
 use variants_and_fragments::*;
 

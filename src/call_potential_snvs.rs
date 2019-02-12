@@ -5,7 +5,6 @@ extern crate rust_htslib;
 use std::char;
 
 use bio::io::fasta;
-//,HashSet};
 use bio::stats::{PHREDProb,LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
