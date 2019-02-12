@@ -21,6 +21,7 @@ extern crate rand;
 extern crate error_chain;
 extern crate fishers_exact;
 extern crate half;
+extern crate hashbrown;
 
 // import modules
 mod call_genotypes;
