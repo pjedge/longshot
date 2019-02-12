@@ -61,6 +61,7 @@ use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
 use half::f16;
+use variants_and_fragments::VarFilter;
 
 //use variants_and_fragments::parse_VCF_potential_variants;
 //use haplotype_assembly::separate_reads_by_haplotype;
@@ -677,7 +678,7 @@ fn run() -> Result<()> {
         });
 
         if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
-            var.valid = false;
+            var.filter.add_filter(VarFilter::StrandBias);
             var.genotype = Genotype(0,0);
             var.gq = f16::from_f64(0.0);
         }
@@ -685,7 +686,7 @@ fn run() -> Result<()> {
 
 
     for f in 0..flist.len() {
-        &flist[f].calls.retain(|&c| varlist.lst[c.var_ix as usize].valid);
+        &flist[f].calls.retain(|&c| !varlist.lst[c.var_ix as usize].filter.has_filter(VarFilter::StrandBias));
     }
 
 
@@ -704,6 +705,7 @@ fn run() -> Result<()> {
         print_vcf(
             &mut varlist,
             &interval,
+            &None,
             &output_vcf_file,
             false,
             max_cov,
@@ -844,6 +846,7 @@ fn run() -> Result<()> {
     print_vcf(
         &mut varlist,
         &interval,
+        &Some(fasta_file),
         &output_vcf_file,
         false,
         max_cov,

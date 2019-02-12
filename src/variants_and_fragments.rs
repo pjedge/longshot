@@ -12,6 +12,9 @@ use hashbrown::HashMap;
 use util::*;
 use half::f16;
 use rust_htslib::bcf::Read as bcfread;
+use std::fmt;
+use std::convert::From;
+
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
@@ -30,9 +33,59 @@ pub struct Fragment {
     pub reverse_strand: bool
 }
 
-//pub struct VarIx {
-//    pub ix: usize
-//}
+#[repr(u8)]
+#[derive(Debug,Copy,Clone,Eq,PartialEq)]
+pub enum VarFilter {
+    Pass = 0,
+    Density = 1,
+    Depth = 2,
+    DensityAndDepth = 3,
+    StrandBias = 4,
+    DensityAndStrandBias = 5,
+    DepthAndStrandBias = 6,
+    DensityAndDepthAndStrandBias = 7
+}
+
+impl fmt::Display for VarFilter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            VarFilter::Pass => write!(f, "PASS"),
+            VarFilter::Density => write!(f, "dn"),
+            VarFilter::Depth => write!(f, "dp"),
+            VarFilter::DensityAndDepth => write!(f, "dn;dp"),
+            VarFilter::StrandBias => write!(f, "sb"),
+            VarFilter::DensityAndStrandBias => write!(f, "dn;sb"),
+            VarFilter::DepthAndStrandBias => write!(f, "dp;sb"),
+            VarFilter::DensityAndDepthAndStrandBias => write!(f, "dn;dp;sb")
+        }
+    }
+}
+
+impl From<usize> for VarFilter {
+    fn from(item: usize) -> Self {
+        match item {
+            0 => VarFilter::Pass,
+            1 => VarFilter::Density,
+            2 => VarFilter::Depth,
+            3 => VarFilter::DensityAndDepth,
+            4 => VarFilter::StrandBias,
+            5 => VarFilter::DensityAndStrandBias,
+            6 => VarFilter::DepthAndStrandBias,
+            7 => VarFilter::DensityAndDepthAndStrandBias,
+            _ => {panic!("Invalid value while combining variant filters");}
+        }
+    }
+}
+
+impl VarFilter {
+    // rhs is filter to add
+    pub fn add_filter(&mut self, filter: VarFilter) {
+        *self = VarFilter::from(*self as usize | filter as usize)
+    }
+    pub fn has_filter(&self, filter: VarFilter) -> bool {
+        (*self as usize & filter as usize) != 0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Var {
@@ -47,7 +100,7 @@ pub struct Var {
     pub allele_counts_reverse: Vec<u16>, // indices match up with those of Var.alleles
     pub ambiguous_count: u16,
     pub qual: f16,
-    pub filter: String,
+    pub filter: VarFilter, // bitwise flag holding filter info: 0 == PASS, 1 == dp, 2 == dn, 3 == dp && dn
     pub genotype: Genotype,
     pub gq: f16,
     pub unphased_genotype: Genotype,
@@ -66,8 +119,6 @@ pub struct Var {
     pub mq30_frac: f16,
     pub mq40_frac: f16,
     pub mq50_frac: f16,
-    pub sequence_context: String,
-    pub valid: bool
 }
 
 impl Var {
@@ -173,7 +224,7 @@ pub fn parse_vcf_potential_variants(
             allele_counts_reverse: vec![0; alleles.len()],
             ambiguous_count: 0,
             qual: f16::from_f64(0.0),
-            filter: ".".to_string(),
+            filter: VarFilter::Pass,
             genotype: Genotype(0, 0),
             gq: f16::from_f64(0.0),
             unphased_genotype: Genotype(0, 0),
@@ -191,8 +242,6 @@ pub fn parse_vcf_potential_variants(
             mq30_frac: f16::from_f64(0.0),
             mq40_frac: f16::from_f64(0.0),
             mq50_frac: f16::from_f64(0.0),
-            sequence_context: "None".to_string(),
-            valid: true
         };
         varlist.push(new_var);
     }
@@ -588,7 +637,7 @@ pub fn var_filter(
             count += 1;
             if count > density_count {
                 for k in i..j + 1 {
-                    varlist.lst[k].filter = "dn".to_string();
+                    varlist.lst[k].filter.add_filter(VarFilter::Density);
                 }
             }
         }
@@ -596,13 +645,7 @@ pub fn var_filter(
 
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].dp > max_depth as u16 {
-            if varlist.lst[i].filter == ".".to_string()
-                || varlist.lst[i].filter == "PASS".to_string()
-            {
-                varlist.lst[i].filter = "dp".to_string();
-            } else {
-                varlist.lst[i].filter.push_str(";dp");
-            }
+            varlist.lst[i].filter.add_filter(VarFilter::Depth);
         }
     }
 }
@@ -610,6 +653,43 @@ pub fn var_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_varfilter_cast() {
+        assert_eq!(VarFilter::Pass as usize, 0);
+        assert_eq!(VarFilter::Density as usize, 1);
+        assert_eq!(VarFilter::Depth as usize, 2);
+        assert_eq!(VarFilter::DensityAndDepth as usize, 3);
+        assert_eq!(VarFilter::StrandBias as usize, 4);
+    }
+
+    #[test]
+    fn test_varfilter_enum() {
+        let pass = VarFilter::Pass;
+        let dp = VarFilter::Depth;
+        let dn = VarFilter::Density;
+        let sb = VarFilter::StrandBias;
+
+        let mut f1 = VarFilter::Pass;
+        assert!(!f1.has_filter(dp));
+        f1.add_filter(pass);
+        assert_eq!(f1,pass);
+        f1.add_filter(dp);
+        assert!(f1.has_filter(dp));
+        assert!(!f1.has_filter(dn));
+        assert_eq!(f1,dp);
+        f1.add_filter(dn);
+        assert!(f1.has_filter(dp));
+        assert!(f1.has_filter(dn));
+        assert!(!f1.has_filter(sb));
+        assert_eq!(f1,VarFilter::DensityAndDepth);
+        f1.add_filter(sb);
+        assert_eq!(f1,VarFilter::DensityAndDepthAndStrandBias);
+        assert!(f1.has_filter(dp));
+        assert!(f1.has_filter(dn));
+        assert!(f1.has_filter(sb));
+    }
+
 
     /**********************************************************************************************/
     // TEST VARIANT RANGE LOOKUP
@@ -646,7 +726,7 @@ mod tests {
             allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
             qual: f16::from_f64(0.0),
-            filter: ".".to_string(),
+            filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
             gq: f16::from_f64(0.0),
             mean_allele_qual: f16::from_f64(0.0),
@@ -662,10 +742,8 @@ mod tests {
             mq50_frac: f16::from_f64(1.0),
             unphased_genotype: Genotype(0, 1),
             unphased_gq: f16::from_f64(0.0),
-            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
-            phase_set: None,
-            valid: true
+            phase_set: None
         }
     }
 
@@ -1272,7 +1350,7 @@ mod tests {
             allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
             qual: f16::from_f64(0.0),
-            filter: ".".to_string(),
+            filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
             gq: f16::from_f64(0.0),
             mean_allele_qual: f16::from_f64(0.0),
@@ -1288,10 +1366,8 @@ mod tests {
             mq50_frac: f16::from_f64(1.0),
             unphased_genotype: Genotype(0, 1),
             unphased_gq: f16::from_f64(0.0),
-            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
-            phase_set: None,
-            valid: true
+            phase_set: None
         }
     }
 

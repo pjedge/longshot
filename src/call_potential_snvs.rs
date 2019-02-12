@@ -178,22 +178,6 @@ pub fn call_potential_snvs(
             // r_window = 15
             // l..r = 6,7,8,9,10,11,12,13,14
 
-            // we want to save the sequence context (9 bp window around variant on reference)
-            // this will be printed to the VCF later and may help diagnose variant calling
-            // issues e.g. if the variant occurs inside a large homopolymer or etc.
-            // get the position 10 bases to the left
-            let l_window = if pileup.pos() >= 4 {
-                pileup.pos() as usize - 4
-            } else {
-                0
-            };
-            // get the position 11 bases to the right
-            let mut r_window = pileup.pos() as usize + 5;
-            if r_window >= ref_seq.len() {
-                r_window = ref_seq.len();
-            }
-            let sequence_context: String = (ref_seq[l_window..r_window]).iter().collect::<String>();
-
             let mut counts = [0 as usize; 5]; // A,C,G,T,N
 
             // use a counter instead of pileup.depth() since that would include qc_fail bases, low mapq, etc.
@@ -382,7 +366,7 @@ pub fn call_potential_snvs(
                     allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
                     qual: f16::from_f64(0.0),
-                    filter: ".".to_string(),
+                    filter: VarFilter::Pass,
                     genotype: Genotype(0, 0),
                     gq: f16::from_f64(0.0),
                     unphased_genotype: Genotype(0, 0),
@@ -400,8 +384,6 @@ pub fn call_potential_snvs(
                     mq30_frac: f16::from_f64(mq30_frac),
                     mq40_frac: f16::from_f64(mq40_frac),
                     mq50_frac: f16::from_f64(mq50_frac),
-                    sequence_context,
-                    valid: true
                 };
 
                 // we don't want potential SNVs that are inside a deletion, for instance.

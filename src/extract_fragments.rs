@@ -1150,7 +1150,7 @@ mod tests {
             allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
             qual: f16::from_f64(0.0),
-            filter: ".".to_string(),
+            filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
             gq: f16::from_f64(0.0),
             mean_allele_qual: f16::from_f64(0.0),
@@ -1166,10 +1166,8 @@ mod tests {
             mq50_frac: f16::from_f64(1.0),
             unphased_genotype: Genotype(0, 1),
             unphased_gq: f16::from_f64(0.0),
-            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
-            phase_set: None,
-            valid: true
+            phase_set: None
         }
     }
 
