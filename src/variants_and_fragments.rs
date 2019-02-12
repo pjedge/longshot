@@ -631,38 +631,41 @@ mod tests {
     fn generate_var1(
         ix: usize,
         tid: usize,
-        chrom: String,
         pos0: usize,
         ra: String,
         aa: String,
     ) -> Var {
         Var {
             ix: ix,
-            tid: tid,
+            tid: tid as u32,
             pos0: pos0,
             alleles: vec![ra, aa],
             dp: 40,
             allele_counts: vec![20, 20],
+            allele_counts_forward: vec![10, 10],
+            allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
-            qual: 0.0,
+            qual: f16::from_f64(0.0),
             filter: ".".to_string(),
             genotype: Genotype(0, 1),
-            gq: 0.0,
-            mean_allele_qual: 0.0,
-            mec: 0,
-            mec_frac_block: 0.0,
-            mec_frac_variant: 0.0,
-            dp_any_mq: 40,
-            mq10_frac: 1.0,
-            mq20_frac: 1.0,
-            mq30_frac: 1.0,
-            mq40_frac: 1.0,
-            mq50_frac: 1.0,
+            gq: f16::from_f64(0.0),
+            mean_allele_qual: f16::from_f64(0.0),
+            mec: 0 as u16,
+            strand_bias_pvalue: f16::from_f64(0.0),
+            mec_frac_block: f16::from_f64(0.0),
+            mec_frac_variant: f16::from_f64(0.0),
+            dp_any_mq: 40 as u16,
+            mq10_frac: f16::from_f64(1.0),
+            mq20_frac: f16::from_f64(1.0),
+            mq30_frac: f16::from_f64(1.0),
+            mq40_frac: f16::from_f64(1.0),
+            mq50_frac: f16::from_f64(1.0),
             unphased_genotype: Genotype(0, 1),
-            unphased_gq: 0.0,
+            unphased_gq: f16::from_f64(0.0),
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
+            valid: true
         }
     }
 
@@ -672,7 +675,6 @@ mod tests {
         lst.push(generate_var1(
             0,
             0,
-            "chr1".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -680,7 +682,6 @@ mod tests {
         lst.push(generate_var1(
             1,
             0,
-            "chr1".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -688,7 +689,6 @@ mod tests {
         lst.push(generate_var1(
             2,
             0,
-            "chr1".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -696,7 +696,6 @@ mod tests {
         lst.push(generate_var1(
             3,
             0,
-            "chr1".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -704,7 +703,6 @@ mod tests {
         lst.push(generate_var1(
             4,
             0,
-            "chr1".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -712,7 +710,6 @@ mod tests {
         lst.push(generate_var1(
             5,
             0,
-            "chr1".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
@@ -720,7 +717,6 @@ mod tests {
         lst.push(generate_var1(
             6,
             1,
-            "chr2".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -728,7 +724,6 @@ mod tests {
         lst.push(generate_var1(
             7,
             1,
-            "chr2".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -736,7 +731,6 @@ mod tests {
         lst.push(generate_var1(
             8,
             1,
-            "chr2".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -744,7 +738,6 @@ mod tests {
         lst.push(generate_var1(
             9,
             1,
-            "chr2".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -752,7 +745,6 @@ mod tests {
         lst.push(generate_var1(
             10,
             1,
-            "chr2".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -760,7 +752,6 @@ mod tests {
         lst.push(generate_var1(
             11,
             1,
-            "chr2".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
@@ -768,7 +759,6 @@ mod tests {
         lst.push(generate_var1(
             12,
             2,
-            "chr3".to_string(),
             20200,
             "C".to_string(),
             "G".to_string(),
@@ -776,7 +766,6 @@ mod tests {
         lst.push(generate_var1(
             13,
             2,
-            "chr3".to_string(),
             25100,
             "A".to_string(),
             "C".to_string(),
@@ -784,13 +773,12 @@ mod tests {
         lst.push(generate_var1(
             14,
             2,
-            "chr3".to_string(),
             30400,
             "C".to_string(),
             "A".to_string(),
         ));
 
-        VarList::new(lst).unwrap()
+        VarList::new(lst,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap()
     }
 
     #[test]
@@ -812,7 +800,6 @@ mod tests {
         exp.push(generate_var1(
             3,
             0,
-            "chr1".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -820,7 +807,6 @@ mod tests {
         exp.push(generate_var1(
             4,
             0,
-            "chr1".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -833,7 +819,7 @@ mod tests {
     fn test_varlist_get_variants_range2() {
         let vlst = generate_test_lst1();
         let t = 1;
-        let c = "chr2".to_string();
+        let c: String = "chr1".to_string();
         let p1 = 0;
         let p2 = 3000;
         let interval = GenomicInterval {
@@ -848,7 +834,6 @@ mod tests {
         exp.push(generate_var1(
             6,
             1,
-            "chr2".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -856,7 +841,6 @@ mod tests {
         exp.push(generate_var1(
             7,
             1,
-            "chr2".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -864,7 +848,6 @@ mod tests {
         exp.push(generate_var1(
             8,
             1,
-            "chr2".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -872,7 +855,6 @@ mod tests {
         exp.push(generate_var1(
             9,
             1,
-            "chr2".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -900,7 +882,6 @@ mod tests {
         exp.push(generate_var1(
             10,
             1,
-            "chr2".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -908,7 +889,6 @@ mod tests {
         exp.push(generate_var1(
             11,
             1,
-            "chr2".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
@@ -936,7 +916,6 @@ mod tests {
         exp.push(generate_var1(
             12,
             2,
-            "chr3".to_string(),
             20200,
             "C".to_string(),
             "G".to_string(),
@@ -964,7 +943,6 @@ mod tests {
         exp.push(generate_var1(
             12,
             2,
-            "chr3".to_string(),
             20200,
             "C".to_string(),
             "G".to_string(),
@@ -993,7 +971,6 @@ mod tests {
         exp.push(generate_var1(
             13,
             2,
-            "chr3".to_string(),
             25100,
             "A".to_string(),
             "C".to_string(),
@@ -1001,7 +978,6 @@ mod tests {
         exp.push(generate_var1(
             14,
             2,
-            "chr3".to_string(),
             30400,
             "C".to_string(),
             "A".to_string(),
@@ -1040,7 +1016,6 @@ mod tests {
         lst.push(generate_var1(
             0,
             1,
-            "chr2".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -1048,7 +1023,6 @@ mod tests {
         lst.push(generate_var1(
             1000,
             1,
-            "chr2".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -1056,7 +1030,6 @@ mod tests {
         lst.push(generate_var1(
             0,
             0,
-            "chr1".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -1064,7 +1037,6 @@ mod tests {
         lst.push(generate_var1(
             100,
             0,
-            "chr1".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -1072,7 +1044,6 @@ mod tests {
         lst.push(generate_var1(
             4,
             0,
-            "chr1".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -1080,7 +1051,6 @@ mod tests {
         lst.push(generate_var1(
             14,
             2,
-            "chr3".to_string(),
             30400,
             "C".to_string(),
             "A".to_string(),
@@ -1088,7 +1058,6 @@ mod tests {
         lst.push(generate_var1(
             13,
             2,
-            "chr3".to_string(),
             25100,
             "A".to_string(),
             "C".to_string(),
@@ -1096,7 +1065,6 @@ mod tests {
         lst.push(generate_var1(
             10,
             0,
-            "chr1".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
@@ -1104,7 +1072,6 @@ mod tests {
         lst.push(generate_var1(
             1,
             1,
-            "chr2".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -1112,7 +1079,6 @@ mod tests {
         lst.push(generate_var1(
             2,
             0,
-            "chr1".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -1120,7 +1086,6 @@ mod tests {
         lst.push(generate_var1(
             10,
             1,
-            "chr2".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -1128,7 +1093,6 @@ mod tests {
         lst.push(generate_var1(
             10,
             1,
-            "chr2".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -1136,7 +1100,6 @@ mod tests {
         lst.push(generate_var1(
             11,
             1,
-            "chr2".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
@@ -1144,7 +1107,6 @@ mod tests {
         lst.push(generate_var1(
             2,
             0,
-            "chr1".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -1152,13 +1114,12 @@ mod tests {
         lst.push(generate_var1(
             12,
             2,
-            "chr3".to_string(),
             20200,
             "C".to_string(),
             "G".to_string(),
         ));
 
-        VarList::new(lst).unwrap()
+        VarList::new(lst,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap()
     }
 
     // generate another unsorted version of test_lst1, with meaningless indices. for testing sorting.
@@ -1168,7 +1129,6 @@ mod tests {
         lst.push(generate_var1(
             10,
             1,
-            "chr2".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -1176,7 +1136,6 @@ mod tests {
         lst.push(generate_var1(
             1,
             0,
-            "chr1".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -1184,7 +1143,6 @@ mod tests {
         lst.push(generate_var1(
             0,
             1,
-            "chr2".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -1192,7 +1150,6 @@ mod tests {
         lst.push(generate_var1(
             0,
             0,
-            "chr1".to_string(),
             5,
             "A".to_string(),
             "G".to_string(),
@@ -1200,7 +1157,6 @@ mod tests {
         lst.push(generate_var1(
             1000,
             0,
-            "chr1".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -1208,7 +1164,6 @@ mod tests {
         lst.push(generate_var1(
             0,
             1,
-            "chr2".to_string(),
             1000,
             "T".to_string(),
             "A".to_string(),
@@ -1216,7 +1171,6 @@ mod tests {
         lst.push(generate_var1(
             12,
             2,
-            "chr3".to_string(),
             20200,
             "C".to_string(),
             "G".to_string(),
@@ -1224,7 +1178,6 @@ mod tests {
         lst.push(generate_var1(
             2,
             2,
-            "chr3".to_string(),
             25100,
             "A".to_string(),
             "C".to_string(),
@@ -1232,7 +1185,6 @@ mod tests {
         lst.push(generate_var1(
             100,
             0,
-            "chr1".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -1240,7 +1192,6 @@ mod tests {
         lst.push(generate_var1(
             9,
             0,
-            "chr1".to_string(),
             2005,
             "T".to_string(),
             "G".to_string(),
@@ -1248,7 +1199,6 @@ mod tests {
         lst.push(generate_var1(
             5,
             0,
-            "chr1".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
@@ -1256,7 +1206,6 @@ mod tests {
         lst.push(generate_var1(
             3,
             1,
-            "chr2".to_string(),
             2900,
             "C".to_string(),
             "G".to_string(),
@@ -1264,7 +1213,6 @@ mod tests {
         lst.push(generate_var1(
             10,
             1,
-            "chr2".to_string(),
             6000,
             "C".to_string(),
             "A".to_string(),
@@ -1272,7 +1220,6 @@ mod tests {
         lst.push(generate_var1(
             50,
             2,
-            "chr3".to_string(),
             30400,
             "C".to_string(),
             "A".to_string(),
@@ -1280,13 +1227,12 @@ mod tests {
         lst.push(generate_var1(
             3,
             1,
-            "chr2".to_string(),
             10000,
             "C".to_string(),
             "A".to_string(),
         ));
 
-        VarList::new(lst).unwrap()
+        VarList::new(lst,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap()
     }
 
     #[test]
@@ -1312,37 +1258,40 @@ mod tests {
     fn generate_var2(
         ix: usize,
         tid: usize,
-        chrom: String,
         pos0: usize,
         alleles: Vec<String>,
     ) -> Var {
         Var {
             ix: ix,
-            tid: tid,
+            tid: tid as u32,
             pos0: pos0,
             alleles: alleles,
             dp: 40,
             allele_counts: vec![20, 20],
+            allele_counts_forward: vec![10, 10],
+            allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
-            qual: 0.0,
+            qual: f16::from_f64(0.0),
             filter: ".".to_string(),
             genotype: Genotype(0, 1),
-            gq: 0.0,
-            mean_allele_qual: 0.0,
+            gq: f16::from_f64(0.0),
+            mean_allele_qual: f16::from_f64(0.0),
+            strand_bias_pvalue: f16::from_f64(0.0),
             mec: 0,
-            mec_frac_block: 0.0,
-            mec_frac_variant: 0.0,
+            mec_frac_block: f16::from_f64(0.0),
+            mec_frac_variant: f16::from_f64(0.0),
             dp_any_mq: 40,
-            mq10_frac: 1.0,
-            mq20_frac: 1.0,
-            mq30_frac: 1.0,
-            mq40_frac: 1.0,
-            mq50_frac: 1.0,
+            mq10_frac: f16::from_f64(1.0),
+            mq20_frac: f16::from_f64(1.0),
+            mq30_frac: f16::from_f64(1.0),
+            mq40_frac: f16::from_f64(1.0),
+            mq50_frac: f16::from_f64(1.0),
             unphased_genotype: Genotype(0, 1),
-            unphased_gq: 0.0,
+            unphased_gq: f16::from_f64(0.0),
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
+            valid: true
         }
     }
 
@@ -1353,25 +1302,23 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "A".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
+
 
         let vlst1_bak = vlst1.clone();
 
@@ -1379,25 +1326,23 @@ mod tests {
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "A".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
+
 
         vlst1.combine(&mut vlst2).unwrap();
         assert!(varlist_pos_alleles_eq(vlst1, vlst1_bak));
@@ -1410,59 +1355,53 @@ mod tests {
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "A".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "A".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
+
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "A".to_string()],
         ));
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert!(varlist_pos_alleles_eq(vlst1, exp));
@@ -1475,73 +1414,64 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             101,
             vec!["T".to_string(), "C".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string(), "TCT".to_string()],
         ));
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -1555,73 +1485,64 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "C".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "TAAAA".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "C".to_string(), "TAAAA".to_string()],
         ));
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -1635,80 +1556,70 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             101,
             vec!["T".to_string(), "C".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "TAAAA".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "TAAAA".to_string()],
         ));
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             101,
             vec!["T".to_string(), "C".to_string()],
         ));
         lst3.push(generate_var2(
             3,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -1723,69 +1634,60 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "C".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             102,
             vec!["T".to_string(), "C".to_string()],
         ));
         lst2.push(generate_var2(
             3,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec![
                 "TTT".to_string(),
@@ -1797,11 +1699,10 @@ mod tests {
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -1815,73 +1716,64 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             102,
             vec!["TCC".to_string(), "T".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTTCC".to_string(), "TCC".to_string(), "TTT".to_string()],
         ));
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -1895,73 +1787,64 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             101,
             vec!["T".to_string(), "TCCC".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string(), "TTCCCT".to_string()],
         ));
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -1974,69 +1857,60 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["TTT".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["T".to_string(), "G".to_string(), "C".to_string()],
         ));
         lst2.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             101,
             vec!["T".to_string(), "TCCC".to_string()],
         ));
         lst2.push(generate_var2(
             3,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             5,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst3.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec![
                 "TTT".to_string(),
@@ -2049,11 +1923,10 @@ mod tests {
         lst3.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_eq!(vlst1.lst[1].alleles, exp.lst[1].alleles);
@@ -2066,48 +1939,42 @@ mod tests {
         lst1.push(generate_var2(
             0,
             19,
-            "chr20".to_string(),
             5898747,
             vec!["GAA".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             19,
-            "chr20".to_string(),
             5898749,
             vec!["ACT".to_string(), "A".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             19,
-            "chr20".to_string(),
             5898751,
             vec!["T".to_string(), "A".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst2: Vec<Var> = vec![];
         lst2.push(generate_var2(
             0,
             19,
-            "chr20".to_string(),
             5898748,
             vec!["A".to_string(), "C".to_string()],
         ));
         lst2.push(generate_var2(
             1,
             19,
-            "chr20".to_string(),
             5898751,
             vec!["T".to_string(), "A".to_string()],
         ));
-        let mut vlst2 = VarList::new(lst2).unwrap();
+        let mut vlst2 = VarList::new(lst2,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             19,
-            "chr20".to_string(),
             5898747,
             vec![
                 "GAACT".to_string(),
@@ -2117,7 +1984,7 @@ mod tests {
                 "GCT".to_string(),
             ],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
 
@@ -2132,33 +1999,29 @@ mod tests {
         lst1.push(generate_var2(
             0,
             19,
-            "chr20".to_string(),
             42449920,
             vec!["AAAGCTT".to_string(), "A".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             19,
-            "chr20".to_string(),
             42449926,
             vec!["T".to_string(), "TAA".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             19,
-            "chr20".to_string(),
             42449926,
             vec!["T".to_string(), "TAA".to_string()],
         ));
-        let mut vlst1 = VarList::new(lst1).unwrap();
+        let mut vlst1 = VarList::new(lst1,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
-        let mut vlst2 = VarList::new(vec![]).unwrap();
+        let mut vlst2 = VarList::new(vec![],vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         let mut lst3: Vec<Var> = vec![];
         lst3.push(generate_var2(
             0,
             19,
-            "chr20".to_string(),
             42449920,
             vec![
                 "AAAGCTT".to_string(),
@@ -2166,7 +2029,7 @@ mod tests {
                 "AAAGCTTAA".to_string(),
             ],
         ));
-        let exp = VarList::new(lst3).unwrap();
+        let exp = VarList::new(lst3,vec!["chr1".to_string(),"chr2".to_string(),"chr3".to_string()]).unwrap();
 
         vlst1.combine(&mut vlst2).unwrap();
         assert_ne!(vlst1.lst.len(), 0);

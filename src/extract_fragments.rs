@@ -1136,37 +1136,40 @@ mod tests {
     fn generate_var2(
         ix: usize,
         tid: usize,
-        chrom: String,
         pos0: usize,
         alleles: Vec<String>,
     ) -> Var {
         Var {
             ix: ix,
-            tid: tid,
+            tid: tid as u32,
             pos0: pos0,
             alleles: alleles,
             dp: 40,
             allele_counts: vec![20, 20],
+            allele_counts_forward: vec![10, 10],
+            allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
-            qual: 0.0,
+            qual: f16::from_f64(0.0),
             filter: ".".to_string(),
             genotype: Genotype(0, 1),
-            gq: 0.0,
-            mean_allele_qual: 0.0,
+            gq: f16::from_f64(0.0),
+            mean_allele_qual: f16::from_f64(0.0),
             mec: 0,
-            mec_frac_block: 0.0,
-            mec_frac_variant: 0.0,
+            strand_bias_pvalue: f16::from_f64(0.0),
+            mec_frac_block: f16::from_f64(0.0),
+            mec_frac_variant: f16::from_f64(0.0),
             dp_any_mq: 40,
-            mq10_frac: 1.0,
-            mq20_frac: 1.0,
-            mq30_frac: 1.0,
-            mq40_frac: 1.0,
-            mq50_frac: 1.0,
+            mq10_frac: f16::from_f64(1.0),
+            mq20_frac: f16::from_f64(1.0),
+            mq30_frac: f16::from_f64(1.0),
+            mq40_frac: f16::from_f64(1.0),
+            mq50_frac: f16::from_f64(1.0),
             unphased_genotype: Genotype(0, 1),
-            unphased_gq: 0.0,
+            unphased_gq: f16::from_f64(0.0),
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
+            valid: true
         }
     }
 
@@ -1176,7 +1179,6 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
@@ -1195,21 +1197,18 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["A".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
@@ -1237,14 +1236,12 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["A".to_string(), "T".to_string(), "C".to_string()],
         ));
@@ -1270,21 +1267,18 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["A".to_string(), "T".to_string(), "C".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             200,
             vec!["A".to_string(), "T".to_string(), "C".to_string()],
         ));
