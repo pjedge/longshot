@@ -3,10 +3,10 @@
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
 use half::f16;
+use hashbrown::{HashMap, HashSet};
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use std::char::from_digit;
-use hashbrown::{HashMap, HashSet};
 use util::*;
 use variants_and_fragments::*;
 
@@ -170,7 +170,7 @@ pub fn generate_flist_buffer(
         }
         //line.push(' ' as u8);
 
-        let mut prev_call= phase_variant.len() + 1;
+        let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
             if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
@@ -334,16 +334,18 @@ pub fn calculate_mec(
     for mut var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
-                var.mec_frac_block = f16::from_f64(*block_mec
-                    .get(&ps)
-                    .chain_err(|| "Error retrieving MEC for phase set.")?
-                    as f64
-                    / *block_total
+                var.mec_frac_block = f16::from_f64(
+                    *block_mec
                         .get(&ps)
                         .chain_err(|| "Error retrieving MEC for phase set.")?
-                        as f64);
-                var.mec_frac_variant = f16::from_f64(
-                    var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64);
+                        as f64
+                        / *block_total
+                            .get(&ps)
+                            .chain_err(|| "Error retrieving MEC for phase set.")?
+                            as f64,
+                );
+                var.mec_frac_variant =
+                    f16::from_f64(var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64);
             }
             None => {}
         }

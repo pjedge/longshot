@@ -315,9 +315,10 @@ impl GenotypePriors {
                                 + LogProb::from(Prob(0.5))
                                 + LogProb::from(Prob(1.0 / 4.0)),
                         );
-                    } else if g1 == *transition
-                        .get(&allele)
-                        .chain_err(|| ErrorKind::InvalidTransitionBase(allele.to_string()))?
+                    } else if g1
+                        == *transition
+                            .get(&allele)
+                            .chain_err(|| ErrorKind::InvalidTransitionBase(allele.to_string()))?
                     {
                         // otherwise it is a homozygous SNV
                         // transitions are 4 times as likely as transversions

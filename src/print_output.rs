@@ -1,7 +1,7 @@
 //! Print Longshot output in VCF format
 
-use bio::stats::PHREDProb;
 use bio::io::fasta;
+use bio::stats::PHREDProb;
 use errors::*;
 use genotype_probs::Genotype;
 use std::fs::File;
@@ -31,8 +31,10 @@ pub fn print_vcf(
     );
 
     let mut fasta = match fasta_file {
-        &Some(ref ff) => {Some(fasta::IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?)}
-        None => {None}
+        &Some(ref ff) => Some(
+            fasta::IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?,
+        ),
+        None => None,
     };
 
     let mut ref_seq: Vec<char> = vec![]; // this vector will be used to hold the reference sequence
@@ -105,11 +107,9 @@ pub fn print_vcf(
                 // contig/chrom from the FASTA into the ref_seq vector
                 if var.tid != prev_tid {
                     let mut ref_seq_u8: Vec<u8> = vec![];
-                    fa
-                        .fetch_all(&varlist.target_names[var.tid as usize])
+                    fa.fetch_all(&varlist.target_names[var.tid as usize])
                         .chain_err(|| ErrorKind::IndexedFastaReadError)?;
-                    fa
-                        .read(&mut ref_seq_u8)
+                    fa.read(&mut ref_seq_u8)
                         .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                     ref_seq = dna_vec(&ref_seq_u8);
                 }
@@ -153,7 +153,8 @@ pub fn print_vcf(
         let unphased_genotype_str = vec![
             var.unphased_genotype.0.to_string(),
             var.unphased_genotype.1.to_string(),
-        ].join("/");
+        ]
+        .join("/");
 
         let genotypes_match: usize = (var.genotype == var.unphased_genotype
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype)
@@ -178,7 +179,7 @@ pub fn print_vcf(
 
                 (ref_seq[l_window..r_window]).iter().collect::<String>()
             }
-            None => {"None".to_string()}
+            None => "None".to_string(),
         };
 
         writeln!(file,
@@ -241,7 +242,8 @@ pub fn print_variant_debug(
                 density_params,
                 sample_name,
                 true,
-            ).chain_err(|| "Error printing debug VCF file.")?;
+            )
+            .chain_err(|| "Error printing debug VCF file.")?;
         }
         &None => {}
     };

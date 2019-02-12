@@ -46,7 +46,7 @@ pub struct ExtractFragmentParameters {
     /// minimum mapping quality to use (extract haplotype information for) a read
     pub min_mapq: u8,
     /// type of alignment algorithm to use (viterbi, forward algorithm, numerically stable forward algorithm)
-    pub alignment_type: AlignmentType,    //
+    pub alignment_type: AlignmentType, //
     /// band width for the alignment algorithm
     pub band_width: usize,
     /// the length of unique and exact-matching "anchor" sequences to left and right of alignment window.
@@ -217,7 +217,6 @@ pub struct AnchorPositions {
     pub right_anchor_read: u32,
 }
 
-
 /// Given a BAM record, and the position (or interval) of a variant (or variant cluster),
 /// find the AnchorPositions which describe the left and right realignment window boundaries on both
 /// read and reference sequence
@@ -270,10 +269,11 @@ pub fn find_anchors(
     }
 
     if var_interval.chrom != target_names[bam_record.tid() as usize]
-        || (var_interval.start_pos as i32) >= bam_record
-            .cigar()
-            .end_pos()
-            .chain_err(|| "Error while accessing CIGAR end position")?
+        || (var_interval.start_pos as i32)
+            >= bam_record
+                .cigar()
+                .end_pos()
+                .chain_err(|| "Error while accessing CIGAR end position")?
         || (var_interval.end_pos as i32) < bam_record.pos()
     {
         eprintln!(
@@ -386,10 +386,9 @@ pub fn find_anchors(
                         }
 
                         // check if there is an exact match between anchor sequence on read and ref
-                        let anchor_on_read: Vec<char> =
-                            read_seq[(left_anchor_read as usize)
-                                         ..(left_anchor_read + anchor_length) as usize]
-                                .to_vec();
+                        let anchor_on_read: Vec<char> = read_seq[(left_anchor_read as usize)
+                            ..(left_anchor_read + anchor_length) as usize]
+                            .to_vec();
                         assert_eq!(anchor_on_read.len(), anchor_length as usize);
                         let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
                         let anchor_match = anchor_on_read == anchor_on_ref;
@@ -495,7 +494,7 @@ pub fn find_anchors(
                         // check if there is an exact match between anchor sequence on read and ref
                         let anchor_on_read: Vec<char> =
                             read_seq[(right_anchor_read - anchor_length) as usize
-                                         ..right_anchor_read as usize]
+                                ..right_anchor_read as usize]
                                 .to_vec();
                         assert_eq!(anchor_on_read.len(), anchor_length as usize);
                         let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
@@ -710,18 +709,22 @@ fn extract_var_cluster(
 
         // we now want to score hap_window
         let score: LogProb = match extract_params.alignment_type {
-            AlignmentType::ForwardAlgorithmNumericallyStable => forward_algorithm_numerically_stable(
-                &read_window,
-                &hap_window,
-                align_params.ln(),
-                extract_params.band_width,
-            ),
-            AlignmentType::ForwardAlgorithmNonNumericallyStable => forward_algorithm_non_numerically_stable(
-                &read_window,
-                &hap_window,
-                align_params,
-                extract_params.band_width,
-            ),
+            AlignmentType::ForwardAlgorithmNumericallyStable => {
+                forward_algorithm_numerically_stable(
+                    &read_window,
+                    &hap_window,
+                    align_params.ln(),
+                    extract_params.band_width,
+                )
+            }
+            AlignmentType::ForwardAlgorithmNonNumericallyStable => {
+                forward_algorithm_non_numerically_stable(
+                    &read_window,
+                    &hap_window,
+                    align_params,
+                    extract_params.band_width,
+                )
+            }
             AlignmentType::ViterbiMaxScoringAlignment => viterbi_max_scoring_alignment(
                 &read_window,
                 &hap_window,
@@ -805,7 +808,7 @@ pub fn extract_fragment(
     ref_seq: &Vec<char>,
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters
+    align_params: AlignmentParameters,
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -818,7 +821,7 @@ pub fn extract_fragment(
         id: id,
         calls: vec![],
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
-        reverse_strand: bam_record.is_reverse()
+        reverse_strand: bam_record.is_reverse(),
     };
 
     if bam_record.is_quality_check_failed()
@@ -851,7 +854,8 @@ pub fn extract_fragment(
             &read_seq,
             &target_names,
             extract_params,
-        ).chain_err(|| "Error while finding anchor sequences.")?
+        )
+        .chain_err(|| "Error while finding anchor sequences.")?
         {
             Some(anchors) => {
                 var_anchor_lst.push((var.clone(), anchors));
@@ -914,7 +918,6 @@ pub fn extract_fragment(
     // now extract alleles for the variant cluster
 
     for (anchors, var_cluster) in cluster_lst {
-
         // extract the calls for the fragment
         for call in extract_var_cluster(
             &read_seq,
@@ -937,7 +940,7 @@ pub fn extract_fragments(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters
+    align_params: AlignmentParameters,
 ) -> Result<Vec<Fragment>> {
     let t_names = parse_target_names(&bam_file)?;
 
@@ -1032,8 +1035,9 @@ pub fn extract_fragments(
                 &ref_seq,
                 &t_names,
                 extract_params,
-                align_params
-            ).chain_err(|| "Error extracting fragment from read.")?;
+                align_params,
+            )
+            .chain_err(|| "Error extracting fragment from read.")?;
 
             match frag {
                 Some(some_frag) => {
@@ -1133,12 +1137,7 @@ mod tests {
         }
     }
     */
-    fn generate_var2(
-        ix: usize,
-        tid: usize,
-        pos0: usize,
-        alleles: Vec<String>,
-    ) -> Var {
+    fn generate_var2(ix: usize, tid: usize, pos0: usize, alleles: Vec<String>) -> Var {
         Var {
             ix: ix,
             tid: tid as u32,
@@ -1167,7 +1166,7 @@ mod tests {
             unphased_genotype: Genotype(0, 1),
             unphased_gq: f16::from_f64(0.0),
             genotype_post: GenotypeProbs::uniform(2),
-            phase_set: None
+            phase_set: None,
         }
     }
 
