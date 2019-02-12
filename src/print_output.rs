@@ -73,7 +73,7 @@ pub fn print_vcf(
         match interval {
             &Some(ref iv) => {
                 if !print_outside_region
-                    && (var.chrom != iv.chrom
+                    && (var.tid != iv.tid
                         || var.pos0 < iv.start_pos as usize
                         || var.pos0 > iv.end_pos as usize)
                 {
@@ -132,7 +132,7 @@ pub fn print_vcf(
 
         writeln!(file,
                        "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
-                       var.chrom,
+                       varlist.target_names[var.tid as usize],
                        var.pos0 + 1,
                        var.alleles[0],
                        var_alleles.join(","),

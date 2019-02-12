@@ -5,7 +5,7 @@ extern crate rust_htslib;
 use std::char;
 
 use bio::io::fasta;
-use bio::stats::{PHREDProb,LogProb,Prob};
+use bio::stats::{LogProb,Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
@@ -373,8 +373,7 @@ pub fn call_potential_snvs(
                 let new_var = Var {
                     ix: 0,
                     // these will be set automatically,
-                    tid: tid as u16,
-                    chrom: target_names[tid].clone(),
+                    tid: tid as u32,
                     pos0: pos,
                     alleles: vec![ref_allele.to_string(), var_allele.to_string()],
                     dp: depth as u16,
@@ -390,7 +389,7 @@ pub fn call_potential_snvs(
                     unphased_gq: f16::from_f64(0.0),
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    strand_bias_pvalue: PHREDProb(0.0),
+                    strand_bias_pvalue: f16::from_f64(0.0),
                     mec: 0,
                     mec_frac_variant: f16::from_f64(0.0), // mec fraction for this variant
                     mec_frac_block: f16::from_f64(0.0),   // mec fraction for this haplotype block
@@ -413,7 +412,7 @@ pub fn call_potential_snvs(
         }
     }
     // return the vector of Vars as a VarList struct
-    Ok(VarList::new(varlist)?)
+    Ok(VarList::new(varlist, target_names.clone())?)
 }
 
 // alignment: a rust-bio alignment object where x is a read consensus window, and y is the window from the reference

@@ -439,7 +439,7 @@ pub fn call_genotypes_with_haplotypes(
                 vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join("/");
             let line: String = format!(
                 "{}\t{}\t.\t{}\t{}\t.\t.\t.\tGT:GQ\t{}:{}",
-                var.chrom,
+                varlist.target_names[var.tid as usize],
                 var.pos0 + 1,
                 var.alleles[0],
                 var.alleles[1],
