@@ -160,19 +160,19 @@ pub fn print_vcf(
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype)
             as usize;
 
-        // we want to save the sequence context (9 bp window around variant on reference)
+        // we want to save the sequence context (21 bp window around variant on reference)
         // this will be printed to the VCF later and may help diagnose variant calling
         // issues e.g. if the variant occurs inside a large homopolymer or etc.
-        // get the position 10 bases to the left
         let sequence_context: String = match fasta {
             Some(_) => {
-                let l_window = if var.pos0 >= 4 {
-                    var.pos0 as usize - 4
+                // get the position 10 bases to the left
+                let l_window = if var.pos0 >= 10 {
+                    var.pos0 as usize - 10
                 } else {
                     0
                 };
                 // get the position 11 bases to the right
-                let mut r_window = var.pos0 as usize + 5;
+                let mut r_window = var.pos0 as usize + 11;
                 if r_window >= ref_seq.len() {
                     r_window = ref_seq.len();
                 }
