@@ -674,7 +674,7 @@ fn extract_var_cluster(
 
     if VERBOSE {
         for var in var_cluster.clone() {
-            eprint!("{} {}", var.chrom, var.pos0);
+            eprint!("{} {}", var.tid, var.pos0);
             for allele in var.alleles {
                 eprint!(" {}", allele);
             }
@@ -772,7 +772,7 @@ fn extract_var_cluster(
         if VERBOSE {
             eprint!(
                 "adding call: {} {}",
-                var_cluster[v].chrom, var_cluster[v].pos0
+                var_cluster[v].tid, var_cluster[v].pos0
             );
             for allele in &var_cluster[v].alleles {
                 eprint!(" {}", allele);
@@ -839,7 +839,7 @@ pub fn extract_fragment(
     for ref var in vars {
         let var_interval = GenomicInterval {
             tid: var.tid as u32,
-            chrom: var.chrom.clone(),
+            chrom: target_names[var.tid as usize].clone(),
             start_pos: var.pos0 as u32,
             end_pos: var.pos0 as u32,
         };
@@ -1142,9 +1142,7 @@ mod tests {
     ) -> Var {
         Var {
             ix: ix,
-            old_ix: None,
             tid: tid,
-            chrom: chrom,
             pos0: pos0,
             alleles: alleles,
             dp: 40,
@@ -1169,7 +1167,6 @@ mod tests {
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            called: true,
         }
     }
 

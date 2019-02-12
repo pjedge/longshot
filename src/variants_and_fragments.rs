@@ -1,6 +1,6 @@
 //! Data structures to represent variants and haplotype fragments defined over those variants.
 
-use bio::stats::{PHREDProb,LogProb};
+use bio::stats::{LogProb};
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
 use genotype_probs::*;
@@ -37,8 +37,7 @@ pub struct Fragment {
 #[derive(Debug, Clone)]
 pub struct Var {
     pub ix: usize,
-    pub tid: u16,
-    pub chrom: String,
+    pub tid: u32,
     pub pos0: usize,
     pub alleles: Vec<String>, // ref allele is alleles[0] and each that follows is a variant allele
     pub dp: u16,
@@ -56,7 +55,7 @@ pub struct Var {
     pub genotype_post: GenotypeProbs, // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
-    pub strand_bias_pvalue: PHREDProb, // fisher's exact test strand bias Pvalue
+    pub strand_bias_pvalue: f16, // fisher's exact test strand bias Pvalue
     pub mec: u16,            // mec for variant
     pub mec_frac_variant: f16, // mec fraction for this variant
     pub mec_frac_block: f16,   // mec fraction for this haplotype block
@@ -113,7 +112,8 @@ impl Eq for Var {}
 #[derive(Debug, Clone)]
 pub struct VarList {
     pub lst: Vec<Var>,
-    ix: HashMap<String, Vec<usize>>,
+    ix: HashMap<u32, Vec<usize>>, // key is TID
+    pub target_names: Vec<String>
 }
 
 pub fn parse_vcf_potential_variants(
@@ -126,6 +126,7 @@ pub fn parse_vcf_potential_variants(
     let mut vcf = bcf::Reader::from_path(vcffile_name).chain_err(|| ErrorKind::BCFOpenError)?;
     let vcfh = bcf::Reader::from_path(vcffile_name).chain_err(|| ErrorKind::BCFOpenError)?;
 
+    let target_names = parse_target_names(&bamfile_name)?;
     let bam = bam::Reader::from_path(bamfile_name).chain_err(|| ErrorKind::BamOpenError)?;
     let mut chrom2tid: HashMap<String, usize> = HashMap::new();
 
@@ -163,8 +164,7 @@ pub fn parse_vcf_potential_variants(
             ix: 0,
             tid: *chrom2tid
                 .get(&chrom)
-                .chain_err(|| "Error accessing tid from chrom2tid data structure")? as u16,
-            chrom: chrom.clone(),
+                .chain_err(|| "Error accessing tid from chrom2tid data structure")? as u32,
             pos0: record.pos() as usize,
             alleles: alleles.clone(),
             dp: 0,
@@ -180,7 +180,7 @@ pub fn parse_vcf_potential_variants(
             unphased_gq: f16::from_f64(0.0),
             genotype_post: GenotypeProbs::uniform(alleles.len()),
             phase_set: None,
-            strand_bias_pvalue: PHREDProb(0.0),
+            strand_bias_pvalue: f16::from_f64(0.0),
             mec: 0,
             mec_frac_variant: f16::from_f64(0.0), // mec fraction for this variant
             mec_frac_block: f16::from_f64(0.0),   // mec fraction for this haplotype block
@@ -197,7 +197,7 @@ pub fn parse_vcf_potential_variants(
         varlist.push(new_var);
     }
 
-    let vlst = VarList::new(varlist)?;
+    let vlst = VarList::new(varlist, target_names.clone())?;
     vlst.assert_sorted();
 
     Ok(vlst)
@@ -221,10 +221,11 @@ impl Index<Range<VarIx>> for VarList {
 }*/
 
 impl VarList {
-    pub fn new(lst: Vec<Var>) -> Result<VarList> {
+    pub fn new(lst: Vec<Var>, target_names: Vec<String>) -> Result<VarList> {
         let mut v = VarList {
             lst: lst,
             ix: HashMap::new(),
+            target_names: target_names
         };
         v.sort()?;
         Ok(v)
@@ -268,24 +269,24 @@ impl VarList {
         self.assert_sorted();
         // for every chromosome, get the position of the last variant
         // and the varlist index of the first variant on that chromosome
-        let mut max_positions: HashMap<String, usize> = HashMap::new();
-        let mut first_ix: HashMap<String, usize> = HashMap::new();
+        let mut max_positions: HashMap<u32, usize> = HashMap::new();
+        let mut first_ix: HashMap<u32, usize> = HashMap::new();
         for (i, var) in self.lst.iter().enumerate() {
-            let mpos: usize = *(max_positions.entry(var.chrom.clone()).or_insert(0));
+            let mpos: usize = *(max_positions.entry(var.tid).or_insert(0));
             if var.pos0 > mpos {
-                max_positions.insert(var.chrom.clone(), var.pos0);
+                max_positions.insert(var.tid, var.pos0);
             }
-            if !first_ix.contains_key(&var.chrom) {
-                first_ix.insert(var.chrom.clone(), i); // insert varlist index of first variant on chrom
+            if !first_ix.contains_key(&var.tid) {
+                first_ix.insert(var.tid, i); // insert varlist index of first variant on chrom
             }
         }
 
         // for every chrom, iterate up to its last potential variant and create an index that
         // returns the lst index of the next SNV for some position mod 1000
-        for (chrom, max_pos) in &max_positions {
+        for (tid, max_pos) in &max_positions {
             let mut v: Vec<usize> = vec![];
             // the first variant after position 0 is the first variant on the chromosome
-            let e = match first_ix.get(chrom) {
+            let e = match first_ix.get(tid) {
                 Some(x) => *x,
                 None => {
                     bail!("This dictionary is missing a chromosome!");
@@ -310,7 +311,7 @@ impl VarList {
                     break;
                 }
             }
-            self.ix.insert(chrom.clone(), v); // insert the index vector into the ix dictionary
+            self.ix.insert(*tid, v); // insert the index vector into the ix dictionary
         }
         Ok(())
     }
@@ -324,7 +325,7 @@ impl VarList {
 
         if index_pos >= self
             .ix
-            .get(&interval.chrom)
+            .get(&interval.tid)
             .chain_err(|| {
                 format!(
                     "Error accessing chromosome {} from variant list index.",
@@ -335,7 +336,7 @@ impl VarList {
             return Ok(vlst);
         }
 
-        let mut i = self.ix.get(&interval.chrom).chain_err(|| {
+        let mut i = self.ix.get(&interval.tid).chain_err(|| {
             format!(
                 "Error accessing chromosome {} from variant list index.",
                 &interval.chrom
@@ -343,7 +344,7 @@ impl VarList {
         })?[index_pos];
 
         while i < self.lst.len()
-            && self.lst[i].tid == interval.tid as u16
+            && self.lst[i].tid == interval.tid
             && self.lst[i].pos0 + self.lst[i].longest_allele_len()? <= interval.end_pos as usize
         {
             if self.lst[i].pos0 >= interval.start_pos as usize {
@@ -353,7 +354,7 @@ impl VarList {
         }
 
         for var in &vlst {
-            assert!(var.chrom == interval.chrom);
+            assert!(var.tid == interval.tid);
             assert!(var.pos0 >= interval.start_pos as usize);
             assert!(var.pos0 <= interval.end_pos as usize);
         }
@@ -510,6 +511,10 @@ impl VarList {
     }
 
     pub fn combine(&mut self, other: &mut VarList) -> Result<()> {
+        if self.target_names != other.target_names {
+            bail!("Target names of variant lists that are being combined are not the same.");
+        }
+
         other.lst.append(&mut self.lst);
         other.lst.sort();
 
@@ -612,7 +617,7 @@ mod tests {
 
     fn pos_alleles_eq(vlst1: Vec<Var>, vlst2: Vec<Var>) -> bool {
         for (v1, v2) in vlst1.iter().zip(vlst2.iter()) {
-            if v1 != v2 || v1.chrom != v2.chrom || v1.alleles != v2.alleles || v1.ix != v2.ix {
+            if v1 != v2 || v1.tid != v2.tid || v1.alleles != v2.alleles || v1.ix != v2.ix {
                 return false;
             }
         }
@@ -633,9 +638,7 @@ mod tests {
     ) -> Var {
         Var {
             ix: ix,
-            old_ix: None,
             tid: tid,
-            chrom: chrom,
             pos0: pos0,
             alleles: vec![ra, aa],
             dp: 40,
@@ -660,7 +663,6 @@ mod tests {
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            called: true,
         }
     }
 
@@ -1316,9 +1318,7 @@ mod tests {
     ) -> Var {
         Var {
             ix: ix,
-            old_ix: None,
             tid: tid,
-            chrom: chrom,
             pos0: pos0,
             alleles: alleles,
             dp: 40,
@@ -1343,7 +1343,6 @@ mod tests {
             sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            called: true,
         }
     }
 
