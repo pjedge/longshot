@@ -883,6 +883,7 @@ mod tests {
             id: "f0".to_string(),
             calls: vec![f0v0, f0v1, f0v2, f0v3],
             p_read_hap: [p50, p50],
+            reverse_strand: false
         };
         // second fragment
         let f1v0 = fcall(1, 0, 0);
@@ -892,6 +893,7 @@ mod tests {
             id: "f1".to_string(),
             calls: vec![f1v0, f1v1, f1v2],
             p_read_hap: [p50, p50],
+            reverse_strand: false
         };
         // third fragment
         let f2v1 = fcall(2, 1, 1);
@@ -901,6 +903,7 @@ mod tests {
             id: "f2".to_string(),
             calls: vec![f2v1, f2v2, f2v3],
             p_read_hap: [p50, p50],
+            reverse_strand: false
         };
 
         // the fragment list looks like this (rows are fragments and columns are variant sites)
