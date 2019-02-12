@@ -5,11 +5,11 @@ extern crate rust_htslib;
 use std::char;
 
 use bio::io::fasta;
-use bio::stats::{LogProb,Prob};
+use bio::stats::{LogProb, Prob};
+use half::f16;
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
-use half::f16;
 
 use errors::*;
 //use std::str;
@@ -82,10 +82,9 @@ pub fn call_potential_snvs(
     ln_align_params: LnAlignmentParameters,
     potential_snv_cutoff: LogProb,
 ) -> Result<VarList> {
-
     // the list of target (contig) names from the bam file
     let target_names = parse_target_names(&bam_file)?;
-    let bases = ['A','C','G','T','N'];
+    let bases = ['A', 'C', 'G', 'T', 'N'];
 
     let mut fasta = fasta::IndexedReader::from_file(&fasta_file)
         .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
@@ -96,7 +95,8 @@ pub fn call_potential_snvs(
     let mut ref_seq: Vec<char> = vec![]; // this vector will be used to hold the reference sequence
     let mut prev_tid = 4294967295;
 
-    let mut genotype_priors_table: [[(LogProb,LogProb,LogProb); 4]; 4] = [[(LogProb::ln_zero(),LogProb::ln_zero(),LogProb::ln_zero()); 4]; 4];
+    let mut genotype_priors_table: [[(LogProb, LogProb, LogProb); 4]; 4] =
+        [[(LogProb::ln_zero(), LogProb::ln_zero(), LogProb::ln_zero()); 4]; 4];
 
     for i in 0..4 {
         for j in 0..4 {
@@ -110,9 +110,11 @@ pub fn call_potential_snvs(
                 .get_all_priors(&vec![ref_allele, var_allele])
                 .chain_err(|| "Error getting all genotype priors while calculating genotypes.")?;
 
-            genotype_priors_table[i][j] = (priors.get(Genotype(0,0)),
-                                           priors.get(Genotype(0,1)),
-                                           priors.get(Genotype(1,1)));
+            genotype_priors_table[i][j] = (
+                priors.get(Genotype(0, 0)),
+                priors.get(Genotype(0, 1)),
+                priors.get(Genotype(1, 1)),
+            );
         }
     }
 
@@ -191,10 +193,7 @@ pub fn call_potential_snvs(
 
             // the dna_vec conversion function should remove any non-ACGT bases
             assert!(
-                ref_allele == 'A'
-                    || ref_allele == 'C'
-                    || ref_allele == 'G'
-                    || ref_allele == 'T'
+                ref_allele == 'A' || ref_allele == 'C' || ref_allele == 'G' || ref_allele == 'T'
             );
 
             let mut passing_reads: usize = 0; // total number of reads in this pileup at any mapq
@@ -245,16 +244,14 @@ pub fn call_potential_snvs(
 
                 // handle the base/indel observed on the read
                 if !alignment.is_del() && !alignment.is_refskip() {
-
                     match alignment.indel() {
                         Indel::None => {
                             // read is NOT an indel (a base is observed)
 
-                            let base: char =
-                                alignment.record().seq()
-                                    [alignment.qpos().chain_err(|| {
-                                        ErrorKind::IndexedBamPileupQueryPositionError
-                                    })?] as char;
+                            let base: char = alignment.record().seq()[alignment
+                                .qpos()
+                                .chain_err(|| ErrorKind::IndexedBamPileupQueryPositionError)?]
+                                as char;
 
                             let b = match base {
                                 'A' | 'a' => 0,
@@ -266,7 +263,6 @@ pub fn call_potential_snvs(
                             };
 
                             counts[b] += 1;
-
                         }
                         _ => {}
                     }
@@ -287,7 +283,6 @@ pub fn call_potential_snvs(
             if depth > max_coverage as usize {
                 continue;
             }
-
 
             let mut var_count = 0;
             let mut ref_count = 0;
@@ -321,7 +316,8 @@ pub fn call_potential_snvs(
             // use a basic genotype likelihood calculation to call SNVs
             // snv_qual is the LogProb probability of a non-reference base observation
 
-            let (prior_00, prior_01, prior_11) = genotype_priors_table[ref_allele_ix][var_allele_ix];
+            let (prior_00, prior_01, prior_11) =
+                genotype_priors_table[ref_allele_ix][var_allele_ix];
 
             // we dereference these so that they are f64 but in natural log space
             // we want to be able to multiply them by some integer (raise to power),
@@ -330,7 +326,8 @@ pub fn call_potential_snvs(
             let p_call = *LogProb::ln_one_minus_exp(&ln_align_params.emission_probs.not_equal);
             let ln_half = *LogProb::from(Prob(0.5)); // ln(0.5)
             let ln_two = *LogProb::from(Prob(2.0)); // ln(2)
-            let p_het = *LogProb::ln_add_exp(LogProb(ln_half + p_call), LogProb(ln_half + p_miscall));
+            let p_het =
+                *LogProb::ln_add_exp(LogProb(ln_half + p_call), LogProb(ln_half + p_miscall));
 
             // raise the probability of observing allele to the power of number of times we observed that allele
             // fastest way of multiplying probabilities for independent events, where the
@@ -340,19 +337,15 @@ pub fn call_potential_snvs(
             let p11 = LogProb(*prior_11 + p_call * var_count as f64 + p_miscall * ref_count as f64);
 
             // calculate the posterior probability of 0/0 genotype
-            let p_total = LogProb::ln_sum_exp(&[p00,p01,p11]);
+            let p_total = LogProb::ln_sum_exp(&[p00, p01, p11]);
             //let post_00 = p00 - p_total;
-            let snv_qual = LogProb::ln_add_exp(p01,p11) - p_total; //LogProb::ln_one_minus_exp(&post_00);
+            let snv_qual = LogProb::ln_add_exp(p01, p11) - p_total; //LogProb::ln_one_minus_exp(&post_00);
 
             next_valid_pos = (pos + 1) as u32;
 
             // check if SNV meets our quality criteria for a potential SNV
             // if it does, make a new variant and add it to the list of potential SNVs.
-            if snv_qual > potential_snv_cutoff
-                && ref_allele != 'N'
-                && var_allele != 'N'
-            {
-
+            if snv_qual > potential_snv_cutoff && ref_allele != 'N' && var_allele != 'N' {
                 let tid: usize = pileup.tid() as usize;
                 let new_var = Var {
                     ix: 0,
@@ -787,47 +780,46 @@ pub fn call_potential_variants_poa(bam_file: &String,
                     },
                     &None => {}
                 }*/
+match &h1_vars {
+&Some(ref vars) => {
+println!("H1 VARS:");
+for var in vars {
+println!("{}\t{}\t{}\t{}", var.chrom, var.pos0 + 1, var.alleles[0], var.alleles[1]);
+}
+},
+&None => {}
+}
 
-                match &h1_vars {
-                    &Some(ref vars) => {
-                        println!("H1 VARS:");
-                        for var in vars {
-                            println!("{}\t{}\t{}\t{}", var.chrom, var.pos0 + 1, var.alleles[0], var.alleles[1]);
-                        }
-                    },
-                    &None => {}
-                }
+match &h2_vars {
+&Some(ref vars) => {
+println!("H2 VARS:");
+for var in vars {
+println!("{}\t{}\t{}\t{}", var.chrom, var.pos0 + 1, var.alleles[0], var.alleles[1]);
+}
+},
+&None => {}
+}
+println!("----------------------------------------------------------------------------");
+}
 
-                match &h2_vars {
-                    &Some(ref vars) => {
-                        println!("H2 VARS:");
-                        for var in vars {
-                            println!("{}\t{}\t{}\t{}", var.chrom, var.pos0 + 1, var.alleles[0], var.alleles[1]);
-                        }
-                    },
-                    &None => {}
-                }
-                println!("----------------------------------------------------------------------------");
-            }
+match all_vars {
+Some(mut vars) => { varlist.append(&mut vars); }
+None => {}
+}
 
-            match all_vars {
-                Some(mut vars) => { varlist.append(&mut vars); }
-                None => {}
-            }
+match h1_vars {
+Some(mut vars) => { varlist.append(&mut vars); }
+None => {}
+}
 
-            match h1_vars {
-                Some(mut vars) => { varlist.append(&mut vars); }
-                None => {}
-            }
+match h2_vars {
+Some(mut vars) => { varlist.append(&mut vars); }
+None => {}
+}
 
-            match h2_vars {
-                Some(mut vars) => { varlist.append(&mut vars); }
-                None => {}
-            }
-
-            prev_tid = tid;
-        }
-    }
-    Ok(VarList::new(varlist))
+prev_tid = tid;
+}
+}
+Ok(VarList::new(varlist))
 }
 */

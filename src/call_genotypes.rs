@@ -11,11 +11,11 @@ use rand::{Rng, SeedableRng, StdRng};
 
 use errors::*;
 use genotype_probs::*;
+use half::f16;
 use haplotype_assembly::{call_hapcut2, generate_flist_buffer};
 use print_output::*;
 use util::{DensityParameters, GenomicInterval, MAX_VCF_QUAL};
 use variants_and_fragments::*;
-use half::f16;
 
 /// Takes a vector of fragments and returns a vector of "allele pileups"
 ///
@@ -61,7 +61,7 @@ fn count_alleles(
     flist: &Vec<Fragment>,
     num_alleles: usize,
     max_p_miscall: f64,
-) -> (Vec<u16>,Vec<u16>,Vec<u16>, u16) {
+) -> (Vec<u16>, Vec<u16>, Vec<u16>, u16) {
     let mut counts: Vec<u16> = vec![0; num_alleles]; // counts for each allele
     let mut counts_forward: Vec<u16> = vec![0; num_alleles]; // counts for each allele from reads on forward strand
     let mut counts_reverse: Vec<u16> = vec![0; num_alleles]; // counts for each allele from reads on reverse strand
@@ -197,7 +197,8 @@ pub fn call_genotypes_no_haplotypes(
             &genotype_priors,
             &var.alleles,
             max_p_miscall,
-        ).chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
+        )
+        .chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
 
         // get the genotype with maximum genotype posterior
         let (max_g, max_post) = posts.max_genotype(false, false);
@@ -206,7 +207,8 @@ pub fn call_genotypes_no_haplotypes(
         let genotype_qual: f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
 
         // count the number of alleles (for annotating the VCF fields)
-        let (allele_counts, counts_forward, counts_reverse, ambig_count) = count_alleles(&pileup, flist,var.alleles.len(), max_p_miscall);
+        let (allele_counts, counts_forward, counts_reverse, ambig_count) =
+            count_alleles(&pileup, flist, var.alleles.len(), max_p_miscall);
         let allele_total: u16 = allele_counts.iter().sum::<u16>() + ambig_count;
 
         // UPDATE THE VARIANT FIELDS
@@ -630,7 +632,10 @@ pub fn call_genotypes_with_haplotypes(
 
                         // get the value of the read likelihood given each haplotype
                         let (mut p_read_h0, mut p_read_h1) = match call.frag_ix {
-                            Some(frag_ix) => (p_read_hap[0][frag_ix as usize], p_read_hap[1][frag_ix as usize]),
+                            Some(frag_ix) => (
+                                p_read_hap[0][frag_ix as usize],
+                                p_read_hap[1][frag_ix as usize],
+                            ),
                             None => panic!("ERROR: Fragment index is missing in pileup iteration."),
                         };
 
@@ -683,8 +688,11 @@ pub fn call_genotypes_with_haplotypes(
                         if var_phased[v as usize] {
                             match call.frag_ix {
                                 Some(frag_ix) => {
-                                    p_reads_g[g.0 as usize][g.1 as usize]
-                                        .push((frag_ix as usize, p_read_h0, p_read_h1));
+                                    p_reads_g[g.0 as usize][g.1 as usize].push((
+                                        frag_ix as usize,
+                                        p_read_h0,
+                                        p_read_h1,
+                                    ));
                                 }
                                 None => panic!("Fragment index in pileup call is None."),
                             }
@@ -827,7 +835,8 @@ pub fn call_genotypes_with_haplotypes(
         let debug_vcf_str = format!(
             "{}.{}.haplotype_genotype_iteration.vcf",
             program_step, hapcut2_iter
-        ).to_owned();
+        )
+        .to_owned();
         print_variant_debug(
             varlist,
             &interval,
@@ -844,8 +853,7 @@ pub fn call_genotypes_with_haplotypes(
         let b10 = |x: LogProb| (*PHREDProb::from(x) / -10.0) as f64;
 
         // termination criteria for the likelihoods
-        if ((b10(total_likelihood) - b10(prev_likelihood)) / b10(prev_likelihood)) < ll_delta
-        {
+        if ((b10(total_likelihood) - b10(prev_likelihood)) / b10(prev_likelihood)) < ll_delta {
             break;
         }
 
@@ -883,7 +891,7 @@ mod tests {
             id: "f0".to_string(),
             calls: vec![f0v0, f0v1, f0v2, f0v3],
             p_read_hap: [p50, p50],
-            reverse_strand: false
+            reverse_strand: false,
         };
         // second fragment
         let f1v0 = fcall(1, 0, 0);
@@ -893,7 +901,7 @@ mod tests {
             id: "f1".to_string(),
             calls: vec![f1v0, f1v1, f1v2],
             p_read_hap: [p50, p50],
-            reverse_strand: false
+            reverse_strand: false,
         };
         // third fragment
         let f2v1 = fcall(2, 1, 1);
@@ -903,7 +911,7 @@ mod tests {
             id: "f2".to_string(),
             calls: vec![f2v1, f2v2, f2v3],
             p_read_hap: [p50, p50],
-            reverse_strand: false
+            reverse_strand: false,
         };
 
         // the fragment list looks like this (rows are fragments and columns are variant sites)

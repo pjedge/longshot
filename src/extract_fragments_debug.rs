@@ -70,7 +70,8 @@ pub fn get_fragment_anchors(
             &read_seq,
             &target_names,
             extract_params,
-        ).expect("CIGAR or Anchor Error while finding anchor sequences.")
+        )
+        .expect("CIGAR or Anchor Error while finding anchor sequences.")
         {
             Some(anchors) => {
                 var_anchor_lst.push((var.clone(), anchors));

@@ -12,11 +12,11 @@
 
 // external crates
 extern crate bio;
-extern crate clap;
-extern crate rust_htslib;
 extern crate chrono;
+extern crate clap;
 extern crate core;
 extern crate rand;
+extern crate rust_htslib;
 #[macro_use]
 extern crate error_chain;
 extern crate fishers_exact;
@@ -48,6 +48,7 @@ use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::ExtractFragmentParameters;
 use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
+use half::f16;
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::AlignmentType;
@@ -60,7 +61,6 @@ use util::*;
 use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
-use half::f16;
 use variants_and_fragments::VarFilter;
 
 //use variants_and_fragments::parse_VCF_potential_variants;
@@ -105,7 +105,6 @@ fn main() {
 /// - if a file/directory already exists and -F option isn't set (e.g. vcf output or vcf debug directory)
 /// - input bam file isn't indexed
 fn run() -> Result<()> {
-
     /***********************************************************************************************/
     // READ COMMAND LINE ARGUMENTS
     /***********************************************************************************************/
@@ -374,11 +373,11 @@ fn run() -> Result<()> {
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
     let min_allele_qual: f64 = parse_positive_f64(&input_args, "Min allele quality")?;
-    let strand_bias_pvalue_cutoff: f64 = parse_positive_f64(&input_args, "Strand Bias P-value cutoff")?;
+    let strand_bias_pvalue_cutoff: f64 =
+        parse_positive_f64(&input_args, "Strand Bias P-value cutoff")?;
     let hap_assignment_qual: f64 = parse_positive_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
-    let potential_snv_cutoff_phred =
-        parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
+    let potential_snv_cutoff_phred = parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
     let potential_snv_min_alt_count: usize =
         parse_usize(&input_args, "Potential SNV Min Alt Count")?;
     let potential_snv_min_alt_frac: f64 =
@@ -534,7 +533,8 @@ fn run() -> Result<()> {
         &interval,
         min_mapq,
         max_cigar_indel as u32,
-    ).chain_err(|| "Error estimating alignment parameters.")?;
+    )
+    .chain_err(|| "Error estimating alignment parameters.")?;
 
     /***********************************************************************************************/
     // GET GENOTYPE PRIORS
@@ -546,7 +546,8 @@ fn run() -> Result<()> {
         hom_indel_rate,
         het_indel_rate,
         ts_tv_ratio,
-    ).chain_err(|| "Error estimating genotype priors.")?;
+    )
+    .chain_err(|| "Error estimating genotype priors.")?;
 
     /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
@@ -578,7 +579,8 @@ fn run() -> Result<()> {
         min_mapq,
         alignment_parameters.ln(),
         potential_snv_cutoff,
-    ).chain_err(|| "Error calling potential SNVs.")?;
+    )
+    .chain_err(|| "Error calling potential SNVs.")?;
 
     print_variant_debug(
         &mut varlist,
@@ -614,8 +616,9 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         extract_fragment_parameters,
-        alignment_parameters
-    ).chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
+        alignment_parameters,
+    )
+    .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
     // if we're printing out variant "debug" information, print out a fragment file to that debug directory
     match &variant_debug_directory {
@@ -660,15 +663,19 @@ fn run() -> Result<()> {
     call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall)
         .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
 
-
     // use Fishers exact test to check if allele observations are biased toward one strand or the other
     for mut var in &mut varlist.lst {
         if !var.alleles.len() == 2 {
             continue;
         }
-        let counts: [u32;4] = [var.allele_counts_forward[0] as u32, var.allele_counts_reverse[0]  as u32,
-            var.allele_counts_forward[1] as u32, var.allele_counts_reverse[1] as u32];
-        let fishers_exact_pvalues = fishers_exact(&counts).chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
+        let counts: [u32; 4] = [
+            var.allele_counts_forward[0] as u32,
+            var.allele_counts_reverse[0] as u32,
+            var.allele_counts_forward[1] as u32,
+            var.allele_counts_reverse[1] as u32,
+        ];
+        let fishers_exact_pvalues = fishers_exact(&counts)
+            .chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
 
         //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
         var.strand_bias_pvalue = f16::from_f64(if fishers_exact_pvalues.two_tail_pvalue <= 500.0 {
@@ -679,16 +686,18 @@ fn run() -> Result<()> {
 
         if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
             var.filter.add_filter(VarFilter::StrandBias);
-            var.genotype = Genotype(0,0);
+            var.genotype = Genotype(0, 0);
             var.gq = f16::from_f64(0.0);
         }
     }
 
-
     for f in 0..flist.len() {
-        &flist[f].calls.retain(|&c| !varlist.lst[c.var_ix as usize].filter.has_filter(VarFilter::StrandBias));
+        &flist[f].calls.retain(|&c| {
+            !varlist.lst[c.var_ix as usize]
+                .filter
+                .has_filter(VarFilter::StrandBias)
+        });
     }
-
 
     print_variant_debug(
         &mut varlist,
@@ -712,7 +721,8 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
-        ).chain_err(|| "Error printing VCF output.")?;
+        )
+        .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
     }
     /***********************************************************************************************/
@@ -735,70 +745,66 @@ fn run() -> Result<()> {
         max_p_miscall,
         &sample_name,
         ll_delta,
-    ).chain_err(|| "Error during haplotype/genotype iteration procedure.")?;
+    )
+    .chain_err(|| "Error during haplotype/genotype iteration procedure.")?;
 
     /*
     if use_poa {
         /***********************************************************************************************/
-        // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
-        /***********************************************************************************************/
+    // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
+    /***********************************************************************************************/
+    let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
 
-        let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
+    eprintln!("{} Using Partial Order Alignment (POA) to find new variants...", print_time());
 
-        eprintln!("{} Using Partial Order Alignment (POA) to find new variants...", print_time());
+    let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
+    &fasta_file,
+    &interval,
+    &h1,
+    &h2,
+    max_cov,
+    min_mapq,
+    alignment_parameters.ln());
 
-        let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
-                                                                   &fasta_file,
-                                                                   &interval,
-                                                                   &h1,
-                                                                   &h2,
-                                                                   max_cov,
-                                                                   min_mapq,
-                                                                   alignment_parameters.ln());
+    eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
 
-        eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
+    varlist.combine(&mut varlist_poa);
 
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &density_params, &sample_name);
 
-        varlist.combine(&mut varlist_poa);
+    eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
 
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &density_params, &sample_name);
+    /***********************************************************************************************/
+    // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
+    /***********************************************************************************************/
+    eprintln!("{} Producing condensed read data for POA variants...",print_time());
+    let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
+    &fasta_file,
+    &varlist,
+    &interval,
+    extract_fragment_parameters,
+    alignment_parameters,
+    None);  // Some(flist)
 
-        eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
+    call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &density_params, &sample_name);
 
-        /***********************************************************************************************/
-        // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
-        /***********************************************************************************************/
+    eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
+    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
+    &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name, ll_delta);
 
-        eprintln!("{} Producing condensed read data for POA variants...",print_time());
-        let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
-                                                             &fasta_file,
-                                                             &varlist,
-                                                             &interval,
-                                                             extract_fragment_parameters,
-                                                             alignment_parameters,
-                                                              None);  // Some(flist)
-
-
-        call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
-        print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &density_params, &sample_name);
-
-        eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
-        call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-            &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name, ll_delta);
-
-        /***********************************************************************************************/
-        // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
-        /***********************************************************************************************/
-
-        //calculate_mec(&flist2, &mut varlist);
+    /***********************************************************************************************/
+    // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
+    /***********************************************************************************************/
+    //calculate_mec(&flist2, &mut varlist);
     }
 
     let debug_filename = if use_poa {
-        "7.0.final_genotypes.vcf"
+    "7.0.final_genotypes.vcf"
     } else {
-        "4.0.final_genotypes.vcf"
+    "4.0.final_genotypes.vcf"
     };
-    */
+     */
 
     // calculate MEC-based statistics for variants and blocks
     calculate_mec(&flist, &mut varlist, max_p_miscall)
@@ -827,7 +833,8 @@ fn run() -> Result<()> {
                 &h1,
                 &h2,
                 min_mapq,
-            ).chain_err(|| "Error separating BAM reads by haplotype.")?;
+            )
+            .chain_err(|| "Error separating BAM reads by haplotype.")?;
         }
         None => {}
     }
@@ -853,7 +860,8 @@ fn run() -> Result<()> {
         &density_params,
         &sample_name,
         false,
-    ).chain_err(|| "Error printing VCF output.")?;
+    )
+    .chain_err(|| "Error printing VCF output.")?;
 
     Ok(())
 }
