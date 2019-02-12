@@ -1,6 +1,7 @@
 //! Print Longshot output in VCF format
 
 use bio::stats::PHREDProb;
+use bio::io::fasta;
 use errors::*;
 use genotype_probs::Genotype;
 use std::fs::File;
@@ -12,6 +13,7 @@ use variants_and_fragments::{var_filter, VarList};
 pub fn print_vcf(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
+    fasta_file: &Option<String>,
     output_vcf_file: &String,
     print_reference_genotype: bool,
     max_cov: u32,
@@ -27,6 +29,14 @@ pub fn print_vcf(
         density_params.n,
         max_cov,
     );
+
+    let mut fasta = match fasta_file {
+        &Some(ref ff) => {Some(fasta::IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?)}
+        None => {None}
+    };
+
+    let mut ref_seq: Vec<char> = vec![]; // this vector will be used to hold the reference sequence
+    let mut prev_tid = 4294967295;
 
     let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
@@ -89,6 +99,25 @@ pub fn print_vcf(
             }
         }
 
+        match fasta {
+            Some(ref mut fa) => {
+                // if we're on a different contig/chrom, we need to read in the sequence for that
+                // contig/chrom from the FASTA into the ref_seq vector
+                if var.tid != prev_tid {
+                    let mut ref_seq_u8: Vec<u8> = vec![];
+                    fa
+                        .fetch_all(&varlist.target_names[var.tid as usize])
+                        .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                    fa
+                        .read(&mut ref_seq_u8)
+                        .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                    ref_seq = dna_vec(&ref_seq_u8);
+                }
+                prev_tid = var.tid;
+            }
+            None => {}
+        }
+
         let ps = match var.phase_set {
             Some(ps) => format!("{}", ps),
             None => ".".to_string(),
@@ -130,6 +159,28 @@ pub fn print_vcf(
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype)
             as usize;
 
+        // we want to save the sequence context (9 bp window around variant on reference)
+        // this will be printed to the VCF later and may help diagnose variant calling
+        // issues e.g. if the variant occurs inside a large homopolymer or etc.
+        // get the position 10 bases to the left
+        let sequence_context: String = match fasta {
+            Some(_) => {
+                let l_window = if var.pos0 >= 4 {
+                    var.pos0 as usize - 4
+                } else {
+                    0
+                };
+                // get the position 11 bases to the right
+                let mut r_window = var.pos0 as usize + 5;
+                if r_window >= ref_seq.len() {
+                    r_window = ref_seq.len();
+                }
+
+                (ref_seq[l_window..r_window]).iter().collect::<String>()
+            }
+            None => {"None".to_string()}
+        };
+
         writeln!(file,
                        "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
                        varlist.target_names[var.tid as usize],
@@ -153,7 +204,7 @@ pub fn print_vcf(
                        var.mq40_frac,
                        var.mq50_frac,
                        post_str,
-                       var.sequence_context,
+                       sequence_context,
                        genotype_str,
                        var.gq,
                        ps,
@@ -183,6 +234,7 @@ pub fn print_variant_debug(
             print_vcf(
                 varlist,
                 &interval,
+                &None,
                 &outfile,
                 true,
                 max_cov,

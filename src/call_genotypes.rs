@@ -806,7 +806,7 @@ pub fn call_genotypes_with_haplotypes(
             //var.ambiguous_count = ambig_count;
             var.genotype = max_g;
             var.gq = f16::from_f64(genotype_qual);
-            var.filter = "PASS".to_string();
+            var.filter = VarFilter::Pass;
 
             if var.qual > f16::from_f64(MAX_VCF_QUAL) {
                 var.qual = f16::from_f64(MAX_VCF_QUAL);
