@@ -35,6 +35,7 @@ use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
 use util::*;
 use variants_and_fragments::*;
+use std::u32;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -63,6 +64,9 @@ pub struct ExtractFragmentParameters {
     /// if a CIGAR indel is encountered that exceeds this size while forming the window,
     /// the allele site is thrown out for that read.
     pub max_cigar_indel: usize,
+    /// whether or not to store the read id.
+    /// we store the read ID if we'll be separating reads by haplotype and otherwise we don't
+    pub store_read_id: bool
 }
 
 /// an extension of the rust-htslib cigar representation that has the cigar operation and length as
@@ -786,11 +790,10 @@ fn extract_var_cluster(
         }
 
         calls.push(FragCall {
-            frag_ix: None,
-            var_ix: var_cluster[v].ix,
+            frag_ix: u32::MAX, // this will be assigned a correct value soon after all fragments extracted
+            var_ix: var_cluster[v as usize].ix as u32,
             allele: best_allele,
             qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual),
         });
     }
 
@@ -817,11 +820,18 @@ pub fn extract_fragment(
         eprintln!("Extracting fragment for read {}...", id);
     }
 
+    let fid = match extract_params.store_read_id {
+        true => Some(id),
+        false => None
+    };
+
     let mut fragment = Fragment {
-        id: id,
+        id: fid,
         calls: vec![],
-        p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
-        reverse_strand: bam_record.is_reverse(),
+        // ln(0.5) stored as f16 for compactness
+        p_read_hap: [f16::from_f64(*LogProb::from(Prob(0.5))),
+                     f16::from_f64(*LogProb::from(Prob(0.5)))],
+        reverse_strand: bam_record.is_reverse()
     };
 
     if bam_record.is_quality_check_failed()
@@ -1054,7 +1064,7 @@ pub fn extract_fragments(
     // label every fragment call with its index in the fragment list.
     for i in 0..flist.len() {
         for j in 0..flist[i].calls.len() {
-            flist[i].calls[j].frag_ix = Some(i);
+            flist[i].calls[j].frag_ix = i as u32;
         }
     }
 

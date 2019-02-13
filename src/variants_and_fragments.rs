@@ -17,19 +17,18 @@ use util::*;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub frag_ix: Option<usize>,  // index into fragment list
-    pub var_ix: usize,           // index into variant list
+    pub frag_ix: u32,  // index into fragment list
+    pub var_ix: u32,           // index into variant list
     pub allele: u8,              // allele call
     pub qual: LogProb,           // LogProb probability the call is an error
-    pub one_minus_qual: LogProb, // LogProb probability the call is correct
 }
 
 #[derive(Clone)]
 pub struct Fragment {
-    pub id: String,
+    pub id: Option<String>,
     pub calls: Vec<FragCall>,
-    pub p_read_hap: [LogProb; 2],
-    pub reverse_strand: bool,
+    pub p_read_hap: [f16; 2],
+    pub reverse_strand: bool
 }
 
 #[repr(u8)]
@@ -103,6 +102,7 @@ pub struct Var {
     pub qual: f16,
     pub filter: VarFilter, // bitwise flag holding filter info: 0 == PASS, 1 == dp, 2 == dn, 3 == dp && dn
     pub genotype: Genotype,
+    //pub unphased: bool, // whether the variant has been explicity flagged as unphased
     pub gq: f16,
     pub unphased_genotype: Genotype,
     pub unphased_gq: f16,
@@ -228,6 +228,7 @@ pub fn parse_vcf_potential_variants(
             qual: f16::from_f64(0.0),
             filter: VarFilter::Pass,
             genotype: Genotype(0, 0),
+            //unphased: false,
             gq: f16::from_f64(0.0),
             unphased_genotype: Genotype(0, 0),
             unphased_gq: f16::from_f64(0.0),
