@@ -23,7 +23,7 @@ use util::*;
 // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
 use variants_and_fragments::*;
 
-pub static VARLIST_CAPACITY: usize = 1000000;
+pub static VARLIST_CAPACITY: usize = 0; //1000000;
 static VERBOSE: bool = false; //true;
 
 /// Calls potential SNV sites using a pileup-based genotyping calculation
@@ -361,6 +361,7 @@ pub fn call_potential_snvs(
                     qual: f16::from_f64(0.0),
                     filter: VarFilter::Pass,
                     genotype: Genotype(0, 0),
+                    //unphased: false,
                     gq: f16::from_f64(0.0),
                     unphased_genotype: Genotype(0, 0),
                     unphased_gq: f16::from_f64(0.0),

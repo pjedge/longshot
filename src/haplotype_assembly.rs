@@ -13,7 +13,7 @@ use variants_and_fragments::*;
 pub fn separate_fragments_by_haplotype(
     flist: &Vec<Fragment>,
     threshold: LogProb,
-) -> (HashSet<String>, HashSet<String>) {
+) -> Result<(HashSet<String>, HashSet<String>)> {
     let mut h1 = HashSet::new();
     let mut h2 = HashSet::new();
 
@@ -22,18 +22,28 @@ pub fn separate_fragments_by_haplotype(
     let mut unassigned_count = 0;
 
     for ref f in flist {
-        let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0], f.p_read_hap[1]);
-        let p_read_hap0: LogProb = f.p_read_hap[0] - total;
-        let p_read_hap1: LogProb = f.p_read_hap[1] - total;
 
-        if p_read_hap0 > threshold {
-            h1_count += 1;
-            h1.insert(f.id.clone());
-        } else if p_read_hap1 > threshold {
-            h2_count += 1;
-            h2.insert(f.id.clone());
-        } else {
-            unassigned_count += 1;
+        // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
+        let p_read_hap0 = LogProb(f64::from(f.p_read_hap[0]));
+        let p_read_hap1 = LogProb(f64::from(f.p_read_hap[1]));
+
+        let total: LogProb = LogProb::ln_add_exp(p_read_hap0, p_read_hap1);
+        let p_read_hap0: LogProb = p_read_hap0 - total;
+        let p_read_hap1: LogProb = p_read_hap1 - total;
+
+        match &f.id {
+            &Some(ref fid) => {
+                if p_read_hap0 > threshold {
+                    h1_count += 1;
+                    h1.insert(fid.clone());
+                } else if p_read_hap1 > threshold {
+                    h2_count += 1;
+                    h2.insert(fid.clone());
+                } else {
+                    unassigned_count += 1;
+                }
+            }
+            &None => {bail!("Fragment without read ID found while separating reads by haplotype.");}
         }
     }
 
@@ -62,7 +72,7 @@ pub fn separate_fragments_by_haplotype(
         unassigned_percent
     );
 
-    (h1, h2)
+    Ok((h1, h2))
 }
 
 pub fn separate_bam_reads_by_haplotype(
@@ -137,6 +147,7 @@ pub fn generate_flist_buffer(
     single_reads: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
+    let mut frag_num = 0;
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
@@ -165,12 +176,17 @@ pub fn generate_flist_buffer(
         }
         line.push(' ' as u8);
 
-        for u in frag.id.clone().into_bytes() {
+        let fid = match &frag.id {
+            Some(ref fid) => {fid.clone()}
+            None => {frag_num.to_string()}
+        };
+
+        for u in fid.clone().into_bytes() {
             line.push(u as u8);
         }
         //line.push(' ' as u8);
 
-        let mut prev_call = phase_variant.len() + 1;
+        let mut prev_call: u32 = phase_variant.len() as u32 + 1;
 
         for c in frag.clone().calls {
             if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
@@ -221,6 +237,7 @@ pub fn generate_flist_buffer(
         //println!("{}", charline.iter().collect::<String>());
 
         buffer.push(line);
+        frag_num += 1;
     }
     Ok(buffer)
 }
@@ -282,7 +299,7 @@ pub fn calculate_mec(
     }
 
     for f in 0..flist.len() {
-        let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
+        let mut mismatched_vars: Vec<Vec<u32>> = vec![vec![], vec![]];
 
         for &hap_ix in &hap_ixs {
             for call in &flist[f].calls {
@@ -314,7 +331,7 @@ pub fn calculate_mec(
         };
 
         for &ix in &mismatched_vars[min_error_hap] {
-            varlist.lst[ix].mec += 1;
+            varlist.lst[ix as usize].mec += 1;
         }
     }
 

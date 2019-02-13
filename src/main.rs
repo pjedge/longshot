@@ -516,6 +516,11 @@ fn run() -> Result<()> {
         bail!("{} ERROR: Max read coverage set to 0.");
     }
 
+    // we store the read IDs if we will be separating the reads by haplotype
+    // we will compute sets holding the separated read IDs and then refer back to the original BAM
+    // and write to separate files based on set membership
+    let store_read_id = hap_bam_prefix != None;
+
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq,
         alignment_type,
@@ -524,6 +529,7 @@ fn run() -> Result<()> {
         variant_cluster_max_size: variant_cluster_max_size,
         max_window_padding,
         max_cigar_indel,
+        store_read_id
     };
 
     eprintln!("{} Estimating alignment parameters...", print_time());
@@ -810,18 +816,19 @@ fn run() -> Result<()> {
     calculate_mec(&flist, &mut varlist, max_p_miscall)
         .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
 
-    eprintln!(
-        "{} Calculating fraction of reads assigned to either haplotype...",
-        print_time()
-    );
-    // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
-    let (h1, h2) =
-        separate_fragments_by_haplotype(&flist, LogProb::from(Prob(1.0 - hap_max_p_misassign)));
-
     // if haplotype-based read separation is turned on,
     // write BAM files for h1,h2, and unassigned
     match hap_bam_prefix {
         Some(p) => {
+
+            eprintln!(
+                "{} Calculating fraction of reads assigned to either haplotype...",
+                print_time()
+            );
+            // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
+            let (h1, h2) =
+                separate_fragments_by_haplotype(&flist, LogProb::from(Prob(1.0 - hap_max_p_misassign)))?;
+
             eprintln!(
                 "{} Writing haplotype-assigned reads to bam files...",
                 print_time()

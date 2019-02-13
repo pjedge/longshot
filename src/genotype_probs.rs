@@ -40,7 +40,28 @@ impl GenotypeProbs {
         self.tab.len()
     }
 
-    pub fn max_genotype(&self, phased: bool, force_nonreference: bool) -> (Genotype, LogProb) {
+    pub fn max_prob(&self) -> (Genotype, LogProb) {
+        let mut max_post: LogProb = LogProb::ln_zero();
+        let mut max_i = 0;
+        let mut max_j = 0;
+
+        for i in 0..self.n_alleles() {
+            for j in 0..self.n_alleles() {
+
+                let post: LogProb = self.tab[i][j];
+
+                if post > max_post {
+                    max_post = post;
+                    max_i = i;
+                    max_j = j;
+                }
+            }
+        }
+
+        (Genotype(max_i as u8, max_j as u8), max_post)
+    }
+
+    pub fn max_genotype_post(&self, phased: bool, force_nonreference: bool) -> (Genotype, LogProb) {
         let mut max_post: LogProb = LogProb::ln_zero();
         let mut max_i = 0;
         let mut max_j = 0;
