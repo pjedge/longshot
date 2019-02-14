@@ -198,7 +198,7 @@ pub fn call_genotypes_no_haplotypes(
             &var.alleles,
             max_p_miscall,
         )
-        .chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
+            .chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
 
         // get the genotype with maximum genotype posterior
         let (max_g, max_post) = posts.max_genotype_post(false, false);
@@ -296,7 +296,6 @@ pub fn call_genotypes_with_haplotypes(
     sample_name: &String,
     ll_delta: f64,
 ) -> Result<()> {
-
     let n_var = varlist.lst.len();
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
     assert_eq!(pileup_lst.len(), varlist.lst.len());
@@ -330,7 +329,6 @@ pub fn call_genotypes_with_haplotypes(
             && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
             && var.alleles[0].len() == 1
             && var.alleles[1].len() == 1
-            //&& !var.unphased
         {
             if rng.next_f64() < 0.5 {
                 var.genotype = Genotype(0, 1);
@@ -359,7 +357,6 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
             {
                 num_phased += 1;
             }
@@ -423,7 +420,6 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
             {
                 var_phased[i] = true;
 
@@ -490,7 +486,7 @@ pub fn call_genotypes_with_haplotypes(
             if p < &0 {
                 continue;
             }
-            if varlist.lst[i].pos0 < min_pos_ps[*p as usize]{
+            if varlist.lst[i].pos0 < min_pos_ps[*p as usize] {
                 min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
             }
         }
@@ -535,7 +531,7 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
+            //&& !var.unphased
             {
                 num_phased += 1;
             }
@@ -612,14 +608,12 @@ pub fn call_genotypes_with_haplotypes(
                 assert_eq!(v, var.ix);
 
                 let mut p_reads: GenotypeProbs = genotype_priors.get_all_priors(&var.alleles).chain_err(|| "Error getting all genotype priors while calculating haplotype-informed genotypes")?;
-                //let mut p_reads_unphased: LogProb = LogProb::ln_one();
 
                 // let (g1,g2) be the current genotype being considered to switch to
                 // then p_read_lst_genotype[g1][g2] contains a vector of tuples (frag_ix, p_read_h0, p_read_h1
                 // that have the probability of each fragment under the new genotypes
                 let mut p_read_lst_genotype: Vec<Vec<Vec<(usize, LogProb, LogProb)>>> =
                     vec![vec![vec![]; var.alleles.len()]; var.alleles.len()];
-                //let mut p_read_lst_unphased: Vec<(usize, LogProb, LogProb)> = vec![];
 
                 // p_read_hap contains the probability of reads given haplotypes,
                 // ONLY for variants in variant_phased.
@@ -695,120 +689,34 @@ pub fn call_genotypes_with_haplotypes(
                         p_reads.ln_times_equals(g, p_read);
                     }
                 }
-                /*
-                for call in &pileup_lst[v as usize] {
-                    if call.qual >= ln_max_p_miscall {
-                        continue; // allele call fails allele quality cutoff
-                    }
 
-                    // get the value of the read likelihood given each haplotype
-                    let (mut p_read_h0, mut p_read_h1) = (p_read_hap[0][call.frag_ix as usize],
-                                                          p_read_hap[1][call.frag_ix as usize]);
+                // calculate the posterior probabilities
+                let posts: GenotypeProbs = p_reads.normalize();
 
+                let (max_g, _) = posts.max_genotype_post(true, false);
+
+                var.genotype_post = posts.clone();
+                // TODO: should we reassign var.gq here?
+
+                // we need to track if any changes occured for termination
+                if haps[0][v as usize] != max_g.0 || haps[1][v as usize] != max_g.1 {
+                    changed = true;
+                    // if this variant was phased with HapCUT2 and used in calculating P(read | h),
+                    // then we need to update the P(read | h1) and P(read | h2) values that changed
+                    // when we changed h1 and h2
                     if var_phased[v as usize] {
-                        // for each haplotype allele
-                        // if that allele on the haplotype changes in g = [g1,g2],
-                        // then we divide out the old value
-
-                        // haplotype 0 at site j will change under this genotype
-                        // therefore p_read_h0 needs to change
-                        if haps[0][v as usize] == call.allele {
-                            // fragment call matched old h0 but doesn't match new h0
-                            // divide out the p(call), and multiply in p(miscall)
-                            p_read_h0 = p_read_h0 - LogProb::ln_one_minus_exp(&call.qual);
-                        } else if haps[0][v as usize] != call.allele {
-                            // fragment call didn't match old h0 but matches new h0
-                            // divide out the p(miscall), and multiply in p(call)
-                            p_read_h0 = p_read_h0 - call.qual;
-                        }
-
-                        // haplotype 1 at site j will change under this genotype
-                        // therefore p_read_h1 needs to change
-                        if haps[1][v as usize] == call.allele {
-                            // fragment call matched old h1 but doesn't match new h1
-                            // divide out the p(call), and multiply in p(miscall)
-                            p_read_h1 = p_read_h1 - LogProb::ln_one_minus_exp(&call.qual);
-                        } else if haps[1][v as usize] != call.allele {
-                            // fragment call didn't match old h1 but matches new h1
-                            // divide out the p(miscall), and multiply in p(call)
-                            p_read_h1 = p_read_h1 - call.qual;
-                        }
+                        for &(frag_ix, p_read_h0, p_read_h1) in
+                            &p_read_lst_genotype[max_g.0 as usize][max_g.1 as usize]
+                            {
+                                p_read_hap[0][frag_ix] = p_read_h0;
+                                p_read_hap[1][frag_ix] = p_read_h1;
+                            }
                     }
-
-                    if var_phased[v as usize] {
-                        p_read_lst_unphased.push((
-                            call.frag_ix as usize,
-                            p_read_h0,
-                            p_read_h1,
-                        ));
-                    }
-
-                    let p_read = LogProb::ln_add_exp(ln_half + p_read_h0, ln_half + p_read_h1);
-
-                    p_reads_unphased+= p_read;
                 }
-                */
-                // convert unphased genotype quality score back to log prob
-                // then take one minus it to get the probability of the genotype
-                //let p_unphased_genotype = LogProb::ln_one_minus_exp(&LogProb::from(PHREDProb(f64::from(var.unphased_gq))));
-                //p_reads_unphased += p_unphased_genotype;
 
-                //let (max_p_reads_genotype, max_p_reads) = p_reads.max_prob();
-
-                //if max_p_reads > p_reads_unphased {
-
-                    // calculate the posterior probabilities
-                    let posts: GenotypeProbs = p_reads.normalize();
-
-                    let (max_g, _) = posts.max_genotype_post(true, false);
-
-                    var.genotype_post = posts.clone();
-                    // TODO: should we reassign var.gq here?
-
-                    // we need to track if any changes occured for termination
-                    if haps[0][v as usize] != max_g.0 || haps[1][v as usize] != max_g.1
-                    {// || var.unphased {
-                        changed = true;
-                        //var.unphased = false;
-                        // if this variant was phased with HapCUT2 and used in calculating P(read | h),
-                        // then we need to update the P(read | h1) and P(read | h2) values that changed
-                        // when we changed h1 and h2
-                        if var_phased[v as usize] {
-                            for &(frag_ix, p_read_h0, p_read_h1) in
-                                &p_read_lst_genotype[max_g.0 as usize][max_g.1 as usize]
-                                {
-                                    p_read_hap[0][frag_ix] = p_read_h0;
-                                    p_read_hap[1][frag_ix] = p_read_h1;
-                                }
-                        }
-                    }
-
-                    // update the haplotype vectors with the max scoring phased genotype
-                    haps[0][v as usize] = max_g.0;
-                    haps[1][v as usize] = max_g.1;
-                /*} else {
-
-                    // we need to track if any changes occured for termination
-                    if !var.unphased {
-                        changed = true;
-                        var.unphased = true;
-                        // if this variant was phased with HapCUT2 and used in calculating P(read | h),
-                        // then we need to update the P(read | h1) and P(read | h2) values that changed
-                        // when we changed h1 and h2
-                        if var_phased[v as usize] {
-                            for &(frag_ix, p_read_h0, p_read_h1) in
-                                &p_read_lst_unphased
-                                {
-                                    p_read_hap[0][frag_ix] = p_read_h0;
-                                    p_read_hap[1][frag_ix] = p_read_h1;
-                                }
-                        }
-                    }
-
-                    // update the haplotype vectors with the max scoring phased genotype
-                    haps[0][v as usize] = max_p_reads_genotype.0;
-                    haps[1][v as usize] = max_p_reads_genotype.1;
-                }*/
+                // update the haplotype vectors with the max scoring phased genotype
+                haps[0][v as usize] = max_g.0;
+                haps[1][v as usize] = max_g.1;
             }
 
             // if the haplotypes have not changed in this iteration, then we break
@@ -824,7 +732,6 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
             {
                 num_phased += 1;
             }
@@ -864,14 +771,6 @@ pub fn call_genotypes_with_haplotypes(
         for i in 0..varlist.lst.len() {
             //let pileup = &pileup_lst[i];
             let var = &mut varlist.lst[i];
-
-            /*
-            if var.unphased {
-                var.gq = var.unphased_gq;
-                var.genotype = var.unphased_genotype;
-                var.qual = var.unphased_gq;
-                continue;
-            }*/
 
             let (max_g, _) = var.genotype_post.max_genotype_post(true, false);
 
@@ -921,7 +820,7 @@ pub fn call_genotypes_with_haplotypes(
             "{}.{}.haplotype_genotype_iteration.vcf",
             program_step, hapcut2_iter
         )
-        .to_owned();
+            .to_owned();
         print_variant_debug(
             varlist,
             &interval,
@@ -957,14 +856,13 @@ mod tests {
     fn test_generate_fragcall_pileup() {
         let fcall = |f_ix, v_ix, a| {
             FragCall {
-                frag_ix: Some(f_ix),                       // index into fragment list
+                frag_ix: f_ix as u32,                       // index into fragment list
                 var_ix: v_ix,                              // index into variant list
                 allele: a,                                 // allele call
                 qual: LogProb::from(Prob(0.01)), // LogProb probability the call is an error
-                one_minus_qual: LogProb::from(Prob(0.99)), // LogProb probability the call is correct
             }
         };
-        let p50 = LogProb::from(Prob(0.5));
+        let p50 = f16::from_f64(*LogProb::from(Prob(0.5)));
         // in this example assume the haplotype pair is (0000,1111)
 
         // first fragment
@@ -973,7 +871,7 @@ mod tests {
         let f0v2 = fcall(0, 2, 1);
         let f0v3 = fcall(0, 3, 1);
         let f0 = Fragment {
-            id: "f0".to_string(),
+            id: Some("f0".to_string()),
             calls: vec![f0v0, f0v1, f0v2, f0v3],
             p_read_hap: [p50, p50],
             reverse_strand: false,
@@ -983,7 +881,7 @@ mod tests {
         let f1v1 = fcall(1, 1, 0);
         let f1v2 = fcall(1, 2, 0);
         let f1 = Fragment {
-            id: "f1".to_string(),
+            id: Some("f1".to_string()),
             calls: vec![f1v0, f1v1, f1v2],
             p_read_hap: [p50, p50],
             reverse_strand: false,
@@ -993,7 +891,7 @@ mod tests {
         let f2v2 = fcall(2, 2, 1);
         let f2v3 = fcall(2, 3, 1);
         let f2 = Fragment {
-            id: "f2".to_string(),
+            id: Some("f2".to_string()),
             calls: vec![f2v1, f2v2, f2v3],
             p_read_hap: [p50, p50],
             reverse_strand: false,
