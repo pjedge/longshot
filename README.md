@@ -9,11 +9,11 @@ It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
 
-* rust 1.26.2 (see installation)
+* rust 1.32.0 (see installation)
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
-First, install the Rust programming language. Longshot requires Rust 1.26.2 or higher which comes with the cargo package manager. You can install rust with the following command:
+First, install the Rust programming language. Longshot requires Rust 1.32.0 or higher which comes with the cargo package manager. You can install rust with the following command:
 ```
 curl https://sh.rustup.rs -sSf | sh
 ```
@@ -153,7 +153,7 @@ Call variants in a 500 kb region and then separate the reads into ```reads.hap1.
 ## installation troubleshooting
 
 ### older version of Rust
-Check that the Rust version is 1.26.2 or higher:
+Check that the Rust version is 1.32.0 or higher:
 ```
 rustc --version
 ```
