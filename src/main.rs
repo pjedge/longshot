@@ -331,6 +331,7 @@ fn run() -> Result<()> {
             .display_order(184)
             .default_value(&"0.5"))
         .arg(Arg::with_name("Strand Bias P-value cutoff")
+            .short("P")
             .long("strand_bias_pvalue_cutoff")
             .value_name("float")
             .help("Remove a variant if the allele observations are biased toward one strand (forward or reverse) according to Fisher's exact test. Use this cutoff for the two-tailed P-value.")
