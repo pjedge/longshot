@@ -373,16 +373,16 @@ fn run() -> Result<()> {
     let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
-    let min_allele_qual: f64 = parse_positive_f64(&input_args, "Min allele quality")?;
+    let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
     let strand_bias_pvalue_cutoff: f64 =
-        parse_positive_f64(&input_args, "Strand Bias P-value cutoff")?;
-    let hap_assignment_qual: f64 = parse_positive_f64(&input_args, "Haplotype assignment quality")?;
+        parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
+    let hap_assignment_qual: f64 = parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
     let potential_snv_cutoff_phred = parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
     let potential_snv_min_alt_count: usize =
         parse_usize(&input_args, "Potential SNV Min Alt Count")?;
     let potential_snv_min_alt_frac: f64 =
-        parse_positive_f64(&input_args, "Potential SNV Min Alt Fraction")?;
+        parse_nonnegative_f64(&input_args, "Potential SNV Min Alt Fraction")?;
     let hom_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous SNV Rate")?;
     let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
     let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
