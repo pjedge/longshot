@@ -102,7 +102,7 @@ pub struct Var {
     pub qual: f16,
     pub filter: VarFilter, // bitwise flag holding filter info: 0 == PASS, 1 == dp, 2 == dn, 3 == dp && dn
     pub genotype: Genotype,
-    //pub unphased: bool, // whether the variant has been explicity flagged as unphased
+    pub unphased: bool, // whether the variant has been explicity flagged as unphased
     pub gq: f16,
     pub unphased_genotype: Genotype,
     pub unphased_gq: f16,
@@ -228,7 +228,7 @@ pub fn parse_vcf_potential_variants(
             qual: f16::from_f64(0.0),
             filter: VarFilter::Pass,
             genotype: Genotype(0, 0),
-            //unphased: false,
+            unphased: false,
             gq: f16::from_f64(0.0),
             unphased_genotype: Genotype(0, 0),
             unphased_gq: f16::from_f64(0.0),

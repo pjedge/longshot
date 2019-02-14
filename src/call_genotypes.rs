@@ -330,7 +330,7 @@ pub fn call_genotypes_with_haplotypes(
             && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
             && var.alleles[0].len() == 1
             && var.alleles[1].len() == 1
-            //&& !var.unphased
+            && !var.unphased
         {
             if rng.next_f64() < 0.5 {
                 var.genotype = Genotype(0, 1);
@@ -359,7 +359,7 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
+                && !var.unphased
             {
                 num_phased += 1;
             }
@@ -423,7 +423,7 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
+                && !var.unphased
             {
                 var_phased[i] = true;
 
@@ -535,7 +535,7 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
+                && !var.unphased
             {
                 num_phased += 1;
             }
@@ -612,14 +612,14 @@ pub fn call_genotypes_with_haplotypes(
                 assert_eq!(v, var.ix);
 
                 let mut p_reads: GenotypeProbs = genotype_priors.get_all_priors(&var.alleles).chain_err(|| "Error getting all genotype priors while calculating haplotype-informed genotypes")?;
-                //let mut p_reads_unphased: LogProb = LogProb::ln_one();
+                let mut p_reads_unphased: LogProb = p_reads.get(Genotype(0,1));
 
                 // let (g1,g2) be the current genotype being considered to switch to
                 // then p_read_lst_genotype[g1][g2] contains a vector of tuples (frag_ix, p_read_h0, p_read_h1
                 // that have the probability of each fragment under the new genotypes
                 let mut p_read_lst_genotype: Vec<Vec<Vec<(usize, LogProb, LogProb)>>> =
                     vec![vec![vec![]; var.alleles.len()]; var.alleles.len()];
-                //let mut p_read_lst_unphased: Vec<(usize, LogProb, LogProb)> = vec![];
+                let mut p_read_lst_unphased: Vec<(usize, LogProb, LogProb)> = vec![];
 
                 // p_read_hap contains the probability of reads given haplotypes,
                 // ONLY for variants in variant_phased.
@@ -695,7 +695,7 @@ pub fn call_genotypes_with_haplotypes(
                         p_reads.ln_times_equals(g, p_read);
                     }
                 }
-                /*
+
                 for call in &pileup_lst[v as usize] {
                     if call.qual >= ln_max_p_miscall {
                         continue; // allele call fails allele quality cutoff
@@ -743,19 +743,17 @@ pub fn call_genotypes_with_haplotypes(
                         ));
                     }
 
-                    let p_read = LogProb::ln_add_exp(ln_half + p_read_h0, ln_half + p_read_h1);
+                    let mut p_read = LogProb::ln_add_exp(ln_half + p_read_h0, ln_half + p_read_h1);
 
+                    p_reads_unphased += LogProb::ln_add_exp(ln_half + call.qual, ln_half + LogProb::ln_one_minus_exp(&call.qual));
                     p_reads_unphased+= p_read;
                 }
-                */
-                // convert unphased genotype quality score back to log prob
-                // then take one minus it to get the probability of the genotype
-                //let p_unphased_genotype = LogProb::ln_one_minus_exp(&LogProb::from(PHREDProb(f64::from(var.unphased_gq))));
-                //p_reads_unphased += p_unphased_genotype;
 
-                //let (max_p_reads_genotype, max_p_reads) = p_reads.max_prob();
+                let (max_p_reads_genotype, max_p_reads) = p_reads.max_prob();
 
-                //if max_p_reads > p_reads_unphased {
+                //eprintln!("{} {}", *PHREDProb::from(max_p_reads), *PHREDProb::from(p_reads_unphased));
+
+                if max_p_reads > p_reads_unphased {
 
                     // calculate the posterior probabilities
                     let posts: GenotypeProbs = p_reads.normalize();
@@ -766,10 +764,10 @@ pub fn call_genotypes_with_haplotypes(
                     // TODO: should we reassign var.gq here?
 
                     // we need to track if any changes occured for termination
-                    if haps[0][v as usize] != max_g.0 || haps[1][v as usize] != max_g.1
-                    {// || var.unphased {
+                    if (haps[0][v as usize] != max_g.0 || haps[1][v as usize] != max_g.1)
+                       || var.unphased {
                         changed = true;
-                        //var.unphased = false;
+                        var.unphased = false;
                         // if this variant was phased with HapCUT2 and used in calculating P(read | h),
                         // then we need to update the P(read | h1) and P(read | h2) values that changed
                         // when we changed h1 and h2
@@ -786,7 +784,7 @@ pub fn call_genotypes_with_haplotypes(
                     // update the haplotype vectors with the max scoring phased genotype
                     haps[0][v as usize] = max_g.0;
                     haps[1][v as usize] = max_g.1;
-                /*} else {
+                } else {
 
                     // we need to track if any changes occured for termination
                     if !var.unphased {
@@ -796,6 +794,7 @@ pub fn call_genotypes_with_haplotypes(
                         // then we need to update the P(read | h1) and P(read | h2) values that changed
                         // when we changed h1 and h2
                         if var_phased[v as usize] {
+                            var_phased[v as usize] = false;
                             for &(frag_ix, p_read_h0, p_read_h1) in
                                 &p_read_lst_unphased
                                 {
@@ -808,7 +807,7 @@ pub fn call_genotypes_with_haplotypes(
                     // update the haplotype vectors with the max scoring phased genotype
                     haps[0][v as usize] = max_p_reads_genotype.0;
                     haps[1][v as usize] = max_p_reads_genotype.1;
-                }*/
+                }
             }
 
             // if the haplotypes have not changed in this iteration, then we break
@@ -824,7 +823,7 @@ pub fn call_genotypes_with_haplotypes(
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
-                //&& !var.unphased
+                && !var.unphased
             {
                 num_phased += 1;
             }
@@ -865,13 +864,12 @@ pub fn call_genotypes_with_haplotypes(
             //let pileup = &pileup_lst[i];
             let var = &mut varlist.lst[i];
 
-            /*
             if var.unphased {
                 var.gq = var.unphased_gq;
                 var.genotype = var.unphased_genotype;
                 var.qual = var.unphased_gq;
                 continue;
-            }*/
+            }
 
             let (max_g, _) = var.genotype_post.max_genotype_post(true, false);
 

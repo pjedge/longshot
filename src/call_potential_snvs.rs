@@ -361,7 +361,7 @@ pub fn call_potential_snvs(
                     qual: f16::from_f64(0.0),
                     filter: VarFilter::Pass,
                     genotype: Genotype(0, 0),
-                    //unphased: false,
+                    unphased: false,
                     gq: f16::from_f64(0.0),
                     unphased_genotype: Genotype(0, 0),
                     unphased_gq: f16::from_f64(0.0),
