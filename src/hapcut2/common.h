@@ -79,17 +79,6 @@ struct SNPfrags {
     int parent;
     float score;
     int heaploc;
-    char* id;
-    char* allele0;
-    char* allele1;
-    char* chromosome;
-    int position;
-    // changed on feb 1 2012 to be pointers (char* id, char* chrom)
-    char* genotypes; // VCF genotypes 0|1 1|0 or 0/1 added feb 1 2012
-    float post_notsw;
-    float post_hap;
-    int pruned_discrete_heuristic; // for error analysis mode
-    float homozygous_prior; // prior probability of homozygousity. Based on GQ field of VCF.
 };
 
 int fprintf_time(FILE *stream, const char *format, ...);

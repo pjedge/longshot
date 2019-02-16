@@ -6,7 +6,6 @@
 #include<math.h>
 #include "common.h"
 
-
 /** Adapted from http://stackoverflow.com/questions/3673226/how-to-print-time-in-format-2009-08-10-181754-811 */
 int fprintf_time(FILE *stream, const char *format, ...)
 {
