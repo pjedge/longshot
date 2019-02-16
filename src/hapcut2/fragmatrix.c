@@ -59,21 +59,6 @@ void label_node_alt(struct SNPfrags* snpfrag, int init_node, int comp, khash_t(3
 
 void label_node(struct SNPfrags* snpfrag, int node, int comp, khash_t(32) *label_node_hash) // DFS search routine for connected component
 {
-	/*
-    int i = 0, ret;
-	if (kh_get(32, label_node_hash, node) != kh_end(label_node_hash)) return;
-	kh_put(32, label_node_hash, node, &ret);
-	if (ret == 0) {
-		fprintf(stderr, "kh_put returned non-empty\n");
-		exit (1);
-	}
-    if (snpfrag[node].component == -1) {
-        //  fprintf(stdout," called %d node edges %d %d \n",node,snpfrag[node].edges,comp);
-        snpfrag[node].component = comp;
-        snpfrag[comp].csize++;
-        for (i = 0; i < snpfrag[node].edges; i++) label_node(snpfrag, snpfrag[node].elist[i].snp, comp, label_node_hash);
-    }
-	*/
     label_node_alt(snpfrag, node, comp, label_node_hash);
 }
 
@@ -130,8 +115,7 @@ void add_edges_fosmids(struct fragment* Flist, int fragments, struct SNPfrags* s
     // elist contains duplicates (due to multiple fragments), telist does not, feb 5 2013
     // sort all edges lists once for all by snp number, this can be done faster using QSORT, see later code...
     for (i = 0; i < snps; i++) qsort(snpfrag[i].elist, snpfrag[i].edges, sizeof (struct edge), edge_compare);
-	//fprintf(stderr, "Iterating through SNPs\n0");
-	//int every = (snps < 10000) ? snps : (snps / 10000.0);
+
     for (i = 0; i < snps; i++) {
 		//if (0 == (i % every)) fprintf(stderr, "\r%.2lf%% complete", i * 100.0 / snps);
         if (snpfrag[i].edges > maxdeg) maxdeg = snpfrag[i].edges;
@@ -159,7 +143,6 @@ void add_edges_fosmids(struct fragment* Flist, int fragments, struct SNPfrags* s
     }
 	kh_destroy(32, label_node_hash);
     if (VERBOSE) fprintf(stdout, "Number of non-trivial connected components %d max-Degree %d connected variants %d coverage-per-variant %f \n", *components, maxdeg, nodes_in_graph, (double) avgdeg / (double) csnps);
-    //fprintf(stderr, "Number of non-trivial connected components %d max-Degree %d connected variants %d coverage-per-variant %f \n", *components, maxdeg, nodes_in_graph, (double) avgdeg / (double) csnps);
 }
 
 // for each fragment: add all pairwise edges between all variants in it, complexity = O(k^2) for 'k' length fragment
@@ -190,13 +173,9 @@ void add_edges(struct fragment* Flist, int fragments, struct SNPfrags* snpfrag, 
     // elist contains duplicates (due to multiple fragments), telist does not, feb 5 2013
     // sort all edges lists once for all by snp number, this can be done faster using QSORT, see later code...
     for (i = 0; i < snps; i++) qsort(snpfrag[i].elist, snpfrag[i].edges, sizeof (struct edge), edge_compare);
-	//fprintf(stderr, "Iterating through SNPs\n0");
-	//int every = snps / 10000.0;
+
     for (i = 0; i < snps; i++) {
-		//if (snps > 0 && every > 0 && (0 == (i % every))){
-		//	 fprintf(stderr, "\r%.2lf%% complete", i * 100.0 / snps);
-		//}
-        //fprintf(stdout," snp %d edges %d || ",i,snpfrag[i].edges); for (j=0;j<snpfrag[i].edges;j++) fprintf(stdout,"%d ",snpfrag[i].elist[j]); fprintf(stdout,"\n"); getchar();
+
         if (snpfrag[i].edges > maxdeg) maxdeg = snpfrag[i].edges;
         avgdeg += snpfrag[i].frags;
         // edit here june 7 2012
@@ -209,15 +188,6 @@ void add_edges(struct fragment* Flist, int fragments, struct SNPfrags* snpfrag, 
 			label_node(snpfrag, snpfrag[i].elist[j].snp, i, label_node_hash);
 		}
     }
-	//if (snps > 0){
-	//	fprintf(stderr, "\r%.2lf%% complete\n", i * 100.0 / snps);
-	//}
-    /*
-    fprintf_time(stderr,"FRAGMENTS=%d",fragments);
-    for (i = 0; i < fragments; i++){
-        fprintf_time(stderr,"i=%d",i);
-        Flist[i].component = snpfrag[Flist[i].list[0].offset].component; // each fragment has a component fixed
-    }*/
 
     *components = 0;
     int nodes_in_graph = 0;
@@ -294,9 +264,6 @@ void update_snpfrags(struct fragment* Flist, int fragments, struct SNPfrags* snp
     // find the first fragment whose endpoint lies at snp 'i' or beyond
     for (i = 0; i < snps; i++) {
         snpfrag[i].frags = 0;
-        snpfrag[i].post_notsw = 0;
-        snpfrag[i].post_hap = 0;
-        snpfrag[i].pruned_discrete_heuristic = 0;
     }
     for (i = 0; i < fragments; i++) {
         j = Flist[i].list[0].offset;

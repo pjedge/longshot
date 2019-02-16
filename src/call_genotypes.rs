@@ -406,12 +406,9 @@ pub fn call_genotypes_with_haplotypes(
         // each inner vector represents a VCF file line
         // it contains the VCF line formatted as vec of u8
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
-        let mut vcf_buffer: Vec<Vec<u8>> = Vec::with_capacity(varlist.lst.len());
         let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
 
-        for i in 0..varlist.lst.len() {
-            let var = &varlist.lst[i];
-
+        for (i, var) in varlist.lst.iter().enumerate() {
             // if the variant meets certain criteria (heterozygous, biallelic, not an indel)
             // set its bit to true in var_phased (so that it will be used in HapCUT2 assembly)
             // and take the haplotype information from the current haplotypes
@@ -419,8 +416,7 @@ pub fn call_genotypes_with_haplotypes(
             if var.alleles.len() == 2
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
-                && var.alleles[1].len() == 1
-            {
+                && var.alleles[1].len() == 1 {
                 var_phased[i] = true;
 
                 if var.genotype == Genotype(0, 1) {
@@ -428,31 +424,7 @@ pub fn call_genotypes_with_haplotypes(
                 } else if var.genotype == Genotype(1, 0) {
                     hap1[i] = '1' as u8;
                 }
-            } else {
-                hap1[i] = '-' as u8;
             }
-
-            // make formatted VCF file line
-            let genotype_str =
-                vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join("/");
-            let line: String = format!(
-                "{}\t{}\t.\t{}\t{}\t.\t.\t.\tGT:GQ\t{}:{}",
-                varlist.target_names[var.tid as usize],
-                var.pos0 + 1,
-                var.alleles[0],
-                var.alleles[1],
-                genotype_str,
-                var.gq
-            );
-
-            // push the line to the list of u8 buffers
-            let mut vcf_line: Vec<u8> = vec![];
-            for u in line.into_bytes() {
-                vcf_line.push(u as u8);
-            }
-            vcf_line.push('\n' as u8);
-            vcf_line.push('\0' as u8);
-            vcf_buffer.push(vcf_line);
         }
 
         // similarly to the VCF buffer, generate a fragment buffer representing the fragment file
@@ -468,9 +440,8 @@ pub fn call_genotypes_with_haplotypes(
         // make an unsafe call to the HapCUT2 code which is linked statically via FFI
         call_hapcut2(
             &frag_buffer,
-            &vcf_buffer,
             frag_buffer.len(),
-            vcf_buffer.len(),
+            varlist.lst.len(),
             &mut hap1,
             &mut phase_sets,
         );
