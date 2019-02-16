@@ -245,7 +245,6 @@ pub fn generate_flist_buffer(
 extern "C" {
     fn hapcut2(
         fragmentbuffer: *const *const u8,
-        variantbuffer: *const *const u8,
         fragments: usize,
         snps: usize,
         hap1: *mut u8,
@@ -253,9 +252,9 @@ extern "C" {
     );
 }
 
+
 pub fn call_hapcut2(
     frag_buffer: &Vec<Vec<u8>>,
-    vcf_buffer: &Vec<Vec<u8>>,
     fragments: usize,
     snps: usize,
     hap1: &mut Vec<u8>,
@@ -263,19 +262,13 @@ pub fn call_hapcut2(
 ) {
     unsafe {
         let mut frag_ptrs: Vec<*const u8> = Vec::with_capacity(frag_buffer.len());
-        let mut vcf_ptrs: Vec<*const u8> = Vec::with_capacity(vcf_buffer.len());
 
         for line in frag_buffer {
             frag_ptrs.push(line.as_ptr());
         }
 
-        for line in vcf_buffer {
-            vcf_ptrs.push(line.as_ptr());
-        }
-
         hapcut2(
             frag_ptrs.as_ptr(),
-            vcf_ptrs.as_ptr(),
             fragments,
             snps,
             hap1.as_mut_ptr(),

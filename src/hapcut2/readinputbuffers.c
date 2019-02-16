@@ -35,13 +35,13 @@ int read_fragment_buffer(char** fragmentbuffer, struct fragment* Flist, int frag
         t = 0;
         type = 0;
         while (k < j) {
-            while (buffer[k] != ' ' && buffer[k] != '\t' && k < j && buffer[k] != '\0') {
+            while (k < j && buffer[k] != ' ' && buffer[k] != '\t' && buffer[k] != '\0') {
                 blockseq[t] = buffer[k];
                 t++;
                 k++;
             }
             k++;
-            while ((buffer[k] == ' ' || buffer[k] == '\t') && k < j) k++;
+            while (k < j && (buffer[k] == ' ' || buffer[k] == '\t')) k++;
             blockseq[t] = '\0';
 
             if (type == 0) // read the number of blocks in fragment
@@ -55,23 +55,8 @@ int read_fragment_buffer(char** fragmentbuffer, struct fragment* Flist, int frag
                 Flist[i].list = (struct block*) malloc(sizeof (struct block)*(blocks));
                 biter = 0;
 
-
-                //expected_num_fields = (3 + 2*blocks);
-
-                //if (num_fields < expected_num_fields){
-                //    fprintf_time(stderr, "ERROR: Invalid fragment file, too few fields at line %d.\n",i);
-                //    exit(1);
-                //}else if (num_fields > expected_num_fields){
-                //    fprintf_time(stderr, "ERROR: Invalid fragment file, too many fields at line %d.\n",i);
-                //    exit(1);
-                //}
             } else if (type == 1) // read the fragment id, changed to allow dynamic length feb202011
             {
-                Flist[i].id = (char*) malloc(t + 1);
-                for (l = 0; l < t; l++) Flist[i].id[l] = blockseq[l];
-                Flist[i].id[l] = '\0';
-                //Flist[i].id = (char*)malloc(1); Flist[i].id[0] = '0'; this doesnt reduce the memory requirement
-
                 type = 2; // old format, skip right to reading alleles
             } else if (type == 2 && biter < blocks) {
                 offset = 0;
@@ -111,132 +96,4 @@ int read_fragment_buffer(char** fragmentbuffer, struct fragment* Flist, int frag
     qsort(Flist, fragments, sizeof (struct fragment), fragment_compare);
 
     return fragments;
-}
-
-// 1000 genomes file have large deletions, need to allow longer VCF line
-// this function is distinct from the function used to read VCF file for parsing haplotype informative reads, why ???
-// read variants from VCF file, this code doesn't check the vcf file and assumes that column 10 contains the genotypes for the individual we are interested in phasing
-
-int read_vcf_buffer(char** vcfbuffer, struct SNPfrags* snpfrag, int snps) {
-    char* buffer = vcfbuffer[0];
-    char temp[1000];
-    //char GQ[5];
-    //char* gen;
-    int var=0, i = 0, j = 0, s = 0, e = 0;
-    //int GQ_ix = 0,k=0, len=0,format_ix;
-    for (var=0; var < snps; var++) {
-
-        buffer = vcfbuffer[var];
-
-        if (buffer[0] == '#') continue;
-        i = 0;
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        snpfrag[var].chromosome = (char*) malloc(e - s + 1);
-        for (j = s; j < e; j++) snpfrag[var].chromosome[j - s] = buffer[j];
-        snpfrag[var].chromosome[j - s] = '\0';
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        for (j = s; j < e; j++) temp[j - s] = buffer[j];
-        temp[j - s] = '\0';
-        snpfrag[var].position = atoi(temp);
-
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        snpfrag[var].id = (char*) malloc(e - s + 1);
-        for (j = s; j < e; j++) snpfrag[var].id[j - s] = buffer[j];
-        snpfrag[var].id[j - s] = '\0';
-        //strcpy(snpfrag[var].id,".");
-        //variant->id = (char*)malloc(e-s+1); for (j=s;j<e;j++) variant->id[j-s] = buffer[j]; variant->id[j-s] = '\0';
-
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        snpfrag[var].allele0 = (char*) malloc(e - s + 1);
-        for (j = s; j < e; j++) snpfrag[var].allele0[j - s] = buffer[j];
-        snpfrag[var].allele0[j - s] = '\0';
-
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        snpfrag[var].allele1 = (char*) malloc(e - s + 1);
-        for (j = s; j < e; j++) snpfrag[var].allele1[j - s] = buffer[j];
-        snpfrag[var].allele1[j - s] = '\0';
-
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        //variant->quality = (char*)malloc(e-s+1); for (j=s;j<e;j++) variant->quality[j-s] = buffer[j]; variant->quality[j-s] = '\0';
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        //variant->filter = (char*)malloc(e-s+1); for (j=s;j<e;j++) variant->filter[j-s] = buffer[j]; variant->filter[j-s] = '\0';
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-        //variant->info = (char*)malloc(e-s+1); for (j=s;j<e;j++) variant->info[j-s] = buffer[j]; variant->info[j-s] = '\0';
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t') i++;
-        e = i;
-
-        // assert that GT field is the first field
-        assert(buffer[s] == 'G' && buffer[s+1] == 'T' && (buffer[s+2] == ':' || buffer[s+2] == '\t'));
-
-        // check format string for presence of GQ
-        //format_ix = 0;
-        //GQ_ix = -1; // the index of format field for GQ
-        //for (j=s;j<e;j++){
-        //    if (buffer[j] == ':')
-        //        format_ix++;
-        //    else if((j+1 < e) && buffer[j] == 'G' && buffer[j+1] == 'Q'){
-        //        GQ_ix = format_ix;
-        //    }
-        //}
-
-        while (buffer[i] == ' ' || buffer[i] == '\t') i++;
-        s = i;
-        while (buffer[i] != ' ' && buffer[i] != '\t' && buffer[i] != '\n') i++;
-        e = i;
-
-        snpfrag[var].genotypes = (char*) malloc(e - s + 1);
-        for (j = s; j < e; j++) snpfrag[var].genotypes[j - s] = buffer[j];
-        snpfrag[var].genotypes[j - s] = '\0';
-        //len = j-s;
-        //gen = snpfrag[var].genotypes; //  for convenience
-        //if (GQ_ix != -1) {
-            // get to the index where GQ is located.
-        //    k = 0; // where we are in gen
-        //    for (j=0; j<GQ_ix; j++){
-        //        while(gen[k] != ':')
-        //            k++;
-        //        k++; // step past the ':'
-        //    }
-            // reached GQ field. read it in.
-
-        //    j=0;
-        //    while (k<len && gen[k] != ':') {
-        //        GQ[j] = gen[k];
-        //        k++;
-        //        j++;
-        //    }
-        //    GQ[j] = '\0';
-
-        //    snpfrag[var].homozygous_prior = atof(GQ) / -10; // log prior probability of homozygousity
-        //} else{
-        snpfrag[var].homozygous_prior = HOMOZYGOUS_PRIOR;
-        //}
-    }
-    return 0;
 }
