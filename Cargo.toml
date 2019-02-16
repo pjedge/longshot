@@ -14,5 +14,5 @@ error-chain = "0.12.0"
 [build-dependencies]
 cc = "1.0"
 
-[profile.release]
-debug = true       # (u32 or bool) Include debug information (debug symbols).
+#[profile.release]
+#debug = true       # (u32 or bool) Include debug information (debug symbols).
