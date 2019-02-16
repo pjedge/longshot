@@ -79,12 +79,7 @@ int evaluate_cut_component(struct fragment* Flist, struct SNPfrags* snpfrag, str
     int i = 0, j = 0, t = 0, count1, count2;
 
     float cutvalue;
-    /*
-       i=0;for (j=clist[k].offset;j<clist[k].offset+clist[k].length;j++)
-       {
-       if (snpfrag[clist[k].offset].component == snpfrag[j].component) { slist[i] = j; i++; }
-       }*/
-    // slist is copied from clist[k].slist
+
     for (t = 0; t < clist[k].phased; t++) slist[t] = clist[k].slist[t]; // new way to determine slist
 
     // not required but we do it to avoid errors
