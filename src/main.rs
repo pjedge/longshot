@@ -110,7 +110,7 @@ fn run() -> Result<()> {
     eprintln!("");
 
     let input_args = App::new("Longshot")
-        .version("0.3.0")
+        .version("0.3.1")
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
         .arg(Arg::with_name("Input BAM")
