@@ -302,7 +302,7 @@ pub fn find_connected_components(
                 && var.alleles[1].len() == 1 {
 
                     component_flist[uf.find(call.var_ix)].push(call.frag_ix);
-
+                    break;
             }
         }
     }
@@ -473,10 +473,15 @@ pub fn call_genotypes_with_haplotypes(
         // each inner vector represents a VCF file line
         // it contains the VCF line formatted as vec of u8
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
-        //let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
+        let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
 
         let (component_varixs, component_flist) = find_connected_components(flist, varlist, max_p_miscall)
             .chain_err(|| "Error finding connected components for haplotyping")?;
+
+        for i in 0..hap1.len() {
+            haps[0][i] = varlist.lst[i].genotype.0;
+            haps[1][i] = varlist.lst[i].genotype.1;
+        }
 
         for (c_vars, c_flist) in component_varixs.iter().zip(component_flist.iter()) {
 
@@ -492,7 +497,7 @@ pub fn call_genotypes_with_haplotypes(
             // make an unsafe call to the HapCUT2 code which is linked statically via FFI
 
             let mini_hap_size = max_var_ix - min_var_ix + 1;
-            let mut mini_hap1: Vec<u8> = vec!['-' as u8; mini_hap_size];
+            let mut mini_hap1 = vec!['-' as u8; mini_hap_size]; //&mut hap1[min_var_ix..max_var_ix]; //
 
             for i in c_vars.iter() {
                 let m_i = *i - min_var_ix;
@@ -508,9 +513,9 @@ pub fn call_genotypes_with_haplotypes(
                     var_phased[*i] = true;
 
                     if var.genotype == Genotype(0, 1) {
-                        mini_hap1[m_i] = '0' as u8;
+                        mini_hap1[m_i] = '0' as u8; // hap1[*i] = '0' as u8;
                     } else if var.genotype == Genotype(1, 0) {
-                        mini_hap1[m_i] = '1' as u8;
+                        mini_hap1[m_i] = '1' as u8; // hap1[*i] = '1' as u8;
                     }
                 }
             }
@@ -523,12 +528,34 @@ pub fn call_genotypes_with_haplotypes(
             call_hapcut2(
                 &frag_buffer,
                 frag_buffer.len(),
-                mini_hap_size,
-                &mut mini_hap1
+                mini_hap_size, // hap1.len(),
+                &mut mini_hap1      // &mut hap1//
             );
 
-            for m_i in 0..mini_hap_size {
-                let i = m_i + min_var_ix;
+            //println!("mini_hap1: {}", mini_hap1.iter().map(|x| *x as char).collect::<String>());
+            /*
+            for i in 0..hap1.len() {
+
+                match hap1[i] as char {
+                    '0' => {
+                        varlist.lst[i].genotype = Genotype(0, 1);
+                        varlist.lst[i].phase_set = Some(phase_set);
+                    }
+                    '1' => {
+                        varlist.lst[i].genotype = Genotype(1, 0);
+                        varlist.lst[i].phase_set = Some(phase_set);
+                    }
+                    _ => {
+                        var_phased[i] = false;
+                    }
+                }
+
+                haps[0][i] = varlist.lst[i].genotype.0;
+                haps[1][i] = varlist.lst[i].genotype.1;
+            }*/
+
+            for &i in c_vars.iter() {
+                let m_i = i - min_var_ix;
 
                 match mini_hap1[m_i] as char {
                     '0' => {
