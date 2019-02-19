@@ -20,7 +20,6 @@ extern crate rust_htslib;
 #[macro_use]
 extern crate error_chain;
 extern crate fishers_exact;
-extern crate half;
 extern crate hashbrown;
 
 // import modules
@@ -48,7 +47,6 @@ use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::ExtractFragmentParameters;
 use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
-use half::f16;
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::AlignmentType;
@@ -685,16 +683,16 @@ fn run() -> Result<()> {
             .chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
 
         //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
-        var.strand_bias_pvalue = f16::from_f64(if fishers_exact_pvalues.two_tail_pvalue <= 500.0 {
+        var.strand_bias_pvalue = if fishers_exact_pvalues.two_tail_pvalue <= 500.0 {
             *PHREDProb::from(Prob(fishers_exact_pvalues.two_tail_pvalue))
         } else {
             500.0
-        });
+        };
 
         if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
             var.filter.add_filter(VarFilter::StrandBias);
             var.genotype = Genotype(0, 0);
-            var.gq = f16::from_f64(0.0);
+            var.gq = 0.0;
         }
     }
 

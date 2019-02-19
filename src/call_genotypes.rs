@@ -11,7 +11,6 @@ use rand::{Rng, SeedableRng, StdRng};
 
 use errors::*;
 use genotype_probs::*;
-use half::f16;
 use haplotype_assembly::{call_hapcut2, generate_flist_buffer};
 use print_output::*;
 use util::{DensityParameters, GenomicInterval, MAX_VCF_QUAL};
@@ -124,7 +123,7 @@ pub fn calculate_genotype_posteriors_no_haplotypes(
     for &call in pileup {
         let allele = call.allele;
         let p_miscall = call.qual;
-        let p_call = LogProb::ln_one_minus_exp(&call.qual);
+        let p_call = call.one_minus_qual;
 
         if p_miscall >= ln_max_p_miscall {
             continue; // allele call fails allele quality cutoff, do not use
@@ -212,14 +211,14 @@ pub fn call_genotypes_no_haplotypes(
         let allele_total: u16 = allele_counts.iter().sum::<u16>() + ambig_count;
 
         // UPDATE THE VARIANT FIELDS
-        if var.dp < allele_total as u16 {
-            var.dp = allele_total as u16; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
+        if var.dp < allele_total as usize {
+            var.dp = allele_total as usize; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
         }
 
-        var.qual = f16::from_f64(*PHREDProb::from(posts.get(Genotype(0, 0))));
+        var.qual = *PHREDProb::from(posts.get(Genotype(0, 0)));
 
-        if var.qual > f16::from_f64(MAX_VCF_QUAL) {
-            var.qual = f16::from_f64(MAX_VCF_QUAL); // don't let the variant quality exceed upper bound
+        if var.qual > MAX_VCF_QUAL {
+            var.qual = MAX_VCF_QUAL; // don't let the variant quality exceed upper bound
         }
 
         var.genotype = max_g;
@@ -228,14 +227,14 @@ pub fn call_genotypes_no_haplotypes(
         var.allele_counts_reverse = counts_reverse;
         var.ambiguous_count = ambig_count;
         var.unphased_genotype = max_g;
-        var.gq = f16::from_f64(genotype_qual);
-        var.unphased_gq = f16::from_f64(genotype_qual);
-        if var.gq > f16::from_f64(MAX_VCF_QUAL) {
-            var.gq = f16::from_f64(MAX_VCF_QUAL); // don't let the genotype quality exceed upper bound
+        var.gq = genotype_qual;
+        var.unphased_gq = genotype_qual;
+        if var.gq > MAX_VCF_QUAL {
+            var.gq = MAX_VCF_QUAL; // don't let the genotype quality exceed upper bound
         }
 
-        if var.unphased_gq > f16::from_f64(MAX_VCF_QUAL) {
-            var.unphased_gq = f16::from_f64(MAX_VCF_QUAL); // don't let the unphased quality exceed upper bound
+        if var.unphased_gq > MAX_VCF_QUAL {
+            var.unphased_gq = MAX_VCF_QUAL; // don't let the unphased quality exceed upper bound
         }
 
         var.phase_set = None; // set phase set to none since phase information was not used
@@ -382,7 +381,7 @@ pub fn call_genotypes_with_haplotypes(
                     if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
                         if call.allele == haps[*hap_ix][call.var_ix as usize] {
-                            pr[*hap_ix] = pr[*hap_ix] + &LogProb::ln_one_minus_exp(&call.qual);
+                            pr[*hap_ix] = pr[*hap_ix] + call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
                             pr[*hap_ix] = pr[*hap_ix] + call.qual;
@@ -526,7 +525,7 @@ pub fn call_genotypes_with_haplotypes(
                     if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
                         if call.allele == haps[*hap_ix][call.var_ix as usize] {
-                            pr[*hap_ix] = pr[*hap_ix] + &LogProb::ln_one_minus_exp(&call.qual);
+                            pr[*hap_ix] = pr[*hap_ix] + call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
                             pr[*hap_ix] = pr[*hap_ix] + call.qual;
@@ -550,7 +549,7 @@ pub fn call_genotypes_with_haplotypes(
                     if var_phased[call.var_ix as usize] && call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
                         if call.allele == haps[*hap_ix][call.var_ix as usize] {
-                            p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + &LogProb::ln_one_minus_exp(&call.qual);
+                            p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
                             p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + call.qual;
@@ -612,11 +611,11 @@ pub fn call_genotypes_with_haplotypes(
                                 if haps[0][v as usize] == call.allele && g.0 != call.allele {
                                     // fragment call matched old h0 but doesn't match new h0
                                     // divide out the p(call), and multiply in p(miscall)
-                                    p_read_h0 = p_read_h0 - LogProb::ln_one_minus_exp(&call.qual) + call.qual;
+                                    p_read_h0 = p_read_h0 - call.one_minus_qual + call.qual;
                                 } else if haps[0][v as usize] != call.allele && g.0 == call.allele {
                                     // fragment call didn't match old h0 but matches new h0
                                     // divide out the p(miscall), and multiply in p(call)
-                                    p_read_h0 = p_read_h0 - call.qual + LogProb::ln_one_minus_exp(&call.qual);
+                                    p_read_h0 = p_read_h0 - call.qual + call.one_minus_qual;
                                 }
                             }
 
@@ -626,22 +625,22 @@ pub fn call_genotypes_with_haplotypes(
                                 if haps[1][v as usize] == call.allele && g.1 != call.allele {
                                     // fragment call matched old h1 but doesn't match new h1
                                     // divide out the p(call), and multiply in p(miscall)
-                                    p_read_h1 = p_read_h1 - LogProb::ln_one_minus_exp(&call.qual) + call.qual;
+                                    p_read_h1 = p_read_h1 - call.one_minus_qual + call.qual;
                                 } else if haps[1][v as usize] != call.allele && g.1 == call.allele {
                                     // fragment call didn't match old h1 but matches new h1
                                     // divide out the p(miscall), and multiply in p(call)
-                                    p_read_h1 = p_read_h1 - call.qual + LogProb::ln_one_minus_exp(&call.qual);
+                                    p_read_h1 = p_read_h1 - call.qual + call.one_minus_qual;
                                 }
                             }
                         } else {
                             if g.0 == call.allele {
-                                p_read_h0 = p_read_h0 + LogProb::ln_one_minus_exp(&call.qual);
+                                p_read_h0 = p_read_h0 + call.one_minus_qual;
                             } else {
                                 p_read_h0 = p_read_h0 + call.qual;
                             }
 
                             if g.1 == call.allele {
-                                p_read_h1 = p_read_h1 + LogProb::ln_one_minus_exp(&call.qual);
+                                p_read_h1 = p_read_h1 + call.one_minus_qual;
                             } else {
                                 p_read_h1 = p_read_h1 + call.qual;
                             }
@@ -726,7 +725,7 @@ pub fn call_genotypes_with_haplotypes(
                     if call.qual < ln_max_p_miscall {
                         // read allele matches haplotype allele
                         if call.allele == haps[*hap_ix][call.var_ix as usize] {
-                            pr[*hap_ix] = pr[*hap_ix] + &LogProb::ln_one_minus_exp(&call.qual);
+                            pr[*hap_ix] = pr[*hap_ix] + call.one_minus_qual;
                         } else {
                             // read allele does not match haplotype allele
                             pr[*hap_ix] = pr[*hap_ix] + call.qual;
@@ -764,26 +763,26 @@ pub fn call_genotypes_with_haplotypes(
             //    var.dp = allele_total;
             //}
 
-            var.qual = f16::from_f64(*PHREDProb::from(var.genotype_post.get(Genotype(0, 0))));
+            var.qual = *PHREDProb::from(var.genotype_post.get(Genotype(0, 0)));
             //var.allele_counts = allele_counts;
             //var.ambiguous_count = ambig_count;
             var.genotype = max_g;
-            var.gq = f16::from_f64(genotype_qual);
+            var.gq = genotype_qual;
             var.filter = VarFilter::Pass;
 
-            if var.qual > f16::from_f64(MAX_VCF_QUAL) {
-                var.qual = f16::from_f64(MAX_VCF_QUAL);
+            if var.qual > MAX_VCF_QUAL {
+                var.qual = MAX_VCF_QUAL;
             }
 
-            if var.gq > f16::from_f64(MAX_VCF_QUAL) {
-                var.gq = f16::from_f64(MAX_VCF_QUAL);
+            if var.gq > MAX_VCF_QUAL {
+                var.gq = MAX_VCF_QUAL;
             }
         }
 
         // for each fragment in the flist
         // save the values of P(read | H1) and P(read | H2)
         for i in 0..flist.len() {
-            flist[i].p_read_hap = [f16::from_f64(*p_read_hap[0][i]), f16::from_f64(*p_read_hap[1][i])];
+            flist[i].p_read_hap = [p_read_hap[0][i], p_read_hap[1][i]];
         }
 
         // print out current variants to VCF file in VCF debug directory (if turned on)
@@ -831,9 +830,10 @@ mod tests {
                 var_ix: v_ix,                              // index into variant list
                 allele: a,                                 // allele call
                 qual: LogProb::from(Prob(0.01)), // LogProb probability the call is an error
+                one_minus_qual: LogProb::from(Prob(0.99))
             }
         };
-        let p50 = f16::from_f64(*LogProb::from(Prob(0.5)));
+        let p50 = LogProb::from(Prob(0.5));
         // in this example assume the haplotype pair is (0000,1111)
 
         // first fragment

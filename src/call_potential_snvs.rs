@@ -6,7 +6,6 @@ use std::char;
 
 use bio::io::fasta;
 use bio::stats::{LogProb, Prob};
-use half::f16;
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
@@ -353,31 +352,31 @@ pub fn call_potential_snvs(
                     tid: tid as u32,
                     pos0: pos,
                     alleles: vec![ref_allele.to_string(), var_allele.to_string()],
-                    dp: depth as u16,
+                    dp: depth,
                     allele_counts: vec![0, 0],
                     allele_counts_forward: vec![0, 0],
                     allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
-                    qual: f16::from_f64(0.0),
+                    qual: 0.0,
                     filter: VarFilter::Pass,
                     genotype: Genotype(0, 0),
                     //unphased: false,
-                    gq: f16::from_f64(0.0),
+                    gq: 0.0,
                     unphased_genotype: Genotype(0, 0),
-                    unphased_gq: f16::from_f64(0.0),
+                    unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    strand_bias_pvalue: f16::from_f64(0.0),
+                    strand_bias_pvalue: 0.0,
                     mec: 0,
-                    mec_frac_variant: f16::from_f64(0.0), // mec fraction for this variant
-                    mec_frac_block: f16::from_f64(0.0),   // mec fraction for this haplotype block
-                    mean_allele_qual: f16::from_f64(0.0),
-                    dp_any_mq: passing_reads as u16,
-                    mq10_frac: f16::from_f64(mq10_frac),
-                    mq20_frac: f16::from_f64(mq20_frac),
-                    mq30_frac: f16::from_f64(mq30_frac),
-                    mq40_frac: f16::from_f64(mq40_frac),
-                    mq50_frac: f16::from_f64(mq50_frac),
+                    mec_frac_variant: 0.0, // mec fraction for this variant
+                    mec_frac_block: 0.0,   // mec fraction for this haplotype block
+                    mean_allele_qual: 0.0,
+                    dp_any_mq: passing_reads,
+                    mq10_frac: mq10_frac,
+                    mq20_frac: mq20_frac,
+                    mq30_frac: mq30_frac,
+                    mq40_frac: mq40_frac,
+                    mq50_frac: mq50_frac,
                 };
 
                 // we don't want potential SNVs that are inside a deletion, for instance.

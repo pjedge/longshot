@@ -26,7 +26,6 @@ use bio::io::fasta;
 use bio::pattern_matching::bndm;
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
-use half::f16;
 use realignment::*;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
@@ -794,6 +793,7 @@ fn extract_var_cluster(
             var_ix: var_cluster[v as usize].ix as u32,
             allele: best_allele,
             qual: qual,
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
         });
     }
 
@@ -820,17 +820,17 @@ pub fn extract_fragment(
         eprintln!("Extracting fragment for read {}...", id);
     }
 
-    let fid = match extract_params.store_read_id {
-        true => Some(id),
-        false => None
-    };
+    //let fid = match extract_params.store_read_id {
+    //    true => ,
+    //    false => None
+    //};
 
     let mut fragment = Fragment {
-        id: fid,
+        id: Some(id),
         calls: vec![],
         // ln(0.5) stored as f16 for compactness
-        p_read_hap: [f16::from_f64(*LogProb::from(Prob(0.5))),
-                     f16::from_f64(*LogProb::from(Prob(0.5)))],
+        p_read_hap: [LogProb::from(Prob(0.5)),
+                     LogProb::from(Prob(0.5))],
         reverse_strand: bam_record.is_reverse()
     };
 
@@ -1084,7 +1084,7 @@ pub fn extract_fragments(
 
     for (i, ref mut var) in varlist.lst.iter_mut().enumerate() {
         let q = var_qual_sum[i] - LogProb::from(Prob(var_num_alleles[i] as f64)); // q is LogProb of mean allele qual
-        var.mean_allele_qual = f16::from_f64(*PHREDProb::from(q));
+        var.mean_allele_qual = *PHREDProb::from(q);
     }
 
     Ok(flist)
@@ -1158,23 +1158,23 @@ mod tests {
             allele_counts_forward: vec![10, 10],
             allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
-            qual: f16::from_f64(0.0),
+            qual: 0.0,
             filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
-            gq: f16::from_f64(0.0),
-            mean_allele_qual: f16::from_f64(0.0),
+            gq: 0.0,
+            mean_allele_qual: 0.0,
             mec: 0,
-            strand_bias_pvalue: f16::from_f64(0.0),
-            mec_frac_block: f16::from_f64(0.0),
-            mec_frac_variant: f16::from_f64(0.0),
+            strand_bias_pvalue: 0.0,
+            mec_frac_block: 0.0,
+            mec_frac_variant: 0.0,
             dp_any_mq: 40,
-            mq10_frac: f16::from_f64(1.0),
-            mq20_frac: f16::from_f64(1.0),
-            mq30_frac: f16::from_f64(1.0),
-            mq40_frac: f16::from_f64(1.0),
-            mq50_frac: f16::from_f64(1.0),
+            mq10_frac: 1.0,
+            mq20_frac: 1.0,
+            mq30_frac: 1.0,
+            mq40_frac: 1.0,
+            mq50_frac: 1.0,
             unphased_genotype: Genotype(0, 1),
-            unphased_gq: f16::from_f64(0.0),
+            unphased_gq: 0.0,
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
         }

@@ -2,7 +2,6 @@
 //! MEC criteria, haplotype read separation, etc.
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
-use half::f16;
 use hashbrown::{HashMap, HashSet};
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
@@ -287,8 +286,8 @@ pub fn calculate_mec(
 
     for mut var in &mut varlist.lst {
         var.mec = 0;
-        var.mec_frac_variant = f16::from_f64(0.0);
-        var.mec_frac_block = f16::from_f64(0.0);
+        var.mec_frac_variant = 0.0;
+        var.mec_frac_block = 0.0;
     }
 
     for f in 0..flist.len() {
@@ -328,14 +327,14 @@ pub fn calculate_mec(
         }
     }
 
-    let mut block_mec: HashMap<usize, u16> = HashMap::new();
-    let mut block_total: HashMap<usize, u16> = HashMap::new();
+    let mut block_mec: HashMap<usize, usize> = HashMap::new();
+    let mut block_total: HashMap<usize, usize> = HashMap::new();
 
     for mut var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
                 *block_mec.entry(ps).or_insert(0) += var.mec;
-                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<u16>();
+                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<u16>() as usize;
             }
             None => {}
         }
@@ -344,18 +343,16 @@ pub fn calculate_mec(
     for mut var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
-                var.mec_frac_block = f16::from_f64(
-                    *block_mec
+                var.mec_frac_block = *block_mec
                         .get(&ps)
                         .chain_err(|| "Error retrieving MEC for phase set.")?
                         as f64
                         / *block_total
                             .get(&ps)
                             .chain_err(|| "Error retrieving MEC for phase set.")?
-                            as f64,
-                );
+                            as f64;
                 var.mec_frac_variant =
-                    f16::from_f64(var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64);
+                    var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64;
             }
             None => {}
         }
