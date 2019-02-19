@@ -2,17 +2,17 @@
 //! MEC criteria, haplotype read separation, etc.
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
+use hashbrown::{HashMap, HashSet};
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use std::char::from_digit;
-use std::collections::{HashMap, HashSet};
 use util::*;
 use variants_and_fragments::*;
 
 pub fn separate_fragments_by_haplotype(
     flist: &Vec<Fragment>,
     threshold: LogProb,
-) -> (HashSet<String>, HashSet<String>) {
+) -> Result<(HashSet<String>, HashSet<String>)> {
     let mut h1 = HashSet::new();
     let mut h2 = HashSet::new();
 
@@ -21,18 +21,28 @@ pub fn separate_fragments_by_haplotype(
     let mut unassigned_count = 0;
 
     for ref f in flist {
-        let total: LogProb = LogProb::ln_add_exp(f.p_read_hap[0], f.p_read_hap[1]);
-        let p_read_hap0: LogProb = f.p_read_hap[0] - total;
-        let p_read_hap1: LogProb = f.p_read_hap[1] - total;
 
-        if p_read_hap0 > threshold {
-            h1_count += 1;
-            h1.insert(f.id.clone());
-        } else if p_read_hap1 > threshold {
-            h2_count += 1;
-            h2.insert(f.id.clone());
-        } else {
-            unassigned_count += 1;
+        // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
+        let p_read_hap0 = LogProb(f64::from(f.p_read_hap[0]));
+        let p_read_hap1 = LogProb(f64::from(f.p_read_hap[1]));
+
+        let total: LogProb = LogProb::ln_add_exp(p_read_hap0, p_read_hap1);
+        let p_read_hap0: LogProb = p_read_hap0 - total;
+        let p_read_hap1: LogProb = p_read_hap1 - total;
+
+        match &f.id {
+            &Some(ref fid) => {
+                if p_read_hap0 > threshold {
+                    h1_count += 1;
+                    h1.insert(fid.clone());
+                } else if p_read_hap1 > threshold {
+                    h2_count += 1;
+                    h2.insert(fid.clone());
+                } else {
+                    unassigned_count += 1;
+                }
+            }
+            &None => {bail!("Fragment without read ID found while separating reads by haplotype.");}
         }
     }
 
@@ -61,7 +71,7 @@ pub fn separate_fragments_by_haplotype(
         unassigned_percent
     );
 
-    (h1, h2)
+    Ok((h1, h2))
 }
 
 pub fn separate_bam_reads_by_haplotype(
@@ -82,7 +92,7 @@ pub fn separate_bam_reads_by_haplotype(
     let h2_bam_file = format!("{}.hap2.bam", &hap_bam_prefix);
     let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
 
-    let header = bam::Header::from_template(&bam_ix.header);
+    let header = bam::Header::from_template(&bam_ix.header());
     let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header)
         .chain_err(|| ErrorKind::BamWriterOpenError(h1_bam_file))?;
     let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header)
@@ -136,6 +146,7 @@ pub fn generate_flist_buffer(
     single_reads: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
+    let mut frag_num = 0;
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
@@ -143,12 +154,12 @@ pub fn generate_flist_buffer(
         let mut n_calls: usize = 0;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
+            if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
                 n_calls += 1;
-                if prev_call > phase_variant.len() || c.var_ix - prev_call != 1 {
+                if prev_call > phase_variant.len() || c.var_ix as usize - prev_call != 1 {
                     blocks += 1;
                 }
-                prev_call = c.var_ix
+                prev_call = c.var_ix as usize;
             }
         }
         if !single_reads && n_calls == 1 {
@@ -164,15 +175,20 @@ pub fn generate_flist_buffer(
         }
         line.push(' ' as u8);
 
-        for u in frag.id.clone().into_bytes() {
+        let fid = match &frag.id {
+            Some(ref fid) => {fid.clone()}
+            None => {frag_num.to_string()}
+        };
+
+        for u in fid.clone().into_bytes() {
             line.push(u as u8);
         }
         //line.push(' ' as u8);
 
-        let mut prev_call = phase_variant.len() + 1;
+        let mut prev_call: u32 = phase_variant.len() as u32 + 1;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix] && c.qual < LogProb::from(Prob(max_p_miscall)) {
+            if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
                     ensure!(
                         c.allele == 0 as u8 || c.allele == 1 as u8,
@@ -220,6 +236,7 @@ pub fn generate_flist_buffer(
         //println!("{}", charline.iter().collect::<String>());
 
         buffer.push(line);
+        frag_num += 1;
     }
     Ok(buffer)
 }
@@ -274,12 +291,12 @@ pub fn calculate_mec(
     }
 
     for f in 0..flist.len() {
-        let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
+        let mut mismatched_vars: Vec<Vec<u32>> = vec![vec![], vec![]];
 
         for &hap_ix in &hap_ixs {
             for call in &flist[f].calls {
                 if call.qual < ln_max_p_miscall {
-                    let var = &varlist.lst[call.var_ix]; // the variant that the fragment call covers
+                    let var = &varlist.lst[call.var_ix as usize]; // the variant that the fragment call covers
 
                     if var.phase_set == None {
                         continue; // only care about phased variants.
@@ -306,7 +323,7 @@ pub fn calculate_mec(
         };
 
         for &ix in &mismatched_vars[min_error_hap] {
-            varlist.lst[ix].mec += 1;
+            varlist.lst[ix as usize].mec += 1;
         }
     }
 
@@ -317,7 +334,7 @@ pub fn calculate_mec(
         match var.phase_set {
             Some(ps) => {
                 *block_mec.entry(ps).or_insert(0) += var.mec;
-                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<usize>();
+                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<u16>() as usize;
             }
             None => {}
         }
@@ -327,15 +344,15 @@ pub fn calculate_mec(
         match var.phase_set {
             Some(ps) => {
                 var.mec_frac_block = *block_mec
-                    .get(&ps)
-                    .chain_err(|| "Error retrieving MEC for phase set.")?
-                    as f64
-                    / *block_total
                         .get(&ps)
                         .chain_err(|| "Error retrieving MEC for phase set.")?
-                        as f64;
+                        as f64
+                        / *block_total
+                            .get(&ps)
+                            .chain_err(|| "Error retrieving MEC for phase set.")?
+                            as f64;
                 var.mec_frac_variant =
-                    var.mec as f64 / var.allele_counts.iter().sum::<usize>() as f64;
+                    var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64;
             }
             None => {}
         }

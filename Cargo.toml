@@ -5,11 +5,13 @@ authors = ["Peter Edge <edge.peterj@gmail.com>"]
 
 [dependencies]
 bio = "0.25.0"
-rust-htslib = "0.14.0"
+rust-htslib = "0.22.0"
 clap = "2.26.2"
 chrono = "0.4"
 rand = "0.4"
 error-chain = "0.12.0"
+fishers_exact = "1.0.1"
+hashbrown = "0.1.8"
 
 [build-dependencies]
 cc = "1.0"

@@ -34,7 +34,6 @@ pub fn calculate_mean_coverage(
     bam_file: &String,
     interval: &Option<GenomicInterval>,
 ) -> Result<f64> {
-
     // currently, we open up a separate BAM (bam) and indexed BAM (bam_ix) handle
     // we do this because it's illegal to borrow from bam_ix both mutably to do pileup and
     // immutably to access stuff from the header

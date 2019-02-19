@@ -188,7 +188,6 @@ pub fn count_alignment_events(
     read_seq: &Vec<char>,
     max_cigar_indel: u32,
 ) -> Result<(TransitionCounts, EmissionCounts)> {
-
     // initialize TransitionCounts and EmissionCounts with all counts set to 0
     let mut transition_counts = TransitionCounts {
         match_from_match: 0,
@@ -332,7 +331,7 @@ pub fn count_alignment_events(
                     ref_pos += 1;
                 }
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                 );
@@ -416,8 +415,7 @@ pub fn estimate_alignment_parameters(
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() {
-            let record =
-                r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
+            let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
             // check that the read doesn't fail any standard filters
             if record.mapq() < min_mapq

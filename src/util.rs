@@ -58,6 +58,19 @@ pub fn parse_positive_f64(argmatch: &ArgMatches, arg_name: &str) -> Result<f64> 
     Ok(parse_result)
 }
 
+pub fn parse_nonnegative_f64(argmatch: &ArgMatches, arg_name: &str) -> Result<f64> {
+    let parse_result: f64 = argmatch
+        .value_of(arg_name)
+        .chain_err(|| format!("{} not defined.", arg_name))?
+        .parse::<f64>()
+        .chain_err(|| format!("{} must be a nonnegative float!", arg_name))?;
+    ensure!(
+        parse_result >= 0.0,
+        format!("{} must be a positive float!", arg_name)
+    );
+    Ok(parse_result)
+}
+
 pub fn parse_prob_into_logprob(argmatch: &ArgMatches, arg_name: &str) -> Result<LogProb> {
     let parse_result: f64 = argmatch
         .value_of(arg_name)
