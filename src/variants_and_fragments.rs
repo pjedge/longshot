@@ -4,7 +4,6 @@ use bio::stats::LogProb;
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
 use genotype_probs::*;
-use half::f16;
 use hashbrown::HashMap;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
@@ -21,13 +20,14 @@ pub struct FragCall {
     pub var_ix: u32,           // index into variant list
     pub allele: u8,              // allele call
     pub qual: LogProb,           // LogProb probability the call is an error
+    pub one_minus_qual: LogProb,           // LogProb 1-probability the call is an error
 }
 
 #[derive(Clone)]
 pub struct Fragment {
     pub id: Option<String>,
     pub calls: Vec<FragCall>,
-    pub p_read_hap: [f16; 2],
+    pub p_read_hap: [LogProb; 2],
     pub reverse_strand: bool
 }
 
@@ -93,33 +93,33 @@ pub struct Var {
     pub tid: u32,
     pub pos0: usize,
     pub alleles: Vec<String>, // ref allele is alleles[0] and each that follows is a variant allele
-    pub dp: u16,
+    pub dp: usize,
     // depth of coverage
     pub allele_counts: Vec<u16>, // indices match up with those of Var.alleles
     pub allele_counts_forward: Vec<u16>, // indices match up with those of Var.alleles
     pub allele_counts_reverse: Vec<u16>, // indices match up with those of Var.alleles
     pub ambiguous_count: u16,
-    pub qual: f16,
+    pub qual: f64,
     pub filter: VarFilter, // bitwise flag holding filter info: 0 == PASS, 1 == dp, 2 == dn, 3 == dp && dn
     pub genotype: Genotype,
     //pub unphased: bool, // whether the variant has been explicity flagged as unphased
-    pub gq: f16,
+    pub gq: f64,
     pub unphased_genotype: Genotype,
-    pub unphased_gq: f16,
+    pub unphased_gq: f64,
     pub genotype_post: GenotypeProbs, // genotype posteriors[a1][a2] is log posterior of phased a1|a2 haplotype
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
-    pub strand_bias_pvalue: f16, // fisher's exact test strand bias Pvalue
-    pub mec: u16,                // mec for variant
-    pub mec_frac_variant: f16,   // mec fraction for this variant
-    pub mec_frac_block: f16,     // mec fraction for this haplotype block
-    pub mean_allele_qual: f16,
-    pub dp_any_mq: u16,
-    pub mq10_frac: f16,
-    pub mq20_frac: f16,
-    pub mq30_frac: f16,
-    pub mq40_frac: f16,
-    pub mq50_frac: f16,
+    pub strand_bias_pvalue: f64, // fisher's exact test strand bias Pvalue
+    pub mec: usize,                // mec for variant
+    pub mec_frac_variant: f64,   // mec fraction for this variant
+    pub mec_frac_block: f64,     // mec fraction for this haplotype block
+    pub mean_allele_qual: f64,
+    pub dp_any_mq: usize,
+    pub mq10_frac: f64,
+    pub mq20_frac: f64,
+    pub mq30_frac: f64,
+    pub mq40_frac: f64,
+    pub mq50_frac: f64,
 }
 
 impl Var {
@@ -225,26 +225,26 @@ pub fn parse_vcf_potential_variants(
             allele_counts_forward: vec![0; alleles.len()],
             allele_counts_reverse: vec![0; alleles.len()],
             ambiguous_count: 0,
-            qual: f16::from_f64(0.0),
+            qual: 0.0,
             filter: VarFilter::Pass,
             genotype: Genotype(0, 0),
             //unphased: false,
-            gq: f16::from_f64(0.0),
+            gq: 0.0,
             unphased_genotype: Genotype(0, 0),
-            unphased_gq: f16::from_f64(0.0),
+            unphased_gq: 0.0,
             genotype_post: GenotypeProbs::uniform(alleles.len()),
             phase_set: None,
-            strand_bias_pvalue: f16::from_f64(0.0),
+            strand_bias_pvalue: 1.0,
             mec: 0,
-            mec_frac_variant: f16::from_f64(0.0), // mec fraction for this variant
-            mec_frac_block: f16::from_f64(0.0),   // mec fraction for this haplotype block
-            mean_allele_qual: f16::from_f64(0.0),
+            mec_frac_variant: 0.0, // mec fraction for this variant
+            mec_frac_block: 0.0,   // mec fraction for this haplotype block
+            mean_allele_qual: 0.0,
             dp_any_mq: 0,
-            mq10_frac: f16::from_f64(0.0),
-            mq20_frac: f16::from_f64(0.0),
-            mq30_frac: f16::from_f64(0.0),
-            mq40_frac: f16::from_f64(0.0),
-            mq50_frac: f16::from_f64(0.0),
+            mq10_frac: 0.0,
+            mq20_frac: 0.0,
+            mq30_frac: 0.0,
+            mq40_frac: 0.0,
+            mq50_frac: 0.0
         };
         varlist.push(new_var);
     }
@@ -557,7 +557,7 @@ impl VarList {
         new_v.allele_counts = vec![0; new_allele_lst.len()];
         new_v.alleles = new_allele_lst.clone();
         new_v.genotype = Genotype(0, 0);
-        new_v.gq = f16::from_f64(0.0);
+        new_v.gq = 0.0;
         new_v.genotype_post = GenotypeProbs::uniform(new_v.alleles.len());
         new_v.phase_set = None;
 
@@ -627,7 +627,7 @@ pub fn var_filter(
     max_depth: u32,
 ) {
     for i in 0..varlist.lst.len() {
-        if varlist.lst[i].qual < f16::from_f64(density_qual) {
+        if varlist.lst[i].qual < density_qual {
             continue;
         }
 
@@ -636,7 +636,7 @@ pub fn var_filter(
             if varlist.lst[j].pos0 - varlist.lst[i].pos0 > density_dist {
                 break;
             }
-            if varlist.lst[j].qual < f16::from_f64(density_qual) {
+            if varlist.lst[j].qual < density_qual {
                 continue;
             }
             count += 1;
@@ -649,7 +649,7 @@ pub fn var_filter(
     }
 
     for i in 0..varlist.lst.len() {
-        if varlist.lst[i].dp > max_depth as u16 {
+        if varlist.lst[i].dp > max_depth as usize {
             varlist.lst[i].filter.add_filter(VarFilter::Depth);
         }
     }
@@ -723,23 +723,23 @@ mod tests {
             allele_counts_forward: vec![10, 10],
             allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
-            qual: f16::from_f64(0.0),
+            qual: 0.0,
             filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
-            gq: f16::from_f64(0.0),
-            mean_allele_qual: f16::from_f64(0.0),
-            mec: 0 as u16,
-            strand_bias_pvalue: f16::from_f64(0.0),
-            mec_frac_block: f16::from_f64(0.0),
-            mec_frac_variant: f16::from_f64(0.0),
-            dp_any_mq: 40 as u16,
-            mq10_frac: f16::from_f64(1.0),
-            mq20_frac: f16::from_f64(1.0),
-            mq30_frac: f16::from_f64(1.0),
-            mq40_frac: f16::from_f64(1.0),
-            mq50_frac: f16::from_f64(1.0),
+            gq: 0.0,
+            mean_allele_qual: 0.0,
+            mec: 0,
+            strand_bias_pvalue: 0.0,
+            mec_frac_block: 0.0,
+            mec_frac_variant: 0.0,
+            dp_any_mq: 40,
+            mq10_frac: 1.0,
+            mq20_frac: 1.0,
+            mq30_frac: 1.0,
+            mq40_frac: 1.0,
+            mq50_frac: 1.0,
             unphased_genotype: Genotype(0, 1),
-            unphased_gq: f16::from_f64(0.0),
+            unphased_gq: 0.0,
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
         }
@@ -1126,23 +1126,23 @@ mod tests {
             allele_counts_forward: vec![10, 10],
             allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
-            qual: f16::from_f64(0.0),
+            qual: 0.0,
             filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
-            gq: f16::from_f64(0.0),
-            mean_allele_qual: f16::from_f64(0.0),
-            strand_bias_pvalue: f16::from_f64(0.0),
+            gq: 0.0,
+            mean_allele_qual: 0.0,
+            strand_bias_pvalue: 0.0,
             mec: 0,
-            mec_frac_block: f16::from_f64(0.0),
-            mec_frac_variant: f16::from_f64(0.0),
+            mec_frac_block: 0.0,
+            mec_frac_variant: 0.0,
             dp_any_mq: 40,
-            mq10_frac: f16::from_f64(1.0),
-            mq20_frac: f16::from_f64(1.0),
-            mq30_frac: f16::from_f64(1.0),
-            mq40_frac: f16::from_f64(1.0),
-            mq50_frac: f16::from_f64(1.0),
+            mq10_frac: 1.0,
+            mq20_frac: 1.0,
+            mq30_frac: 1.0,
+            mq40_frac: 1.0,
+            mq50_frac: 1.0,
             unphased_genotype: Genotype(0, 1),
-            unphased_gq: f16::from_f64(0.0),
+            unphased_gq: 0.0,
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
         }
