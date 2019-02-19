@@ -826,7 +826,7 @@ mod tests {
     fn test_generate_fragcall_pileup() {
         let fcall = |f_ix, v_ix, a| {
             FragCall {
-                frag_ix: f_ix as u32,                       // index into fragment list
+                frag_ix: f_ix,                       // index into fragment list
                 var_ix: v_ix,                              // index into variant list
                 allele: a,                                 // allele call
                 qual: LogProb::from(Prob(0.01)), // LogProb probability the call is an error

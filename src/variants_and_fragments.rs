@@ -16,8 +16,8 @@ use util::*;
 
 #[derive(Clone, Copy)]
 pub struct FragCall {
-    pub frag_ix: u32,  // index into fragment list
-    pub var_ix: u32,           // index into variant list
+    pub frag_ix: usize,  // index into fragment list
+    pub var_ix: usize,           // index into variant list
     pub allele: u8,              // allele call
     pub qual: LogProb,           // LogProb probability the call is an error
     pub one_minus_qual: LogProb,           // LogProb 1-probability the call is an error

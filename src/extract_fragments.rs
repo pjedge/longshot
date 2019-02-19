@@ -35,6 +35,7 @@ use rust_htslib::bam::Read;
 use util::*;
 use variants_and_fragments::*;
 use std::u32;
+use std::usize;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -789,8 +790,8 @@ fn extract_var_cluster(
         }
 
         calls.push(FragCall {
-            frag_ix: u32::MAX, // this will be assigned a correct value soon after all fragments extracted
-            var_ix: var_cluster[v as usize].ix as u32,
+            frag_ix: usize::MAX, // this will be assigned a correct value soon after all fragments extracted
+            var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
             qual: qual,
             one_minus_qual: LogProb::ln_one_minus_exp(&qual)
@@ -1064,7 +1065,7 @@ pub fn extract_fragments(
     // label every fragment call with its index in the fragment list.
     for i in 0..flist.len() {
         for j in 0..flist[i].calls.len() {
-            flist[i].calls[j].frag_ix = i as u32;
+            flist[i].calls[j].frag_ix = i;
         }
     }
 

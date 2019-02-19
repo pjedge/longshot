@@ -185,7 +185,7 @@ pub fn generate_flist_buffer(
         }
         //line.push(' ' as u8);
 
-        let mut prev_call: u32 = phase_variant.len() as u32 + 1;
+        let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
             if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
@@ -291,7 +291,7 @@ pub fn calculate_mec(
     }
 
     for f in 0..flist.len() {
-        let mut mismatched_vars: Vec<Vec<u32>> = vec![vec![], vec![]];
+        let mut mismatched_vars: Vec<Vec<usize>> = vec![vec![], vec![]];
 
         for &hap_ix in &hap_ixs {
             for call in &flist[f].calls {
