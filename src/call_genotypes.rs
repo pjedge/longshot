@@ -15,6 +15,7 @@ use haplotype_assembly::{call_hapcut2, generate_flist_buffer};
 use print_output::*;
 use util::{DensityParameters, GenomicInterval, MAX_VCF_QUAL};
 use variants_and_fragments::*;
+use disjoint_sets::UnionFind;
 
 /// Takes a vector of fragments and returns a vector of "allele pileups"
 ///
@@ -230,6 +231,74 @@ pub fn call_genotypes_no_haplotypes(
     Ok(())
 }
 
+pub fn find_connected_components(
+    flist: &Vec<Fragment>,
+    varlist: &VarList,
+    max_p_miscall: f64
+) -> Result<(Vec<Vec<usize>>, Vec<Vec<usize>>)> {
+
+    let ln_max_p_miscall: LogProb = LogProb::from(Prob(max_p_miscall));
+    let mut uf = UnionFind::new(varlist.lst.len());
+
+    for fragment in flist.iter() {
+
+        let mut first_var: Option<usize> = None;
+
+        for call in fragment.calls.iter() {
+            if call.qual > ln_max_p_miscall {
+                continue;
+            }
+
+            let var = &varlist.lst[call.var_ix];
+            if var.alleles.len() == 2
+                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+                && var.alleles[0].len() == 1
+                && var.alleles[1].len() == 1 {
+                match first_var {
+                    Some(_) => {}
+                    None => {first_var = Some(var.ix);}
+                }
+
+                match first_var {
+                    Some(v) => {
+                        uf.union(v, call.var_ix);
+                    }
+                    None => {panic!("first_var was not assigned.");}
+                }
+            }
+        }
+    }
+
+    let components: Vec<usize> = uf.to_vec();
+    let mut component_varixs: Vec<Vec<usize>> = vec![vec![]; varlist.lst.len()];
+    let mut component_flist: Vec<Vec<usize>> = vec![vec![]; varlist.lst.len()];
+
+    for (i, c) in components.iter().enumerate() {
+        component_varixs[*c].push(i)
+    }
+
+    for fragment in flist.iter() {
+        for call in fragment.calls.iter() {
+            if call.qual > ln_max_p_miscall {
+                continue;
+            }
+
+            let var = &varlist.lst[call.var_ix];
+            if var.alleles.len() == 2
+                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+                && var.alleles[0].len() == 1
+                && var.alleles[1].len() == 1 {
+                match call.frag_ix {
+                    Some(fix) => {component_flist[uf.find(call.var_ix)].push(fix);},
+                    None => {bail!("Fragment index not defined");}
+                }
+            }
+        }
+    }
+
+    Ok((component_varixs, component_flist))
+}
+
 /// Refines diploid genotypes for each variant in the ```VarList``` using a haplotype assembly approach.
 ///
 /// #Arguments
@@ -396,93 +465,80 @@ pub fn call_genotypes_with_haplotypes(
         // each inner vector represents a VCF file line
         // it contains the VCF line formatted as vec of u8
         let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
-        let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
+        //let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
 
-        for (i, var) in varlist.lst.iter().enumerate() {
-            // if the variant meets certain criteria (heterozygous, biallelic, not an indel)
-            // set its bit to true in var_phased (so that it will be used in HapCUT2 assembly)
-            // and take the haplotype information from the current haplotypes
-            // so that the HapCUT2 assembly isn't starting from a random haplotype
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
-                && var.alleles[0].len() == 1
-                && var.alleles[1].len() == 1 {
-                var_phased[i] = true;
+        let (component_varixs, component_flist) = find_connected_components(flist, varlist, max_p_miscall)
+            .chain_err(|| "Error finding connected components for haplotyping")?;
 
-                if var.genotype == Genotype(0, 1) {
-                    hap1[i] = '0' as u8;
-                } else if var.genotype == Genotype(1, 0) {
-                    hap1[i] = '1' as u8;
-                }
-            }
-        }
+        for (c_vars, c_flist) in component_varixs.iter().zip(component_flist.iter()) {
 
-        // similarly to the VCF buffer, generate a fragment buffer representing the fragment file
-        // this also gets passed off as input to HapCUT2
-        let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall, false)
-            .chain_err(|| "Error generating fragment list buffer.")?;
-        // this phase_sets vector gets modified by HapCUT2 to hold the haplotype block (phase set)
-        // information
-        // phase_sets[i] will hold a specific integer that is like a haplotype block identifier
-        let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
-
-        // ASSEMBLE HAPLOTYPES WITH HAPCUT2
-        // make an unsafe call to the HapCUT2 code which is linked statically via FFI
-        call_hapcut2(
-            &frag_buffer,
-            frag_buffer.len(),
-            varlist.lst.len(),
-            &mut hap1,
-            &mut phase_sets,
-        );
-
-        // we want to convert the phase set ID given by HapCUT2 into the VCF standard type
-        // it should be the variant position (on its chromosome) of the first phased variant in the block
-        // we'll iterate over the phase set IDs given by HapCUT2 and figure out what the minimum
-        // position for that phase set is, so we can use it as the PS flag value
-        let m = <usize>::max_value();
-        let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
-
-        for (i, p) in phase_sets.iter().enumerate() {
-            if p < &0 {
+            if c_vars.len() <= 1 {
                 continue;
             }
-            if varlist.lst[i].pos0 < min_pos_ps[*p as usize] {
-                min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
-            }
-        }
 
-        // we passed the hap1 vector to HapCUT2 and it contains the phased haplotype results
-        // we want to convert the haplotype vectors into the phased genotype field in the VarList
-        // we copy over the genotypes and use min_pos_ps to convert the phase set/block information
-        // into PS field values.
-        for i in 0..hap1.len() {
-            match hap1[i] as char {
-                '0' => {
-                    varlist.lst[i].genotype = Genotype(0, 1);
+            let min_var_ix = *c_vars.iter().min().expect("Component vars was empty");
+            let max_var_ix = *c_vars.iter().max().expect("Component vars was empty");
+            let phase_set = varlist.lst[min_var_ix].pos0+1;
 
-                    if phase_sets[i] >= 0 {
-                        varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
-                    } else {
-                        varlist.lst[i].phase_set = None;
+            // ASSEMBLE HAPLOTYPES WITH HAPCUT2
+            // make an unsafe call to the HapCUT2 code which is linked statically via FFI
+
+            let mini_hap_size = max_var_ix - min_var_ix + 1;
+            let mut mini_hap1: Vec<u8> = vec!['-' as u8; mini_hap_size];
+
+            for i in c_vars.iter() {
+                let m_i = *i - min_var_ix;
+                let var: &Var = &varlist.lst[*i];
+                // if the variant meets certain criteria (heterozygous, biallelic, not an indel)
+                // set its bit to true in var_phased (so that it will be used in HapCUT2 assembly)
+                // and take the haplotype information from the current haplotypes
+                // so that the HapCUT2 assembly isn't starting from a random haplotype
+                if var.alleles.len() == 2
+                    && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+                    && var.alleles[0].len() == 1
+                    && var.alleles[1].len() == 1 {
+                    var_phased[*i] = true;
+
+                    if var.genotype == Genotype(0, 1) {
+                        mini_hap1[m_i] = '0' as u8;
+                    } else if var.genotype == Genotype(1, 0) {
+                        mini_hap1[m_i] = '1' as u8;
                     }
-                }
-                '1' => {
-                    varlist.lst[i].genotype = Genotype(1, 0);
-
-                    if phase_sets[i] >= 0 {
-                        varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
-                    } else {
-                        varlist.lst[i].phase_set = None;
-                    }
-                }
-                _ => {
-                    var_phased[i] = false;
                 }
             }
 
-            haps[0][i] = varlist.lst[i].genotype.0;
-            haps[1][i] = varlist.lst[i].genotype.1;
+            // generate a fragment buffer representing the fragment file
+            // this also gets passed off as input to HapCUT2
+            let frag_buffer = generate_flist_buffer(&flist, &var_phased, max_p_miscall, false, c_flist, min_var_ix)
+                .chain_err(|| "Error generating fragment list buffer.")?;
+
+            call_hapcut2(
+                &frag_buffer,
+                frag_buffer.len(),
+                mini_hap_size,
+                &mut mini_hap1
+            );
+
+            for m_i in 0..mini_hap_size {
+                let i = m_i + min_var_ix;
+
+                match mini_hap1[m_i] as char {
+                    '0' => {
+                        varlist.lst[i].genotype = Genotype(0, 1);
+                        varlist.lst[i].phase_set = Some(phase_set);
+                    }
+                    '1' => {
+                        varlist.lst[i].genotype = Genotype(1, 0);
+                        varlist.lst[i].phase_set = Some(phase_set);
+                    }
+                    _ => {
+                        var_phased[i] = false;
+                    }
+                }
+
+                haps[0][i] = varlist.lst[i].genotype.0;
+                haps[1][i] = varlist.lst[i].genotype.1;
+            }
         }
 
         // count how many variants meet the criteria for "phased"

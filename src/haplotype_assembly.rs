@@ -134,9 +134,13 @@ pub fn generate_flist_buffer(
     phase_variant: &Vec<bool>,
     max_p_miscall: f64,
     single_reads: bool,
+    frag_ixs: &Vec<usize>,
+    var_offset: usize
 ) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
-    for frag in flist {
+    for frag_ix in frag_ixs.iter() {
+
+        let frag = &flist[*frag_ix];
         let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
         let mut blocks: usize = 0;
@@ -185,7 +189,7 @@ pub fn generate_flist_buffer(
                     )
                 } else {
                     line.push(' ' as u8);
-                    for u in (c.var_ix + 1).to_string().into_bytes() {
+                    for u in (c.var_ix - var_offset + 1).to_string().into_bytes() {
                         line.push(u as u8);
                     }
                     line.push(' ' as u8);
@@ -229,8 +233,7 @@ extern "C" {
         fragmentbuffer: *const *const u8,
         fragments: usize,
         snps: usize,
-        hap1: *mut u8,
-        phase_sets: *mut i32,
+        hap1: *mut u8
     );
 }
 
@@ -239,8 +242,7 @@ pub fn call_hapcut2(
     frag_buffer: &Vec<Vec<u8>>,
     fragments: usize,
     snps: usize,
-    hap1: &mut Vec<u8>,
-    phase_sets: &mut Vec<i32>,
+    hap1: &mut Vec<u8>
 ) {
     unsafe {
         let mut frag_ptrs: Vec<*const u8> = Vec::with_capacity(frag_buffer.len());
@@ -253,8 +255,7 @@ pub fn call_hapcut2(
             frag_ptrs.as_ptr(),
             fragments,
             snps,
-            hap1.as_mut_ptr(),
-            phase_sets.as_mut_ptr(),
+            hap1.as_mut_ptr()
         );
     }
 }

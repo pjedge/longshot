@@ -19,6 +19,7 @@ extern crate core;
 extern crate rand;
 #[macro_use]
 extern crate error_chain;
+extern crate disjoint_sets;
 
 // import modules
 mod call_genotypes;
@@ -625,7 +626,7 @@ fn run() -> Result<()> {
             // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
             // together the lines represent the contents of a fragment file in HapCUT-like format
             let mut fragment_buffer =
-                generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true)
+                generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true, &(0..flist.len()).collect(),0)
                     .chain_err(|| "Error generating fragment list buffer.")?;
 
             // convert the buffer of u8s into strings and print them to the fragment file

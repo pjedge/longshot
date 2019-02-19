@@ -26,7 +26,7 @@ int CONVERGE = 5; // stop iterations on a given block if exceed this many iterat
 int LONG_READS = 1;
 #include "find_maxcut.c"   // function compute_good_cut
 
-int hapcut2(char** fragmentbuffer, int fragments, int snps, char* HAP1, int* PS) {
+int hapcut2(char** fragmentbuffer, int fragments, int snps, char* HAP1) {
     // IMP NOTE: all SNPs start from 1 instead of 0 and all offsets are 1+
 
     srand(1);
@@ -111,13 +111,6 @@ int hapcut2(char** fragmentbuffer, int fragments, int snps, char* HAP1, int* PS)
 
         if (converged_count == components) {
             break;
-        }
-    }
-
-    for (i = 0; i < snps; i++){
-
-        if (HAP1[i] != '-') {
-            PS[i] = snpfrag[i].component;
         }
     }
 
