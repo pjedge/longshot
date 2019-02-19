@@ -32,9 +32,11 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
-use std::collections::HashMap;
 use util::*;
 use variants_and_fragments::*;
+use std::u32;
+use std::usize;
+
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -46,7 +48,7 @@ pub struct ExtractFragmentParameters {
     /// minimum mapping quality to use (extract haplotype information for) a read
     pub min_mapq: u8,
     /// type of alignment algorithm to use (viterbi, forward algorithm, numerically stable forward algorithm)
-    pub alignment_type: AlignmentType,    //
+    pub alignment_type: AlignmentType, //
     /// band width for the alignment algorithm
     pub band_width: usize,
     /// the length of unique and exact-matching "anchor" sequences to left and right of alignment window.
@@ -63,6 +65,9 @@ pub struct ExtractFragmentParameters {
     /// if a CIGAR indel is encountered that exceeds this size while forming the window,
     /// the allele site is thrown out for that read.
     pub max_cigar_indel: usize,
+    /// whether or not to store the read id.
+    /// we store the read ID if we'll be separating reads by haplotype and otherwise we don't
+    pub store_read_id: bool
 }
 
 /// an extension of the rust-htslib cigar representation that has the cigar operation and length as
@@ -133,11 +138,6 @@ pub fn create_augmented_cigarlist(
                     "'deletion' (D) found before any operation describing read sequence".to_owned()
                 ));
             }
-            &Cigar::Back(_) => {
-                bail!(ErrorKind::UnsupportedCigarOperation(
-                    "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
-                ));
-            }
             &Cigar::RefSkip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "'reference skip' (N) found before any operation describing read sequence".to_owned()
@@ -171,7 +171,7 @@ pub fn create_augmented_cigarlist(
                     read_pos: qpos,
                 });
             }
-            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) | &Cigar::Back(_) => {}
+            &Cigar::SoftClip(_) | &Cigar::Pad(_) | &Cigar::HardClip(_) => {}
         }
 
         // move the reference and query positions forward
@@ -204,11 +204,6 @@ pub fn create_augmented_cigarlist(
             &Cigar::HardClip(_) => {
                 j += 1;
             }
-            &Cigar::Back(_) => {
-                bail!(ErrorKind::UnsupportedCigarOperation(
-                    "'back' (B) operation is deprecated according to htslib/bam_plcmd.c and is not in SAMv1 spec".to_owned()
-                ));
-            }
         }
     }
 
@@ -226,7 +221,6 @@ pub struct AnchorPositions {
     /// the position of the right anchor on the read. This should be the rightmost base of the right anchor sequence.
     pub right_anchor_read: u32,
 }
-
 
 /// Given a BAM record, and the position (or interval) of a variant (or variant cluster),
 /// find the AnchorPositions which describe the left and right realignment window boundaries on both
@@ -280,10 +274,11 @@ pub fn find_anchors(
     }
 
     if var_interval.chrom != target_names[bam_record.tid() as usize]
-        || (var_interval.start_pos as i32) >= bam_record
-            .cigar()
-            .end_pos()
-            .chain_err(|| "Error while accessing CIGAR end position")?
+        || (var_interval.start_pos as i32)
+            >= bam_record
+                .cigar()
+                .end_pos()
+                .chain_err(|| "Error while accessing CIGAR end position")?
         || (var_interval.end_pos as i32) < bam_record.pos()
     {
         eprintln!(
@@ -336,7 +331,7 @@ pub fn find_anchors(
                     break;
                 }
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -396,10 +391,9 @@ pub fn find_anchors(
                         }
 
                         // check if there is an exact match between anchor sequence on read and ref
-                        let anchor_on_read: Vec<char> =
-                            read_seq[(left_anchor_read as usize)
-                                         ..(left_anchor_read + anchor_length) as usize]
-                                .to_vec();
+                        let anchor_on_read: Vec<char> = read_seq[(left_anchor_read as usize)
+                            ..(left_anchor_read + anchor_length) as usize]
+                            .to_vec();
                         assert_eq!(anchor_on_read.len(), anchor_length as usize);
                         let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
                         let anchor_match = anchor_on_read == anchor_on_ref;
@@ -437,7 +431,7 @@ pub fn find_anchors(
                 match_len_left = 0;
                 seen_indel_left = true;
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -505,7 +499,7 @@ pub fn find_anchors(
                         // check if there is an exact match between anchor sequence on read and ref
                         let anchor_on_read: Vec<char> =
                             read_seq[(right_anchor_read - anchor_length) as usize
-                                         ..right_anchor_read as usize]
+                                ..right_anchor_read as usize]
                                 .to_vec();
                         assert_eq!(anchor_on_read.len(), anchor_length as usize);
                         let anchor_on_ref: Vec<char> = ref_seq[l_anc..r_anc].to_vec();
@@ -543,7 +537,7 @@ pub fn find_anchors(
                 match_len_right = 0;
                 seen_indel_right = true;
             }
-            Cigar::Pad(_) | Cigar::Back(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
+            Cigar::Pad(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) => {
                 bail!(ErrorKind::UnexpectedCigarOperation(
                     "CIGAR operation found in cigarpos_list that should have been removed already."
                         .to_owned()
@@ -684,7 +678,7 @@ fn extract_var_cluster(
 
     if VERBOSE {
         for var in var_cluster.clone() {
-            eprint!("{} {}", var.chrom, var.pos0);
+            eprint!("{} {}", var.tid, var.pos0);
             for allele in var.alleles {
                 eprint!(" {}", allele);
             }
@@ -720,18 +714,22 @@ fn extract_var_cluster(
 
         // we now want to score hap_window
         let score: LogProb = match extract_params.alignment_type {
-            AlignmentType::ForwardAlgorithmNumericallyStable => forward_algorithm_numerically_stable(
-                &read_window,
-                &hap_window,
-                align_params.ln(),
-                extract_params.band_width,
-            ),
-            AlignmentType::ForwardAlgorithmNonNumericallyStable => forward_algorithm_non_numerically_stable(
-                &read_window,
-                &hap_window,
-                align_params,
-                extract_params.band_width,
-            ),
+            AlignmentType::ForwardAlgorithmNumericallyStable => {
+                forward_algorithm_numerically_stable(
+                    &read_window,
+                    &hap_window,
+                    align_params.ln(),
+                    extract_params.band_width,
+                )
+            }
+            AlignmentType::ForwardAlgorithmNonNumericallyStable => {
+                forward_algorithm_non_numerically_stable(
+                    &read_window,
+                    &hap_window,
+                    align_params,
+                    extract_params.band_width,
+                )
+            }
             AlignmentType::ViterbiMaxScoringAlignment => viterbi_max_scoring_alignment(
                 &read_window,
                 &hap_window,
@@ -782,7 +780,7 @@ fn extract_var_cluster(
         if VERBOSE {
             eprint!(
                 "adding call: {} {}",
-                var_cluster[v].chrom, var_cluster[v].pos0
+                var_cluster[v].tid, var_cluster[v].pos0
             );
             for allele in &var_cluster[v].alleles {
                 eprint!(" {}", allele);
@@ -793,11 +791,11 @@ fn extract_var_cluster(
         }
 
         calls.push(FragCall {
-            frag_ix: None,
-            var_ix: var_cluster[v].ix,
+            frag_ix: usize::MAX, // this will be assigned a correct value soon after all fragments extracted
+            var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
             qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual),
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
         });
     }
 
@@ -816,7 +814,6 @@ pub fn extract_fragment(
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-    old_frag: Option<Fragment>,
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -825,10 +822,18 @@ pub fn extract_fragment(
         eprintln!("Extracting fragment for read {}...", id);
     }
 
+    //let fid = match extract_params.store_read_id {
+    //    true => ,
+    //    false => None
+    //};
+
     let mut fragment = Fragment {
-        id: id,
+        id: Some(id),
         calls: vec![],
-        p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
+        // ln(0.5) stored as f16 for compactness
+        p_read_hap: [LogProb::from(Prob(0.5)),
+                     LogProb::from(Prob(0.5))],
+        reverse_strand: bam_record.is_reverse()
     };
 
     if bam_record.is_quality_check_failed()
@@ -849,7 +854,7 @@ pub fn extract_fragment(
     for ref var in vars {
         let var_interval = GenomicInterval {
             tid: var.tid as u32,
-            chrom: var.chrom.clone(),
+            chrom: target_names[var.tid as usize].clone(),
             start_pos: var.pos0 as u32,
             end_pos: var.pos0 as u32,
         };
@@ -861,7 +866,8 @@ pub fn extract_fragment(
             &read_seq,
             &target_names,
             extract_params,
-        ).chain_err(|| "Error while finding anchor sequences.")?
+        )
+        .chain_err(|| "Error while finding anchor sequences.")?
         {
             Some(anchors) => {
                 var_anchor_lst.push((var.clone(), anchors));
@@ -923,96 +929,7 @@ pub fn extract_fragment(
 
     // now extract alleles for the variant cluster
 
-    let mut old_frag_ix = 0; // hold onto index in old fragment
-                             // save reallocation of this hashmap for every variant
-    let mut new_var_ix: HashMap<usize, usize> =
-        HashMap::with_capacity(extract_params.variant_cluster_max_size);
-
     for (anchors, var_cluster) in cluster_lst {
-        if IGNORE_INDEL_ONLY_CLUSTERS {
-            let mut seen_snv = false;
-            for var in var_cluster.iter() {
-                if seen_snv {
-                    break;
-                }
-                for allele in var.alleles[1..].iter() {
-                    if allele.len() == var.alleles[0].len() {
-                        let mut diff = 0;
-                        for (c1, c2) in allele.chars().zip(var.alleles[0].chars()) {
-                            if c1 != c2 {
-                                diff += 1;
-                            }
-                        }
-                        if diff == 1 {
-                            seen_snv = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if !seen_snv {
-                continue;
-            }
-        }
-
-        // some new variants may have been added after performing POA multiple sequence alignment.
-        // if these new variants are too close to existing variant cluster, they will all need to be
-        // realigned. otherwise, if this "variant cluster" didn't change, just reuse the old fragment calls
-        match &old_frag {
-            &Some(ref old_f) => {
-                // if var.called is true, then this variant existed before POA
-                let mut changed = false;
-                for ref var in &var_cluster {
-                    if !var.called {
-                        // this is a new variant from POA
-                        assert_eq!(var.old_ix, None);
-                        changed = true;
-                        break;
-                    }
-                }
-
-                // the fragment cluster didn't change, so convert the old varlist indices to new ones
-                // and just re-use the calls without realigning anything.
-                if !changed {
-                    // map old varlist indices to new ones
-                    assert!(new_var_ix.is_empty()); // shouldn't ever have to clear this hashmap
-
-                    for ref var in &var_cluster {
-                        match var.old_ix {
-                            Some(old_ix) => {
-                                new_var_ix.insert(old_ix, var.ix);
-                            }
-                            None => panic!(
-                                "Attempted to reuse fragment call in an unchanged variant \
-                                 cluster, but var.old_ix was None."
-                            ),
-                        }
-                    }
-
-                    // convert the varlist indices in the old calls and push them to the fragment
-                    while !new_var_ix.is_empty() {
-                        let call = old_f.calls[old_frag_ix];
-
-                        match new_var_ix.remove(&call.var_ix) {
-                            Some(new_ix) => {
-                                let mut new_call = call.clone();
-                                new_call.var_ix = new_ix;
-                                fragment.calls.push(new_call);
-                            }
-                            None => {}
-                        }
-
-                        old_frag_ix += 1;
-                    }
-
-                    // skip to the next var_cluster or else we would double-add the fragment calls!
-                    continue;
-                }
-            }
-            &None => {}
-        }
-
         // extract the calls for the fragment
         for call in extract_var_cluster(
             &read_seq,
@@ -1036,7 +953,6 @@ pub fn extract_fragments(
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-    old_flist: Option<Vec<Fragment>>,
 ) -> Result<Vec<Fragment>> {
     let t_names = parse_target_names(&bam_file)?;
 
@@ -1059,7 +975,7 @@ pub fn extract_fragments(
             .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
             .chain_err(|| "Error seeking BAM file while extracting fragments.")?;
 
-        for (i, r) in bam_ix.records().enumerate() {
+        for (_, r) in bam_ix.records().enumerate() {
             let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
             if record.is_quality_check_failed()
@@ -1071,14 +987,6 @@ pub fn extract_fragments(
             {
                 continue;
             }
-
-            let old_frag: Option<Fragment> = match &old_flist {
-                &Some(ref fl) => {
-                    assert_eq!(fl[i].id, u8_to_string(record.qname())?);
-                    Some(fl[i].clone())
-                }
-                &None => None,
-            };
 
             let tid: usize = record.tid() as usize;
             let chrom: String = t_names[tid].clone();
@@ -1140,8 +1048,8 @@ pub fn extract_fragments(
                 &t_names,
                 extract_params,
                 align_params,
-                old_frag,
-            ).chain_err(|| "Error extracting fragment from read.")?;
+            )
+            .chain_err(|| "Error extracting fragment from read.")?;
 
             match frag {
                 Some(some_frag) => {
@@ -1158,7 +1066,7 @@ pub fn extract_fragments(
     // label every fragment call with its index in the fragment list.
     for i in 0..flist.len() {
         for j in 0..flist[i].calls.len() {
-            flist[i].calls[j].frag_ix = Some(i);
+            flist[i].calls[j].frag_ix = i;
         }
     }
 
@@ -1169,7 +1077,7 @@ pub fn extract_fragments(
 
     for i in 0..flist.len() {
         for j in 0..flist[i].calls.len() {
-            let vix = flist[i].calls[j].var_ix;
+            let vix = flist[i].calls[j].var_ix as usize;
             let qual = flist[i].calls[j].qual;
             var_qual_sum[vix] = LogProb::ln_add_exp(var_qual_sum[vix], qual);
             var_num_alleles[vix] += 1;
@@ -1241,29 +1149,24 @@ mod tests {
         }
     }
     */
-    fn generate_var2(
-        ix: usize,
-        tid: usize,
-        chrom: String,
-        pos0: usize,
-        alleles: Vec<String>,
-    ) -> Var {
+    fn generate_var2(ix: usize, tid: usize, pos0: usize, alleles: Vec<String>) -> Var {
         Var {
             ix: ix,
-            old_ix: None,
-            tid: tid,
-            chrom: chrom,
+            tid: tid as u32,
             pos0: pos0,
             alleles: alleles,
             dp: 40,
             allele_counts: vec![20, 20],
+            allele_counts_forward: vec![10, 10],
+            allele_counts_reverse: vec![10, 10],
             ambiguous_count: 0,
             qual: 0.0,
-            filter: ".".to_string(),
+            filter: VarFilter::Pass,
             genotype: Genotype(0, 1),
             gq: 0.0,
             mean_allele_qual: 0.0,
             mec: 0,
+            strand_bias_pvalue: 0.0,
             mec_frac_block: 0.0,
             mec_frac_variant: 0.0,
             dp_any_mq: 40,
@@ -1274,10 +1177,8 @@ mod tests {
             mq50_frac: 1.0,
             unphased_genotype: Genotype(0, 1),
             unphased_gq: 0.0,
-            sequence_context: "NNN".to_string(),
             genotype_post: GenotypeProbs::uniform(2),
             phase_set: None,
-            called: true,
         }
     }
 
@@ -1287,7 +1188,6 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
@@ -1306,21 +1206,18 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["A".to_string(), "T".to_string()],
         ));
         lst1.push(generate_var2(
             2,
             0,
-            "chr1".to_string(),
             200,
             vec!["T".to_string(), "G".to_string()],
         ));
@@ -1348,14 +1245,12 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["A".to_string(), "T".to_string(), "C".to_string()],
         ));
@@ -1381,21 +1276,18 @@ mod tests {
         lst1.push(generate_var2(
             0,
             0,
-            "chr1".to_string(),
             1,
             vec!["A".to_string(), "G".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             100,
             vec!["A".to_string(), "T".to_string(), "C".to_string()],
         ));
         lst1.push(generate_var2(
             1,
             0,
-            "chr1".to_string(),
             200,
             vec!["A".to_string(), "T".to_string(), "C".to_string()],
         ));

@@ -1,5 +1,6 @@
 //! Print Longshot output in VCF format
 
+use bio::io::fasta;
 use bio::stats::PHREDProb;
 use errors::*;
 use genotype_probs::Genotype;
@@ -12,6 +13,7 @@ use variants_and_fragments::{var_filter, VarList};
 pub fn print_vcf(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
+    fasta_file: &Option<String>,
     output_vcf_file: &String,
     print_reference_genotype: bool,
     max_cov: u32,
@@ -28,6 +30,16 @@ pub fn print_vcf(
         max_cov,
     );
 
+    let mut fasta = match fasta_file {
+        &Some(ref ff) => Some(
+            fasta::IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?,
+        ),
+        None => None,
+    };
+
+    let mut ref_seq: Vec<char> = vec![]; // this vector will be used to hold the reference sequence
+    let mut prev_tid = 4294967295;
+
     let vcf_path = Path::new(output_vcf_file);
     let vcf_display = vcf_path.display();
     // Open a file in write-only mode, returns `io::Result<File>`
@@ -35,7 +47,7 @@ pub fn print_vcf(
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
     let headerstr = format!("##fileformat=VCFv4.2
-##source=Longshot v0.2.1
+##source=Longshot v0.3.1
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
@@ -73,7 +85,7 @@ pub fn print_vcf(
         match interval {
             &Some(ref iv) => {
                 if !print_outside_region
-                    && (var.chrom != iv.chrom
+                    && (var.tid != iv.tid
                         || var.pos0 < iv.start_pos as usize
                         || var.pos0 > iv.end_pos as usize)
                 {
@@ -87,6 +99,23 @@ pub fn print_vcf(
             if var.genotype == Genotype(0, 0) {
                 continue;
             }
+        }
+
+        match fasta {
+            Some(ref mut fa) => {
+                // if we're on a different contig/chrom, we need to read in the sequence for that
+                // contig/chrom from the FASTA into the ref_seq vector
+                if var.tid != prev_tid {
+                    let mut ref_seq_u8: Vec<u8> = vec![];
+                    fa.fetch_all(&varlist.target_names[var.tid as usize])
+                        .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                    fa.read(&mut ref_seq_u8)
+                        .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                    ref_seq = dna_vec(&ref_seq_u8);
+                }
+                prev_tid = var.tid;
+            }
+            None => {}
         }
 
         let ps = match var.phase_set {
@@ -124,15 +153,38 @@ pub fn print_vcf(
         let unphased_genotype_str = vec![
             var.unphased_genotype.0.to_string(),
             var.unphased_genotype.1.to_string(),
-        ].join("/");
+        ]
+        .join("/");
 
         let genotypes_match: usize = (var.genotype == var.unphased_genotype
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype)
             as usize;
 
+        // we want to save the sequence context (21 bp window around variant on reference)
+        // this will be printed to the VCF later and may help diagnose variant calling
+        // issues e.g. if the variant occurs inside a large homopolymer or etc.
+        let sequence_context: String = match fasta {
+            Some(_) => {
+                // get the position 10 bases to the left
+                let l_window = if var.pos0 >= 10 {
+                    var.pos0 as usize - 10
+                } else {
+                    0
+                };
+                // get the position 11 bases to the right
+                let mut r_window = var.pos0 as usize + 11;
+                if r_window >= ref_seq.len() {
+                    r_window = ref_seq.len();
+                }
+
+                (ref_seq[l_window..r_window]).iter().collect::<String>()
+            }
+            None => "None".to_string(),
+        };
+
         writeln!(file,
                        "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
-                       var.chrom,
+                       varlist.target_names[var.tid as usize],
                        var.pos0 + 1,
                        var.alleles[0],
                        var_alleles.join(","),
@@ -153,7 +205,7 @@ pub fn print_vcf(
                        var.mq40_frac,
                        var.mq50_frac,
                        post_str,
-                       var.sequence_context,
+                       sequence_context,
                        genotype_str,
                        var.gq,
                        ps,
@@ -183,13 +235,15 @@ pub fn print_variant_debug(
             print_vcf(
                 varlist,
                 &interval,
+                &None,
                 &outfile,
                 true,
                 max_cov,
                 density_params,
                 sample_name,
                 true,
-            ).chain_err(|| "Error printing debug VCF file.")?;
+            )
+            .chain_err(|| "Error printing debug VCF file.")?;
         }
         &None => {}
     };
