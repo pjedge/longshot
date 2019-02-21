@@ -257,8 +257,7 @@ pub fn call_potential_snvs(
                                 'C' | 'c' => 1,
                                 'G' | 'g' => 2,
                                 'T' | 't' => 3,
-                                'N' | 'n' => 4,
-                                _ => panic!("Invalid base read from BAM file."),
+                                _ => 4
                             };
 
                             counts[b] += 1;
