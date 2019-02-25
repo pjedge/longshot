@@ -57,7 +57,7 @@ Execution should take around 30 seconds on a typical desktop machine. The output
 ```
 $ ./target/release/longshot --help
 
-Longshot 0.3.1
+Longshot 0.3.2
 Peter Edge <edge.peterj@gmail.com>
 SNV caller for Third-Generation Sequencing reads
 
