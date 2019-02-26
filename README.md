@@ -4,7 +4,7 @@ Longshot is a variant calling tool for diploid genomes using long error prone re
 
 
 ## supported operating systems
-Longshot has been tested using Ubuntu 16.04, CentOS 6.6, and Manjaro Linux 17.1.11.
+Longshot has been tested using Ubuntu 16.04, CentOS 6.6, Manjaro Linux 17.1.11, and Mac OS 10.14.2 Mojave.
 It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
