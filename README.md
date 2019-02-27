@@ -4,7 +4,7 @@ Longshot is a variant calling tool for diploid genomes using long error prone re
 
 
 ## supported operating systems
-Longshot has been tested using Ubuntu 16.04, CentOS 6.6, and Manjaro Linux 17.1.11.
+Longshot has been tested using Ubuntu 16.04, CentOS 6.6, Manjaro Linux 17.1.11, and Mac OS 10.14.2 Mojave.
 It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
@@ -57,7 +57,7 @@ Execution should take around 30 seconds on a typical desktop machine. The output
 ```
 $ ./target/release/longshot --help
 
-Longshot 0.3.1
+Longshot 0.3.2
 Peter Edge <edge.peterj@gmail.com>
 SNV caller for Third-Generation Sequencing reads
 
