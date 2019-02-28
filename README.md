@@ -19,7 +19,7 @@ curl https://sh.rustup.rs -sSf | sh
 ```
 download the git repository and change to the longshot directory:
 ```
-git clone --recursive https://github.com/pjedge/longshot.git
+git clone https://github.com/pjedge/longshot
 cd longshot
 ```
 To build Longshot, type:
