@@ -10,6 +10,8 @@ It should work on any linux-based system that has Rust and Cargo installed.
 ## dependencies
 
 * rust 1.32.0 (see installation)
+* zlib
+* xz
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
