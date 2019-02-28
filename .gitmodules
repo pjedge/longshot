@@ -1,1 +1,4 @@
 
+[submodule "src/poa/spoa"]
+	path = src/poa/spoa
+	url = https://github.com/rvaser/spoa

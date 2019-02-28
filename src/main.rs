@@ -35,7 +35,7 @@ mod print_output;
 mod realignment;
 mod util;
 mod variants_and_fragments;
-//mod spoa;
+mod spoa;
 
 // use declarations
 use bio::stats::{LogProb, PHREDProb, Prob};
