@@ -11,7 +11,8 @@ extern "C" {
         alignment_type: i32, // 0 = local, 1 = global, 2 = gapped
         match_score: i32,
         mismatch_score: i32,
-        gap_score: i32,
+        gap_open: i32,
+        gap_extend: i32,
     ) -> u32;
 }
 
@@ -23,7 +24,8 @@ pub fn poa_multiple_sequence_alignment(
     alignment_type: i32,
     match_score: i32,
     mismatch_score: i32,
-    gap_score: i32,
+    gap_open: i32,
+    gap_extend: i32
 ) {
     unsafe {
         let num_seqs = seqs.len() as i32;
@@ -45,7 +47,8 @@ pub fn poa_multiple_sequence_alignment(
             alignment_type,
             match_score,
             mismatch_score,
-            gap_score,
+            gap_open,
+            gap_extend
         );
 
         consensus.truncate(len as usize);

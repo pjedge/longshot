@@ -7,7 +7,7 @@ extern "C" {
     unsigned poa_func(char** seqs, int num_seqs,
                       char* seed_seq, int num_seeds,
                       char* consensus, int consensus_len,
-                      int alignment_type, int match_score, int mismatch_score, int gap_score) {
+                      int alignment_type, int match_score, int mismatch_score, int gap_open, int gap_extend) {
 
         if (num_seqs == 0) {
             return (unsigned) 0;
@@ -24,7 +24,8 @@ extern "C" {
         auto alignment_engine = spoa::createAlignmentEngine(static_cast<spoa::AlignmentType>(alignment_type),
                                                             (int8_t) match_score,
                                                             (int8_t) mismatch_score,
-                                                            (int8_t) gap_score);
+                                                            (int8_t) gap_open,
+                                                            (int8_t) gap_extend);
         auto graph = spoa::createGraph();
 
         // seed the POA with a seed sequence (e.g. reference sequence)

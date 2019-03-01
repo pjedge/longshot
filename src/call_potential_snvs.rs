@@ -10,20 +10,21 @@ use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
 
+use bio::alignment::pairwise::banded::*;
+use bio::alignment::Alignment;
+use bio::alignment::AlignmentOperation::*;
 use errors::*;
-//use std::str;
-//use bio::alignment::Alignment;
-//use bio::alignment::pairwise::banded::*;
-//use bio::alignment::AlignmentOperation::*;
 use genotype_probs::*;
-//use spoa::poa_multiple_sequence_alignment;
+use hashbrown::HashSet;
 use realignment::LnAlignmentParameters;
+use spoa::poa_multiple_sequence_alignment;
+use std::str;
 use util::*;
 // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
 use variants_and_fragments::*;
 
 pub static VARLIST_CAPACITY: usize = 0; //1000000;
-static VERBOSE: bool = false; //true;
+static VERBOSE: bool = false;
 
 /// Calls potential SNV sites using a pileup-based genotyping calculation
 ///
@@ -257,7 +258,7 @@ pub fn call_potential_snvs(
                                 'C' | 'c' => 1,
                                 'G' | 'g' => 2,
                                 'T' | 't' => 3,
-                                _ => 4
+                                _ => 4,
                             };
 
                             counts[b] += 1;
@@ -392,16 +393,16 @@ pub fn call_potential_snvs(
 // alignment: a rust-bio alignment object where x is a read consensus window, and y is the window from the reference
 //
 // l_ref: the 0-indexed position on the reference of the start of the reference window
-/*
-fn extract_variants_from_alignment(alignment: &Alignment,
-                                   consensus: &Vec<u8>,
-                                   ref_window: &Vec<u8>,
-                                   l_ref: usize,
-                                   tid: usize,
-                                   chrom: String,
-                                   depth: usize,
-                                   boundary: usize) -> Result<Vec<Var>> {
 
+fn extract_variants_from_alignment(
+    alignment: &Alignment,
+    consensus: &Vec<u8>,
+    ref_window: &Vec<u8>,
+    l_ref: usize,
+    tid: usize,
+    depth: usize,
+    boundary: usize,
+) -> Result<Vec<Var>> {
     let mut ref_pos = alignment.ystart;
     let mut read_pos = alignment.xstart;
 
@@ -419,29 +420,37 @@ fn extract_variants_from_alignment(alignment: &Alignment,
             if op == Subst {
                 let new_var = Var {
                     ix: 0,
-                    old_ix: None,
                     // this will be set automatically,
-                    tid: tid,
-                    chrom: chrom.clone(),
+                    tid: tid as u32,
                     pos0: l_ref + ref_pos,
-                    alleles: vec![(ref_window[ref_pos] as char).to_string(), (consensus[read_pos] as char).to_string()],
+                    alleles: vec![
+                        (ref_window[ref_pos] as char).to_string(),
+                        (consensus[read_pos] as char).to_string(),
+                    ],
                     dp: depth,
-                    allele_counts: vec![0,0],
+                    allele_counts: vec![0, 0],
+                    allele_counts_forward: vec![0, 0],
+                    allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
                     qual: 0.0,
-                    filter: ".".to_string(),
-                    genotype: Genotype(0,0), // this will be refined later
+                    filter: VarFilter::Pass,
+                    genotype: Genotype(0, 0), // this will be refined later
                     gq: 0.0,
+                    unphased_genotype: Genotype(0, 0), // this will be refined later
+                    unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    mec: 0,                 // mec for variant
-                    mec_frac_variant: 0.0,  // mec fraction for this variant
-                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    strand_bias_pvalue: 1.0,
+                    mec: 0,                // mec for variant
+                    mec_frac_variant: 0.0, // mec fraction for this variant
+                    mec_frac_block: 0.0,   // mec fraction for this haplotype block
                     mean_allele_qual: 0.0,
                     dp_any_mq: depth,
-                    mq10_frac: //TODO,
-                    mq20_frac: //TODO,
-                    called: false
+                    mq10_frac: 0.0,
+                    mq20_frac: 0.0,
+                    mq30_frac: 0.0,
+                    mq40_frac: 0.0,
+                    mq50_frac: 0.0,
                 };
                 new_vars.push(new_var);
             }
@@ -461,26 +470,33 @@ fn extract_variants_from_alignment(alignment: &Alignment,
 
                 let new_var = Var {
                     ix: 0,
-                    old_ix: None,
-                    // this will be set automatically,
-                    tid: tid,
-                    chrom: chrom.clone(),
+                    tid: tid as u32,
                     pos0: l_ref + ref_pos,
-                    alleles: vec![u8_to_string(&ref_allele), u8_to_string(&var_allele)],
+                    alleles: vec![u8_to_string(&ref_allele)?, u8_to_string(&var_allele)?],
                     dp: depth,
-                    allele_counts: vec![0,0],
+                    allele_counts: vec![0, 0],
+                    allele_counts_forward: vec![0, 0],
+                    allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
                     qual: 0.0,
-                    filter: ".".to_string(),
-                    genotype: Genotype(0,0), // this will be refined later
+                    filter: VarFilter::Pass,
+                    genotype: Genotype(0, 0), // this will be refined later
                     gq: 0.0,
+                    unphased_genotype: Genotype(0, 0), // this will be refined later
+                    unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    mec: 0,                 // mec for variant
-                    mec_frac_variant: 0.0,  // mec fraction for this variant
-                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    strand_bias_pvalue: 1.0,
+                    mec: 0,                // mec for variant
+                    mec_frac_variant: 0.0, // mec fraction for this variant
+                    mec_frac_block: 0.0,   // mec fraction for this haplotype block
                     mean_allele_qual: 0.0,
-                    called: false
+                    dp_any_mq: depth,
+                    mq10_frac: 0.0,
+                    mq20_frac: 0.0,
+                    mq30_frac: 0.0,
+                    mq40_frac: 0.0,
+                    mq50_frac: 0.0,
                 };
                 new_vars.push(new_var);
             }
@@ -500,70 +516,77 @@ fn extract_variants_from_alignment(alignment: &Alignment,
                 }
                 let new_var = Var {
                     ix: 0,
-                    old_ix: None,
-                    // this will be set automatically
-                    tid: tid,
-                    chrom: chrom.clone(),
+                    tid: tid as u32,
                     pos0: l_ref + ref_pos,
-                    alleles: vec![u8_to_string(&ref_allele), u8_to_string(&var_allele)],
+                    alleles: vec![u8_to_string(&ref_allele)?, u8_to_string(&var_allele)?],
                     dp: depth,
-                    allele_counts: vec![0,0],
+                    allele_counts: vec![0, 0],
+                    allele_counts_forward: vec![0, 0],
+                    allele_counts_reverse: vec![0, 0],
                     ambiguous_count: 0,
                     qual: 0.0,
-                    filter: ".".to_string(),
-                    genotype: Genotype(0,0), // this will be refined later
+                    filter: VarFilter::Pass,
+                    genotype: Genotype(0, 0), // this will be refined later
                     gq: 0.0,
+                    unphased_genotype: Genotype(0, 0), // this will be refined later
+                    unphased_gq: 0.0,
                     genotype_post: GenotypeProbs::uniform(2),
                     phase_set: None,
-                    mec: 0,                 // mec for variant
-                    mec_frac_variant: 0.0,  // mec fraction for this variant
-                    mec_frac_block: 0.0,    // mec fraction for this haplotype block
+                    strand_bias_pvalue: 1.0,
+                    mec: 0,                // mec for variant
+                    mec_frac_variant: 0.0, // mec fraction for this variant
+                    mec_frac_block: 0.0,   // mec fraction for this haplotype block
                     mean_allele_qual: 0.0,
-                    called: false
+                    dp_any_mq: depth,
+                    mq10_frac: 0.0,
+                    mq20_frac: 0.0,
+                    mq30_frac: 0.0,
+                    mq40_frac: 0.0,
+                    mq50_frac: 0.0,
                 };
                 new_vars.push(new_var);
             }
         }
 
-
         match op {
             Match => {
                 ref_pos += 1;
                 read_pos += 1;
-            },
+            }
             Subst => {
                 ref_pos += 1;
                 read_pos += 1;
-            },
+            }
             Ins => {
                 read_pos += 1;
-            },
+            }
             Del => {
                 ref_pos += 1;
-            },
-            _ => {panic!("Unexpected alignment operation.");}
+            }
+            _ => {
+                panic!("Unexpected alignment operation.");
+            }
         }
     }
 
-    new_vars
+    Ok(new_vars)
 }
-*/
-/*
-pub fn call_potential_variants_poa(bam_file: &String,
-                                   fasta_file: &String,
-                                   interval: &Option<GenomicInterval>,
-                                   h1: &HashSet<String>,
-                                   h2: &HashSet<String>,
-                                   _max_coverage: Option<u32>,
-                                   min_mapq: u8,
-                                   _ln_align_params: LnAlignmentParameters)
-                                   -> VarList {
 
+pub fn call_potential_variants_poa(
+    bam_file: &String,
+    fasta_file: &String,
+    interval: &Option<GenomicInterval>,
+    h1: &HashSet<String>,
+    h2: &HashSet<String>,
+    min_mapq: u8,
+    _ln_align_params: LnAlignmentParameters,
+) -> Result<VarList> {
     //let potential_snv_qual = LogProb::from(Prob(0.5));
-    let target_names = parse_target_names(&bam_file);
+    let target_names = parse_target_names(&bam_file)?;
 
     //let genotype_priors = estimate_genotype_priors();
-    let mut fasta = fasta::IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
+    let mut fasta = fasta::IndexedReader::from_file(&fasta_file)
+        .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
 
     let mut varlist: Vec<Var> = Vec::with_capacity(VARLIST_CAPACITY);
 
@@ -576,30 +599,61 @@ pub fn call_potential_variants_poa(bam_file: &String,
     // if an indexed reader is used, and fetch is never called, pileup() hangs.
     // so we need to iterate over the fetched indexed pileup if there's a region,
     // or a totally separate pileup from the unindexed file if not.
-    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval);
+    let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
 
-    let mut bam_ix = bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
-
+    let mut bam_ix =
+        bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
+    /*
     let alignment_type: i32 = 0;
     let match_score: i32 = 5;
     let mismatch_score: i32 = -4;
-    let gap_score: i32 = -2;
+    let gap_open: i32 = -3;
+    let gap_extend: i32 = -1;
 
     let d: usize = 50;
+    let boundary: usize = 25;
+    */
+
+    let alignment_type: i32 = 1;
+    let match_score: i32 = 0;
+    let mismatch_score: i32 = -4;
+    let gap_open: i32 = -3;
+    let gap_extend: i32 = -1;
+
+    let d: usize = 50;
+    let boundary: usize = 25;
+    let num_seeds: i32 = 1;
+
+    let score = |a: u8, b: u8| if a == b { 5i32 } else { -4i32 };
+    let k = 6; // kmer match length
+    let w = 20; // Window size for creating the band
+    let mut aligner = Aligner::new(-8, -2, score, k, w);
+
+    let consensus_max_len = 200;
+    let min_reads = 10;
 
     for iv in interval_lst {
-        bam_ix.fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1).chain_err(|| ErrorKind::IndexedBamFetchError)?;
+        bam_ix
+            .fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1)
+            .chain_err(|| ErrorKind::IndexedBamFetchError)?;
         let bam_pileup = bam_ix.pileup();
 
         for p in bam_pileup {
-            let pileup = p.chain_err(||ErrorKind::IndexedBamPileupReadError)?;
+            let pileup = p.chain_err(|| ErrorKind::IndexedBamPileupReadError)?;
 
             let tid: usize = pileup.tid() as usize;
             let chrom: String = target_names[tid].clone();
 
+            // if we're on a different contig/chrom, we need to read in the sequence for that
+            // contig/chrom from the FASTA into the ref_seq vector
             if tid != prev_tid {
                 let mut ref_seq_u8: Vec<u8> = vec![];
-                fasta.read_all(&chrom, &mut ref_seq_u8).chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                fasta
+                    .fetch_all(&chrom)
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
+                fasta
+                    .read(&mut ref_seq_u8)
+                    .chain_err(|| ErrorKind::IndexedFastaReadError)?;
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
@@ -613,7 +667,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
             let r_ref: usize = pos_ref + d;
             let mut ref_window: Vec<u8> = vec![];
             for i in l_ref..r_ref + 1 {
-                ref_window.push(ref_seq[i]);
+                ref_window.push(ref_seq[i] as u8);
             }
 
             let mut ref_window_nullterm = ref_window.clone();
@@ -632,15 +686,21 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 let record = alignment.record();
 
                 // may be faster to implement this as bitwise operation on raw flag in the future?
-                if record.mapq() < min_mapq || record.is_unmapped() || record.is_secondary() ||
-                    record.is_quality_check_failed() ||
-                    record.is_duplicate() || record.is_supplementary() {
+                if record.mapq() < min_mapq
+                    || record.is_unmapped()
+                    || record.is_secondary()
+                    || record.is_quality_check_failed()
+                    || record.is_duplicate()
+                    || record.is_supplementary()
+                {
                     continue;
                 }
 
                 let pos_read = match alignment.qpos() {
                     Some(t) => t as usize,
-                    None => { continue; }
+                    None => {
+                        continue;
+                    }
                 };
 
                 let l_read = if pos_read >= d { pos_read - d } else { 0 };
@@ -661,7 +721,7 @@ pub fn call_potential_variants_poa(bam_file: &String,
                 all_read_seqs.push(read_seq.clone());
                 all_seq_count += 1;
 
-                let read_id = u8_to_string(alignment.record().qname());
+                let read_id = u8_to_string(alignment.record().qname())?;
 
                 if h1.contains(&read_id) {
                     h1_read_seqs.push(read_seq.clone());
@@ -673,100 +733,152 @@ pub fn call_potential_variants_poa(bam_file: &String,
                     h2_seq_count += 1;
                 }
             }
-
+            /*
             if VERBOSE {
                 println!("{}:{}-{}", target_names[tid].clone(), l_ref, r_ref);
                 println!("-------");
 
-                println!("All read seqs:", );
+                println!("All read seqs:",);
                 for (i, seq) in all_read_seqs.iter().enumerate() {
                     println!(">seq{}", i);
-                    println!("{}", str::from_utf8(&seq.clone()).chain_err(|| "Error converting read sequences to valid UTF8")?);
+                    println!(
+                        "{}",
+                        str::from_utf8(&seq.clone())
+                            .chain_err(|| "Error converting read sequences to valid UTF8")?
+                    );
                 }
                 println!("-------");
-                println!("H1 read seqs:", );
+                println!("H1 read seqs:",);
                 for (i, seq) in h1_read_seqs.iter().enumerate() {
                     println!(">seq{}", i);
-                    println!("{}", str::from_utf8(&seq.clone()).chain_err(|| "Error converting read sequences to valid UTF8")?);
+                    println!(
+                        "{}",
+                        str::from_utf8(&seq.clone())
+                            .chain_err(|| "Error converting read sequences to valid UTF8")?
+                    );
                 }
 
                 println!("-------");
-                println!("H2 read seqs:", );
+                println!("H2 read seqs:",);
                 for (i, seq) in h2_read_seqs.iter().enumerate() {
                     println!(">seq{}", i);
-                    println!("{}", str::from_utf8(&seq.clone()).chain_err(|| "Error converting read sequences to valid UTF8")?);
+                    println!(
+                        "{}",
+                        str::from_utf8(&seq.clone())
+                            .chain_err(|| "Error converting read sequences to valid UTF8")?
+                    );
                 }
                 println!("-------");
             }
-
-
-            let score = |a: u8, b: u8| if a == b { 5i32 } else { -4i32 };
-            let k = 6;  // kmer match length
-            let w = 20;  // Window size for creating the band
-            let mut aligner = Aligner::new(-8, -2, score, k, w);
-
-            let consensus_max_len = 200;
-            let min_reads = 5;
+            */
 
             let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
                 let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
-                poa_multiple_sequence_alignment(&h1_read_seqs, ref_window_nullterm.clone(),
-                                                1i32, &mut consensus_h1, alignment_type, //  (h1_seq_count/2) as i32
-                                                match_score, mismatch_score, gap_score);
+                poa_multiple_sequence_alignment(
+                    &h1_read_seqs,
+                    ref_window_nullterm.clone(),
+                    num_seeds,
+                    &mut consensus_h1,
+                    alignment_type, //  (h1_seq_count/2) as i32
+                    match_score,
+                    mismatch_score,
+                    gap_open,
+                    gap_extend
+                );
                 let h1_alignment = aligner.local(&consensus_h1, &ref_window);
                 //println!("{}\n", h1_alignment.pretty(&consensus_h1, &ref_window));
-                Some(extract_variants_from_alignment(&h1_alignment,
-                                                     &consensus_h1,
-                                                     &ref_window,
-                                                     l_ref,
-                                                     tid,
-                                                     target_names[tid].clone(),
-                                                     all_seq_count,
-                                                     25))
+                let vars = extract_variants_from_alignment(
+                    &h1_alignment,
+                    &consensus_h1,
+                    &ref_window,
+                    l_ref,
+                    tid,
+                    all_seq_count,
+                    boundary,
+                )?;
+
+                if vars.len() > 0 {
+                    Some(vars)
+                } else {
+                    None
+                }
+
+
             } else {
                 None
             };
 
             let mut h2_vars: Option<Vec<Var>> = if h2_seq_count >= min_reads {
                 let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
-                poa_multiple_sequence_alignment(&h2_read_seqs, ref_window_nullterm.clone(),
-                                                1i32, &mut consensus_h2, alignment_type, // (h1_seq_count/2) as i32
-                                                match_score, mismatch_score, gap_score);
+                poa_multiple_sequence_alignment(
+                    &h2_read_seqs,
+                    ref_window_nullterm.clone(),
+                    num_seeds,
+                    &mut consensus_h2,
+                    alignment_type, // (h1_seq_count/2) as i32
+                    match_score,
+                    mismatch_score,
+                    gap_open,
+                    gap_extend
+                );
                 let h2_alignment = aligner.local(&consensus_h2, &ref_window);
                 //println!("{}\n", h2_alignment.pretty(&consensus_h2, &ref_window));
-                Some(extract_variants_from_alignment(&h2_alignment,
-                                                     &consensus_h2,
-                                                     &ref_window,
-                                                     l_ref,
-                                                     tid,
-                                                     target_names[tid].clone(),
-                                                     all_seq_count,
-                                                     25))
+
+                let vars = extract_variants_from_alignment(
+                    &h2_alignment,
+                    &consensus_h2,
+                    &ref_window,
+                    l_ref,
+                    tid,
+                    all_seq_count,
+                    boundary,
+                )?;
+
+                if vars.len() > 0 {
+                    Some(vars)
+                } else {
+                    None
+                }
+
             } else {
                 None
             };
 
-            let mut all_vars: Option<Vec<Var>> = if h1_vars == None
-                && h2_vars == None
-                && all_seq_count >= min_reads {
-                let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
-                poa_multiple_sequence_alignment(&all_read_seqs, ref_window_nullterm.clone(),
-                                                1i32, // (all_seq_count/2) as i32
-                                                &mut consensus_all, alignment_type,
-                                                match_score, mismatch_score, gap_score);
-                let all_alignment = aligner.local(&consensus_all, &ref_window);
-                //println!("{}\n", all_alignment.pretty(&consensus_all, &ref_window));
-                Some(extract_variants_from_alignment(&all_alignment,
-                                                     &consensus_all,
-                                                     &ref_window,
-                                                     l_ref,
-                                                     tid,
-                                                     target_names[tid].clone(),
-                                                     all_seq_count,
-                                                     25))
-            } else {
-                None
-            };
+            let mut all_vars: Option<Vec<Var>> =
+                if h1_vars == None && h2_vars == None && all_seq_count >= min_reads {
+                    let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
+                    poa_multiple_sequence_alignment(
+                        &all_read_seqs,
+                        ref_window_nullterm.clone(),
+                        num_seeds, // (all_seq_count/2) as i32
+                        &mut consensus_all,
+                        alignment_type,
+                        match_score,
+                        mismatch_score,
+                        gap_open,
+                        gap_extend
+                    );
+                    let all_alignment = aligner.local(&consensus_all, &ref_window);
+                    //println!("{}\n", all_alignment.pretty(&consensus_all, &ref_window));
+                    let vars = extract_variants_from_alignment(
+                        &all_alignment,
+                        &consensus_all,
+                        &ref_window,
+                        l_ref,
+                        tid,
+                        all_seq_count,
+                        boundary,
+                    )?;
+
+                    if vars.len() > 0 {
+                        Some(vars)
+                    } else {
+                        None
+                    }
+
+                } else {
+                    None
+                };
 
             if VERBOSE {
                 /*
@@ -779,46 +891,133 @@ pub fn call_potential_variants_poa(bam_file: &String,
                     },
                     &None => {}
                 }*/
-match &h1_vars {
-&Some(ref vars) => {
-println!("H1 VARS:");
-for var in vars {
-println!("{}\t{}\t{}\t{}", var.chrom, var.pos0 + 1, var.alleles[0], var.alleles[1]);
-}
-},
-&None => {}
-}
+                if h1_vars != None || h2_vars != None || (all_vars != None && all_vars.clone().unwrap().len() > 0) {
 
-match &h2_vars {
-&Some(ref vars) => {
-println!("H2 VARS:");
-for var in vars {
-println!("{}\t{}\t{}\t{}", var.chrom, var.pos0 + 1, var.alleles[0], var.alleles[1]);
-}
-},
-&None => {}
-}
-println!("----------------------------------------------------------------------------");
-}
+                    if VERBOSE {
+                        println!("{}:{}-{}", target_names[tid].clone(), l_ref, r_ref);
 
-match all_vars {
-Some(mut vars) => { varlist.append(&mut vars); }
-None => {}
-}
+                        println!("REF: {}", str::from_utf8(&ref_window.clone()).unwrap());
+                        println!("-------");
 
-match h1_vars {
-Some(mut vars) => { varlist.append(&mut vars); }
-None => {}
-}
+                        println!("All read seqs:",);
+                        for (i, seq) in all_read_seqs.iter().enumerate() {
+                            println!(">seq{}", i);
+                            let mut s = seq.clone();
+                            s.pop();
+                            println!(
+                                "{}",
+                                str::from_utf8(&s)
+                                    .chain_err(|| "Error converting read sequences to valid UTF8")?
+                            );
+                        }
+                        println!("-------");
+                        println!("H1 read seqs:",);
+                        for (i, seq) in h1_read_seqs.iter().enumerate() {
+                            println!(">seq{}", i);
+                            let mut s = seq.clone();
+                            s.pop();
+                            println!(
+                                "{}",
+                                str::from_utf8(&s)
+                                    .chain_err(|| "Error converting read sequences to valid UTF8")?
+                            );
+                        }
 
-match h2_vars {
-Some(mut vars) => { varlist.append(&mut vars); }
-None => {}
-}
+                        println!("-------");
+                        println!("H2 read seqs:",);
+                        for (i, seq) in h2_read_seqs.iter().enumerate() {
+                            println!(">seq{}", i);
+                            let mut s = seq.clone();
+                            s.pop();
+                            println!(
+                                "{}",
+                                str::from_utf8(&s)
+                                    .chain_err(|| "Error converting read sequences to valid UTF8")?
+                            );
+                        }
+                        println!("-------");
+                    }
 
-prev_tid = tid;
+
+                }
+
+                match &h1_vars {
+                    &Some(ref vars) => {
+                        println!("H1 VARS:");
+                        for var in vars {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                target_names[var.tid as usize],
+                                var.pos0 + 1,
+                                var.alleles[0],
+                                var.alleles[1]
+                            );
+                        }
+                    }
+                    &None => {}
+                }
+
+                match &h2_vars {
+                    &Some(ref vars) => {
+                        println!("H2 VARS:");
+                        for var in vars {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                target_names[var.tid as usize],
+                                var.pos0 + 1,
+                                var.alleles[0],
+                                var.alleles[1]
+                            );
+                        }
+                    }
+                    &None => {}
+                }
+
+                match &all_vars {
+                    &Some(ref vars) if vars.len() > 0 => {
+                        println!("H1+H2 VARS:");
+                        for var in vars {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                target_names[var.tid as usize],
+                                var.pos0 + 1,
+                                var.alleles[0],
+                                var.alleles[1]
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+
+                println!(
+                    "----------------------------------------------------------------------------"
+                );
+            }
+
+            match all_vars {
+                Some(mut vars) => {
+                    varlist.append(&mut vars);
+                }
+                None => {}
+            }
+
+            match h1_vars {
+                Some(mut vars) => {
+                    varlist.append(&mut vars);
+                }
+                None => {}
+            }
+
+            match h2_vars {
+                Some(mut vars) => {
+                    varlist.append(&mut vars);
+                }
+                None => {}
+            }
+
+            prev_tid = tid;
+        }
+    }
+
+    Ok(VarList::new(varlist, target_names)?)
 }
-}
-Ok(VarList::new(varlist))
-}
-*/
