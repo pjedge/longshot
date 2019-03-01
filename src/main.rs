@@ -59,7 +59,7 @@ use util::*;
 use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
-use variants_and_fragments::VarFilter;
+use variants_and_fragments::{VarList,VarFilter};
 
 //use variants_and_fragments::parse_VCF_potential_variants;
 //use haplotype_assembly::separate_reads_by_haplotype;
@@ -755,10 +755,6 @@ fn run() -> Result<()> {
     )
     .chain_err(|| "Error during haplotype/genotype iteration procedure.")?;
 
-    // calculate MEC-based statistics for variants and blocks
-    calculate_mec(&flist, &mut varlist, max_p_miscall)
-        .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
-
     // if haplotype-based read separation is turned on,
     // write BAM files for h1,h2, and unassigned
     match hap_bam_prefix {
@@ -815,6 +811,20 @@ fn run() -> Result<()> {
         )
         .chain_err(|| "Error calling new potential variants using POA.")?;
 
+        // want to remove duplicates from POA variant list
+        let mut varlist_empty: VarList = VarList::new(vec![], varlist.target_names.clone())?;
+        varlist_poa.combine(&mut varlist_empty)?;
+
+        print_variant_debug(
+            &mut varlist_poa,
+            &interval,
+            &variant_debug_directory,
+            &"4.0.potential_SNVs_identified_with_POA.vcf",
+            max_cov,
+            &density_params,
+            &sample_name,
+        )?;
+
         eprintln!("{} Merging POA variants with pileup SNVs...", print_time());
 
         varlist.combine(&mut varlist_poa)?;
@@ -823,7 +833,7 @@ fn run() -> Result<()> {
             &mut varlist,
             &interval,
             &variant_debug_directory,
-            &"4.0.new_potential_SNVs_after_POA.vcf",
+            &"5.0.merged_potential_SNVs_pileup_and_POA.vcf",
             max_cov,
             &density_params,
             &sample_name,
@@ -859,7 +869,7 @@ fn run() -> Result<()> {
             &mut varlist,
             &interval,
             &variant_debug_directory,
-            &"5.0.realigned_genotypes_after_POA.vcf",
+            &"6.0.realigned_genotypes_after_POA.vcf",
             max_cov,
             &density_params,
             &sample_name,
@@ -875,7 +885,7 @@ fn run() -> Result<()> {
             &interval,
             &genotype_priors,
             &variant_debug_directory,
-            6,
+            7,
             max_cov,
             &density_params,
             max_p_miscall,
@@ -892,8 +902,12 @@ fn run() -> Result<()> {
         //calculate_mec(&flist2, &mut varlist);
     }
 
+    // calculate MEC-based statistics for variants and blocks
+    calculate_mec(&flist, &mut varlist, max_p_miscall)
+        .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
+
     let debug_filename = if use_poa {
-        "7.0.final_genotypes.vcf"
+        "8.0.final_genotypes.vcf"
     } else {
         "4.0.final_genotypes.vcf"
     };
