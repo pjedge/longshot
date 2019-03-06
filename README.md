@@ -16,12 +16,21 @@ It should work on any linux-based system that has Rust and Cargo installed.
 * rust 1.32.0 (see installation)
 * zlib
 * xz
+* clangdev
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
-First, install the Rust programming language. Longshot requires Rust 1.32.0 or higher which comes with the cargo package manager. You can install rust with the following command:
+Longshot will soon be available via [Bioconda](https://bioconda.github.io/) with a single command.
+
+In the meantime, Longshot can be compiled manually with these instructions:
+
+First, install anaconda and set up Bioconda as described [here](https://bioconda.github.io/).
+
+Second, use Bioconda to install the dependencies for Longshot:
+
 ```
-curl https://sh.rustup.rs -sSf | sh
+conda create -n longshot_deps zlib xz clangdev rust
+conda activate longshot_deps
 ```
 download the git repository and change to the longshot directory:
 ```
