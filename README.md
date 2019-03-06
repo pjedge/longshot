@@ -20,7 +20,7 @@ It should work on any linux-based system that has Rust and Cargo installed.
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
-Longshot will soon be available via [Bioconda](https://bioconda.github.io/) with a single command.
+Longshot will soon be available for install on [Bioconda](https://bioconda.github.io/) with a single command.
 
 In the meantime, Longshot can be compiled manually with these instructions:
 
