@@ -26,13 +26,18 @@ In the meantime, Longshot can be compiled manually with these instructions:
 
 First, install anaconda and set up Bioconda as described [here](https://bioconda.github.io/).
 
-Second, use Bioconda to install the dependencies for Longshot:
+Then, use Bioconda to install the dependencies for Longshot:
 
 ```
 conda create -n longshot_deps zlib xz clangdev rust
 conda activate longshot_deps
 ```
-download the git repository and change to the longshot directory:
+Make sure that the installed libraries can be found by specifying the paths to the libraries and header files in the anaconda environment. Using the default anaconda settings, the paths should look like this (replace USER with your unix username):
+```
+export CFLAGS="-I/home/USER/anaconda3/envs/longshot_deps/include"
+export LDFLAGS="-L/home/USER/anaconda3/envs/longshot_deps/lib -L/home/USER/anaconda3/envs/longshot_deps/lib64"
+```
+Download the git repository and change to the longshot directory:
 ```
 git clone https://github.com/pjedge/longshot
 cd longshot
