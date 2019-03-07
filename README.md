@@ -31,7 +31,7 @@ In the meantime, you can download the longshot recipe and install it locally usi
 This procedure assumes that the libc headers (```libc6-dev``` package in Ubuntu) are available on the system.
 
 First, install Miniconda (or Anaconda). Miniconda can be installed using the
-scripts [here].(https://docs.conda.io/en/latest/miniconda.html)  
+scripts [here](https://docs.conda.io/en/latest/miniconda.html). 
 
 Then, execute these commands
 ```
