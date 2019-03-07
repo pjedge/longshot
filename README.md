@@ -57,7 +57,7 @@ cd longshot                                           # change directory
 cargo install --path .                                # install Longshot
 export PATH=$PATH:/home/$USER/.cargo/bin              # add cargo binaries to path
 ```
-Installation should take around 4 minutes on a typical desktop machine and will use between 400 MB (counting cargo) and 1.7 GB (counting all dependencies) of disk space.
+Installation should take around 4 minutes on a typical desktop machine and will use between 400 MB (counting cargo) and 1.2 GB (counting all dependencies) of disk space.
 It is recommended to add the line ```export PATH=$PATH:/home/$USER/.cargo/bin``` to the end of your ```~/.bashrc``` file so that the longshot binary is in the PATH for future shell sessions.
 
 ## usage:
