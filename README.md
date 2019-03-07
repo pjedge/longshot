@@ -8,7 +8,7 @@ If you use Longshot, please cite the pre-print:
 [Edge, P. and Bansal, V., 2019. Longshot: accurate variant calling in diploid genomes using single-molecule long read sequencing. bioRxiv, p.564443.](https://www.biorxiv.org/content/10.1101/564443v1)
 
 ## supported operating systems
-Longshot has been tested using Ubuntu 16.04, CentOS 6.6, Manjaro Linux 17.1.11, and Mac OS 10.14.2 Mojave.
+Longshot has been tested using Ubuntu 16.04 and 18.04, CentOS 6.6, Manjaro Linux 17.1.11, and Mac OS 10.14.2 Mojave.
 It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
@@ -16,48 +16,45 @@ It should work on any linux-based system that has Rust and Cargo installed.
 * rust >= 1.32.0
 * zlib >= 1.2.11
 * xz >= 5.2.3
+* clang >= 6.0.0
 * clangdev >= 7.0.1
+* gcc >= 7.3.0
 * various rust dependencies (automatically managed by cargo)
 
 ## installation
-Longshot will soon be available for install on [Bioconda](https://bioconda.github.io/) with a single command.
 
-In the meantime, Longshot can be compiled manually with these instructions:
+### installation using Bioconda
 
-First, install Anaconda and set up Bioconda as described [here](https://bioconda.github.io/).
+Longshot will soon be available for installation with a single command using [Bioconda](https://bioconda.github.io/).
+In the meantime, you can manually download the Longshot recipe and install it using Bioconda:
 
-Then, use Bioconda to install the dependencies for Longshot:
+First, install Miniconda (or Anaconda) and set up Bioconda as described [here](https://bioconda.github.io/).
 
+Then, execute these commands 
 ```
-conda create -n longshot_deps zlib xz clangdev rust
-conda activate longshot_deps
+git clone -b longshot-recipe https://github.com/pjedge/bioconda-recipes         # clone repo with longshot recipe
+conda install conda-build                                                       # conda-build is needed for local recipe
+conda-build --no-anaconda-upload bioconda-recipes/recipes/longshot/meta.yaml    # build longshot
+conda install --use-local longshot                                              # install longshot
 ```
-Make sure that the installed libraries can be found by specifying the paths to the libraries and header files in the anaconda environment. Using the default anaconda settings, the paths should look like this (replace USER with your unix username):
-```
-export CFLAGS="-I/home/USER/anaconda3/envs/longshot_deps/include"
-export LDFLAGS="-L/home/USER/anaconda3/envs/longshot_deps/lib -L/home/USER/anaconda3/envs/longshot_deps/lib64"
-```
-Download the git repository and change to the longshot directory:
-```
-git clone https://github.com/pjedge/longshot
-cd longshot
-```
-To build Longshot, type:
-```
-cargo build --release
-```
-This will compile the code with optimizations in release mode, and the binary will be
-in ```target/release/longshot```. It will automatically install Rust dependencies for longshot,
-such rust-bio and rust-htslib. The build process should take around 3 minutes on a typical desktop computer.
+After installation, you can remove the ```bioconda-recipes``` directory to free up space.
 
-To run unit tests, type:
+### manual installation using apt for dependencies (Ubuntu 18.04)
+If you are using Ubuntu 18.04, you can install the dependencies using apt and the [Rust language installation script](https://www.rust-lang.org/tools/install). Then, the Rust cargo package manager is used to compile Longshot. 
 ```
-cargo test
+sudo apt-get install zlib1g-dev xz-utils libclang-dev clang build-essential curl git # install dependencies 
+curl https://sh.rustup.rs -sSf | sh              # install rust language
+source $HOME/.cargo/env                          # add rust binaries to path
+git clone https://github.com/pjedge/longshot     # clone the Longshot repository
+cd longshot                                      # change directory
+cargo install                                    # install Longshot
 ```
+Installation should take around 5 minutes and 1.7 GB of disk space (mostly dependencies) on a typical desktop machine.
 
-Usage:
+## usage:
+After installation, execute the longshot binary as so:
 ```
-$ ./target/release/longshot
+$ longshot [FLAGS] [OPTIONS] --bam <BAM> --ref <FASTA> --out <VCF>
 ```
 
 ## execution on an example dataset
@@ -68,14 +65,14 @@ The directory ```example_data``` contains a simulated toy dataset that can be us
 
 Run Longshot on the example data as so:
 ```
-./target/release/longshot --bam example_data/pacbio_reads_30x.bam --ref example_data/genome.fa --out example_data/longshot_output.vcf
+longshot --bam example_data/pacbio_reads_30x.bam --ref example_data/genome.fa --out example_data/longshot_output.vcf
 ```
 
 Execution should take around 30 seconds on a typical desktop machine. The output can be compared to ```ground_truth_variants.vcf``` for accuracy.
 
 ## command line options
 ```
-$ ./target/release/longshot --help
+$ longshot --help
 
 Longshot 0.3.2
 Peter Edge <edge.peterj@gmail.com>
@@ -155,15 +152,15 @@ OPTIONS:
 ## usage examples
 Call variants with default parameters:
 ```
-./target/release/longshot --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
 Call variants for chromosome 1 only using the automatic max coverage cutoff:
 ```
-./target/release/longshot -A -r chr1 --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot -A -r chr1 --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
 Call variants in a 500 kb region and then separate the reads into ```reads.hap1.bam```,```reads.hap2.bam```, ```reads.unassigned.bam``` using a haplotype assignment threshold of 30:
 ```
-./target/release/longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
 
 ## important considerations
