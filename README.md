@@ -28,8 +28,8 @@ It should work on any linux-based system that has Rust and Cargo installed.
 ### installation using Bioconda
 
 Longshot will soon be available for installation with a single command using [Bioconda](https://bioconda.github.io/).
-In the meantime, you can download the longshot recipe and install it locally using Bioconda.
-This procedure assumes that the libc headers (```libc6-dev``` package in Ubuntu) are available on the system.
+In the meantime, you can download the longshot recipe and build it locally using Bioconda.
+It is assumed that the libc headers (```libc6-dev``` package in Ubuntu) are available on the system.
 
 First, install Miniconda (or Anaconda). Miniconda can be installed using the
 scripts [here](https://docs.conda.io/en/latest/miniconda.html). 
@@ -47,6 +47,8 @@ conda-build --no-anaconda-upload bioconda-recipes/recipes/longshot/meta.yaml    
 conda install --use-local longshot                                              # install longshot
 ```
 After installation, you can remove the ```bioconda-recipes``` directory to free up space.
+The entire process, including miniconda installation, should take around 25 minutes on a typical desktop computer will use around 4 GB of disk space.
+For faster and more lightweight installation, you can try the manual build process described below.
 
 ### manual installation using apt for dependencies (Ubuntu 18.04)
 If you are using Ubuntu 18.04, you can install the dependencies using apt. Then, the Rust cargo package manager is used to compile Longshot. 
