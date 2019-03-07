@@ -18,6 +18,7 @@ It should work on any linux-based system that has Rust and Cargo installed.
 * xz >= 5.2.3
 * clangdev >= 7.0.1
 * gcc >= 7.3.0
+* libc-dev
 * make
 * various rust dependencies (automatically managed by cargo)
 
