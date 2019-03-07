@@ -47,7 +47,7 @@ conda-build --no-anaconda-upload bioconda-recipes/recipes/longshot/meta.yaml    
 conda install --use-local longshot                                              # install longshot
 ```
 After installation, you can remove the ```bioconda-recipes``` directory to free up space.
-The entire process, including miniconda installation, should take around 25 minutes on a typical desktop computer will use around 4 GB of disk space.
+The entire process, including miniconda installation, should take around 25 minutes on a typical desktop computer will use around 4.2 GB of disk space.
 For faster and more lightweight installation, you can try the manual build process described below.
 
 ### manual installation using apt for dependencies (Ubuntu 18.04)
