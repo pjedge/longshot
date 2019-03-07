@@ -13,43 +13,34 @@ It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
 
-* rust >= 1.32.0
+* rust >= 1.30.0
 * zlib >= 1.2.11
 * xz >= 5.2.3
-* clang >= 6.0.0
 * clangdev >= 7.0.1
 * gcc >= 7.3.0
+* make
 * various rust dependencies (automatically managed by cargo)
 
+(older versions may work but have not been tested)
 ## installation
 
 ### installation using Bioconda
 
 Longshot will soon be available for installation with a single command using [Bioconda](https://bioconda.github.io/).
-In the meantime, you can manually download the Longshot recipe and install it using Bioconda:
-
-First, install Miniconda (or Anaconda) and set up Bioconda as described [here](https://bioconda.github.io/).
-
-Then, execute these commands 
-```
-git clone -b longshot-recipe https://github.com/pjedge/bioconda-recipes         # clone repo with longshot recipe
-conda install conda-build                                                       # conda-build is needed for local recipe
-conda-build --no-anaconda-upload bioconda-recipes/recipes/longshot/meta.yaml    # build longshot
-conda install --use-local longshot                                              # install longshot
-```
-After installation, you can remove the ```bioconda-recipes``` directory to free up space.
+In the meantime, please manually install the dependencies and build Longshot with cargo, as described below.
 
 ### manual installation using apt for dependencies (Ubuntu 18.04)
-If you are using Ubuntu 18.04, you can install the dependencies using apt and the [Rust language installation script](https://www.rust-lang.org/tools/install). Then, the Rust cargo package manager is used to compile Longshot. 
+If you are using Ubuntu 18.04, you can install the dependencies using apt. Then, the Rust cargo package manager is used to compile Longshot. 
 ```
-sudo apt-get install zlib1g-dev xz-utils libclang-dev clang build-essential curl git # install dependencies 
-curl https://sh.rustup.rs -sSf | sh              # install rust language
-source $HOME/.cargo/env                          # add rust binaries to path
-git clone https://github.com/pjedge/longshot     # clone the Longshot repository
-cd longshot                                      # change directory
-cargo install                                    # install Longshot
+sudo apt-get install cargo zlib1g-dev xz-utils \
+         libclang-dev clang build-essential curl git  # install dependencies 
+git clone https://github.com/pjedge/longshot          # clone the Longshot repository
+cd longshot                                           # change directory
+cargo install --path .                                # install Longshot
+export PATH=$PATH:/home/$USER/.cargo/bin              # add cargo binaries to path
 ```
-Installation should take around 5 minutes and 1.7 GB of disk space (mostly dependencies) on a typical desktop machine.
+Installation should take around 4 minutes on a typical desktop machine and will use between 400 MB (counting cargo) and 1.7 GB (counting all dependencies) of disk space.
+It is recommended to add the line ```export PATH=$PATH:/home/$USER/.cargo/bin``` to the end of your ```~/.bashrc``` file so that the longshot binary is in the PATH for future shell sessions.
 
 ## usage:
 After installation, execute the longshot binary as so:
@@ -175,7 +166,7 @@ longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --
 ## installation troubleshooting
 
 ### older version of Rust
-Check that the Rust version is 1.32.0 or higher:
+Check that the Rust version is 1.30.0 or higher:
 ```
 rustc --version
 ```
