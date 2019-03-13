@@ -3,8 +3,7 @@
 // modified: Peter Edge, September 2017
 
 use bio::stats::{LogProb, Prob};
-
-static ALLOW_END_GAPS: bool = false;
+use std::f64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AlignmentType {
@@ -121,13 +120,12 @@ pub fn forward_algorithm_non_numerically_stable(
 
     middle_prev[0] = 1.0;
 
-    if ALLOW_END_GAPS {
-        upper_prev[1] = params.transition_probs.deletion_from_match;
-        for j in 2..(w.len() + 1) {
-            upper_prev[j] = upper_prev[j - 1] * params.transition_probs.deletion_from_deletion;
-            middle_prev[j] = 0.0;
-        }
+    upper_prev[1] = params.transition_probs.deletion_from_match;
+    for j in 2..(w.len() + 1) {
+        upper_prev[j] = upper_prev[j - 1] * params.transition_probs.deletion_from_deletion;
+        middle_prev[j] = 0.0;
     }
+
 
     let t = params.transition_probs;
     let e = params.emission_probs;
@@ -145,18 +143,18 @@ pub fn forward_algorithm_non_numerically_stable(
             w.len()
         };
 
-        if ALLOW_END_GAPS {
-            if band_start == 1 {
-                upper_curr[0] = 0.0;
-                middle_curr[0] = 0.0;
-                if i == 1 {
-                    lower_curr[0] = params.transition_probs.insertion_from_match
-                } else {
-                    lower_curr[0] =
-                        lower_prev[0] * params.transition_probs.insertion_from_insertion;
-                }
+
+        if band_start == 1 {
+            upper_curr[0] = 0.0;
+            middle_curr[0] = 0.0;
+            if i == 1 {
+                lower_curr[0] = params.transition_probs.insertion_from_match
+            } else {
+                lower_curr[0] =
+                    lower_prev[0] * params.transition_probs.insertion_from_insertion;
             }
         }
+
 
         for j in band_start..(band_end + 1) {
             let lower_continue = lower_prev[j] * t.insertion_from_insertion;
@@ -179,10 +177,17 @@ pub fn forward_algorithm_non_numerically_stable(
                 match_emission * (middle_from_lower + middle_continue + middle_from_upper);
         }
 
-        for j in band_start..(band_end + 1) {
+        for j in (band_start-1)..(band_end + 1) {
             upper_prev[j] = upper_curr[j];
             middle_prev[j] = middle_curr[j];
             lower_prev[j] = lower_curr[j];
+        }
+        // we previously had a bug at the left boundary of the band... set these to NaN to make sure they
+        // aren't used again
+        if band_start >= 2 {
+            upper_prev[band_start-2] = f64::NAN;
+            middle_prev[band_start-2] = f64::NAN;
+            lower_prev[band_start-2] = f64::NAN;
         }
 
         upper_curr[band_start] = 0.0;
@@ -217,11 +222,9 @@ pub fn forward_algorithm_numerically_stable(
     let t = params.transition_probs;
     let e = params.emission_probs;
 
-    if ALLOW_END_GAPS {
-        upper_prev[1] = params.transition_probs.deletion_from_match;
-        for j in 2..(w.len() + 1) {
-            upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
-        }
+    upper_prev[1] = params.transition_probs.deletion_from_match;
+    for j in 2..(w.len() + 1) {
+        upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
     }
 
     for i in 1..(v.len() + 1) {
@@ -237,15 +240,13 @@ pub fn forward_algorithm_numerically_stable(
             w.len()
         };
 
-        if ALLOW_END_GAPS {
-            if band_start == 1 {
-                middle_curr[0] = LogProb::ln_zero();
-                if i == 1 {
-                    lower_curr[0] = params.transition_probs.insertion_from_match
-                } else {
-                    lower_curr[0] =
-                        lower_prev[0] + params.transition_probs.insertion_from_insertion;
-                }
+        if band_start == 1 {
+            middle_curr[0] = LogProb::ln_zero();
+            if i == 1 {
+                lower_curr[0] = params.transition_probs.insertion_from_match
+            } else {
+                lower_curr[0] =
+                    lower_prev[0] + params.transition_probs.insertion_from_insertion;
             }
         }
 
@@ -270,10 +271,17 @@ pub fn forward_algorithm_numerically_stable(
             middle_curr[j] = match_emission + LogProb::ln_sum_exp(&options3);
         }
 
-        for j in band_start..(band_end + 1) {
+        for j in (band_start-1)..(band_end + 1) {
             upper_prev[j] = upper_curr[j];
             middle_prev[j] = middle_curr[j];
             lower_prev[j] = lower_curr[j];
+        }
+        // we previously had a bug at the left boundary of the band... set these to NaN to make sure they
+        // aren't used again
+        if band_start >= 2 {
+            upper_prev[band_start-2] = LogProb(f64::NAN);
+            middle_prev[band_start-2] = LogProb(f64::NAN);
+            lower_prev[band_start-2] = LogProb(f64::NAN);
         }
 
         upper_curr[band_start] = LogProb::ln_zero();
@@ -304,12 +312,11 @@ pub fn viterbi_max_scoring_alignment(
     let t = params.transition_probs;
     let e = params.emission_probs;
 
-    if ALLOW_END_GAPS {
-        upper_prev[1] = params.transition_probs.deletion_from_match;
-        for j in 2..(w.len() + 1) {
-            upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
-        }
+    upper_prev[1] = params.transition_probs.deletion_from_match;
+    for j in 2..(w.len() + 1) {
+        upper_prev[j] = upper_prev[j - 1] + params.transition_probs.deletion_from_deletion;
     }
+
 
     for i in 1..(v.len() + 1) {
         let band_middle = (w.len() * i) / v.len();
@@ -324,17 +331,16 @@ pub fn viterbi_max_scoring_alignment(
             w.len()
         };
 
-        if ALLOW_END_GAPS {
-            if band_start == 1 {
-                middle_curr[0] = LogProb::ln_zero();
-                if i == 1 {
-                    lower_curr[0] = params.transition_probs.insertion_from_match
-                } else {
-                    lower_curr[0] =
-                        lower_prev[0] + params.transition_probs.insertion_from_insertion;
-                }
+        if band_start == 1 {
+            middle_curr[0] = LogProb::ln_zero();
+            if i == 1 {
+                lower_curr[0] = params.transition_probs.insertion_from_match
+            } else {
+                lower_curr[0] =
+                    lower_prev[0] + params.transition_probs.insertion_from_insertion;
             }
         }
+
 
         for j in band_start..(band_end + 1) {
             let lower_continue = lower_prev[j] + t.insertion_from_insertion;
@@ -371,10 +377,17 @@ pub fn viterbi_max_scoring_alignment(
             middle_curr[j] = match_emission + max_option;
         }
 
-        for j in band_start..(band_end + 1) {
+        for j in (band_start-1)..(band_end + 1) {
             upper_prev[j] = upper_curr[j];
             middle_prev[j] = middle_curr[j];
             lower_prev[j] = lower_curr[j];
+        }
+        // we previously had a bug at the left boundary of the band... set these to NaN to make sure they
+        // aren't used again
+        if band_start >= 2 {
+            upper_prev[band_start-2] = LogProb(f64::NAN);
+            middle_prev[band_start-2] = LogProb(f64::NAN);
+            lower_prev[band_start-2] = LogProb(f64::NAN);
         }
 
         upper_curr[band_start] = LogProb::ln_zero();
