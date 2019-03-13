@@ -2,44 +2,71 @@
 
 Longshot is a variant calling tool for diploid genomes using long error prone reads such as Pacific Biosciences (PacBio) SMRT and Oxford Nanopore Technologies (ONT). It takes as input an aligned BAM file and outputs a phased VCF file with variants and haplotype information. It can also output haplotype-separated BAM files that can be used for downstream analysis. Currently, it only calls single nucleotide variants (SNVs).
 
+## citation
+If you use Longshot, please cite the pre-print:
+
+[Edge, P. and Bansal, V., 2019. Longshot: accurate variant calling in diploid genomes using single-molecule long read sequencing. bioRxiv, p.564443.](https://www.biorxiv.org/content/10.1101/564443v1)
 
 ## supported operating systems
-Longshot has been tested using Ubuntu 16.04, CentOS 6.6, Manjaro Linux 17.1.11, and Mac OS 10.14.2 Mojave.
+Longshot has been tested using Ubuntu 16.04 and 18.04, CentOS 6.6, Manjaro Linux 17.1.11, and Mac OS 10.14.2 Mojave.
 It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
 
-* rust 1.32.0 (see installation)
-* zlib
-* xz
+* rust >= 1.30.0
+* zlib >= 1.2.11
+* xz >= 5.2.3
+* clangdev >= 7.0.1
+* gcc >= 7.3.0
+* libc-dev
+* make
 * various rust dependencies (automatically managed by cargo)
 
+(older versions may work but have not been tested)
 ## installation
-First, install the Rust programming language. Longshot requires Rust 1.32.0 or higher which comes with the cargo package manager. You can install rust with the following command:
-```
-curl https://sh.rustup.rs -sSf | sh
-```
-download the git repository and change to the longshot directory:
-```
-git clone https://github.com/pjedge/longshot
-cd longshot
-```
-To build Longshot, type:
-```
-cargo build --release
-```
-This will compile the code with optimizations in release mode, and the binary will be
-in ```target/release/longshot```. It will automatically install Rust dependencies for longshot,
-such rust-bio and rust-htslib. The build process should take around 3 minutes on a typical desktop computer.
 
-To run unit tests, type:
-```
-cargo test
-```
+### installation using Bioconda
 
-Usage:
+Longshot will soon be available for installation with a single command using [Bioconda](https://bioconda.github.io/).
+In the meantime, you can download the longshot recipe and build it locally using Bioconda.
+It is assumed that the libc headers (```libc6-dev``` package in Ubuntu) are available on the system.
+
+First, install Miniconda (or Anaconda). Miniconda can be installed using the
+scripts [here](https://docs.conda.io/en/latest/miniconda.html). 
+
+Then, execute these commands
 ```
-$ ./target/release/longshot
+# add bioconda channel
+conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels conda-forge
+
+git clone -b longshot-recipe https://github.com/pjedge/bioconda-recipes         # clone repo with longshot recipe
+conda install conda-build                                                       # conda-build is needed for local recipe
+conda-build --no-anaconda-upload bioconda-recipes/recipes/longshot/meta.yaml    # build longshot
+conda install --use-local longshot                                              # install longshot
+```
+After installation, you can remove the ```bioconda-recipes``` directory to free up space.
+The entire process, including miniconda installation, should take around 25 minutes on a typical desktop computer will use around 4.2 GB of disk space.
+For faster and more lightweight installation, you can try the manual build process described below.
+
+### manual installation using apt for dependencies (Ubuntu 18.04)
+If you are using Ubuntu 18.04, you can install the dependencies using apt. Then, the Rust cargo package manager is used to compile Longshot. 
+```
+sudo apt-get install cargo zlib1g-dev xz-utils \
+         libclang-dev clang build-essential curl git  # install dependencies 
+git clone https://github.com/pjedge/longshot          # clone the Longshot repository
+cd longshot                                           # change directory
+cargo install --path .                                # install Longshot
+export PATH=$PATH:/home/$USER/.cargo/bin              # add cargo binaries to path
+```
+Installation should take around 4 minutes on a typical desktop machine and will use between 400 MB (counting cargo) and 1.2 GB (counting all dependencies) of disk space.
+It is recommended to add the line ```export PATH=$PATH:/home/$USER/.cargo/bin``` to the end of your ```~/.bashrc``` file so that the longshot binary is in the PATH for future shell sessions.
+
+## usage:
+After installation, execute the longshot binary as so:
+```
+$ longshot [FLAGS] [OPTIONS] --bam <BAM> --ref <FASTA> --out <VCF>
 ```
 
 ## execution on an example dataset
@@ -50,14 +77,14 @@ The directory ```example_data``` contains a simulated toy dataset that can be us
 
 Run Longshot on the example data as so:
 ```
-./target/release/longshot --bam example_data/pacbio_reads_30x.bam --ref example_data/genome.fa --out example_data/longshot_output.vcf
+longshot --bam example_data/pacbio_reads_30x.bam --ref example_data/genome.fa --out example_data/longshot_output.vcf
 ```
 
-Execution should take around 30 seconds on a typical desktop machine. The output can be compared to ```ground_truth_variants.vcf``` for accuracy.
+Execution should take around 5 to 10 seconds on a typical desktop machine. The output can be compared to ```ground_truth_variants.vcf``` for accuracy.
 
 ## command line options
 ```
-$ ./target/release/longshot --help
+$ longshot --help
 
 Longshot 0.3.2
 Peter Edge <edge.peterj@gmail.com>
@@ -137,15 +164,15 @@ OPTIONS:
 ## usage examples
 Call variants with default parameters:
 ```
-./target/release/longshot --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
 Call variants for chromosome 1 only using the automatic max coverage cutoff:
 ```
-./target/release/longshot -A -r chr1 --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot -A -r chr1 --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
 Call variants in a 500 kb region and then separate the reads into ```reads.hap1.bam```,```reads.hap2.bam```, ```reads.unassigned.bam``` using a haplotype assignment threshold of 30:
 ```
-./target/release/longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
 
 ## important considerations
@@ -160,7 +187,7 @@ Call variants in a 500 kb region and then separate the reads into ```reads.hap1.
 ## installation troubleshooting
 
 ### older version of Rust
-Check that the Rust version is 1.32.0 or higher:
+Check that the Rust version is 1.30.0 or higher:
 ```
 rustc --version
 ```
