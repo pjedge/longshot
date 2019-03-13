@@ -49,7 +49,7 @@ use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
-use realignment::AlignmentType;
+use realignment::{AlignmentType, AlignmentParameters, EmissionProbs, TransitionProbs};
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
 use std::fs::File;
@@ -335,6 +335,13 @@ fn run() -> Result<()> {
             .help("Remove a variant if the allele observations are biased toward one strand (forward or reverse) according to Fisher's exact test. Use this cutoff for the two-tailed P-value.")
             .display_order(185)
             .default_value(&"0.01"))
+        .arg(Arg::with_name("Min Genotype Quality")
+            .short("g")
+            .long("min_gq")
+            .value_name("float")
+            .help("Minimum Genotype Quality for final genotypes")
+            .display_order(187)
+            .default_value(&"0.0"))
         .arg(Arg::with_name("No haplotypes")
                 .short("n")
                 .long("no_haps")
@@ -373,6 +380,8 @@ fn run() -> Result<()> {
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
     let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
+    let min_gq: f64 = parse_nonnegative_f64(&input_args, "Min Genotype Quality")?;
+
     let strand_bias_pvalue_cutoff: f64 =
         parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
     let hap_assignment_qual: f64 =
@@ -533,6 +542,7 @@ fn run() -> Result<()> {
         store_read_id,
     };
 
+
     eprintln!("{} Estimating alignment parameters...", print_time());
     let alignment_parameters = estimate_alignment_parameters(
         &bamfile_name,
@@ -542,6 +552,19 @@ fn run() -> Result<()> {
         max_cigar_indel as u32,
     )
     .chain_err(|| "Error estimating alignment parameters.")?;
+
+    /*
+    let alignment_parameters = AlignmentParameters {
+        emission_probs: EmissionProbs {equal: 0.982, not_equal: 0.006, insertion: 1.0, deletion:1.0},
+        transition_probs: TransitionProbs {match_from_match: 0.879,
+            insertion_from_match: 0.06,
+            deletion_from_match: 0.06,
+            match_from_deletion: 0.85,
+            deletion_from_deletion: 0.15,
+            match_from_insertion: 0.85,
+            insertion_from_insertion: 0.15}
+    };
+    */
 
     /***********************************************************************************************/
     // GET GENOTYPE PRIORS
@@ -728,6 +751,7 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
+            min_gq
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -933,6 +957,7 @@ fn run() -> Result<()> {
         &density_params,
         &sample_name,
         false,
+        min_gq
     )
     .chain_err(|| "Error printing VCF output.")?;
 

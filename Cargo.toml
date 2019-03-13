@@ -17,5 +17,5 @@ hashbrown = "0.1.8"
 cc = "1.0"
 cmake = "0.1"
 
-#[profile.release]
-#debug = true       # (u32 or bool) Include debug information (debug symbols).
+[profile.release]
+debug = true       # (u32 or bool) Include debug information (debug symbols).
