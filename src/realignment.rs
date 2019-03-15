@@ -399,3 +399,195 @@ pub fn viterbi_max_scoring_alignment(
 
     middle_prev[w.len()]
 }
+
+pub fn baum_welch_non_numerically_stable(
+    v: &Vec<char>,
+    w: &Vec<char>,
+    params: AlignmentParameters,
+    min_band_width: usize,
+) -> AlignmentParameters {
+    let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
+    let band_width = min_band_width + len_diff;
+
+    // calculate forward probabilities
+
+    let mut forward_lower: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
+    let mut forward_middle: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
+    let mut forward_upper: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
+
+    forward_middle[0][0] = 1.0;
+
+    forward_upper[0][1] = params.transition_probs.deletion_from_match;
+    for j in 2..(w.len() + 1) {
+        forward_upper[0][j] = forward_upper[0][j - 1] * params.transition_probs.deletion_from_deletion;
+    }
+
+    forward_lower[1][0] = params.transition_probs.insertion_from_match;
+    for i in 2..(v.len() + 1) {
+        forward_lower[i][0] = forward_lower[i-1][0] * params.transition_probs.insertion_from_insertion;
+    }
+
+    let t = params.transition_probs;
+    let e = params.emission_probs;
+
+    for i in 1..(v.len() + 1) {
+        let band_middle = (w.len() * i) / v.len();
+        let band_start = if band_middle >= band_width / 2 + 1 {
+            band_middle - band_width / 2
+        } else {
+            1
+        };
+        let band_end = if band_middle + band_width / 2 <= w.len() {
+            band_middle + band_width / 2
+        } else {
+            w.len()
+        };
+
+        for j in band_start..(band_end + 1) {
+            let lower_continue = forward_lower[i-1][j] * t.insertion_from_insertion;
+            let lower_from_middle = forward_middle[i-1][j] * t.insertion_from_match;
+            forward_lower[i][j] = e.insertion * (lower_continue + lower_from_middle);
+
+            let upper_continue = forward_upper[i][j - 1] * t.deletion_from_deletion;
+            let upper_from_middle = forward_middle[i][j - 1] * t.deletion_from_match;
+            forward_upper[i][j] = e.deletion * (upper_continue + upper_from_middle);
+
+            let middle_from_lower = forward_lower[i-1][j - 1] * t.match_from_insertion;
+            let middle_continue = forward_middle[i-1][j - 1] * t.match_from_match;
+            let middle_from_upper = forward_upper[i-1][j - 1] * t.match_from_deletion;
+
+            let match_emission: f64 = if v[i - 1] == w[j - 1] {
+                e.equal
+            } else {
+                e.not_equal
+            };
+            forward_middle[i][j] =
+                match_emission * (middle_from_lower + middle_continue + middle_from_upper);
+        }
+    }
+
+
+    // calculate backward probabilities
+
+    let mut backward_lower: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
+    let mut backward_middle: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
+    let mut backward_upper: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
+
+    backward_middle[v.len()][w.len()] = 1.0;
+
+    backward_upper[v.len()][w.len()] = params.transition_probs.deletion_from_deletion;
+    for j in (0..(w.len())).rev() {
+        backward_upper[v.len()][j] = backward_upper[v.len()][j+1] * params.transition_probs.deletion_from_deletion;
+    }
+
+    backward_lower[v.len()][w.len()] = params.transition_probs.insertion_from_insertion;
+    for i in (0..(v.len())).rev() {
+        backward_lower[i][w.len()] = backward_lower[i+1][w.len()] * params.transition_probs.insertion_from_insertion;
+    }
+
+    let t = params.transition_probs;
+    let e = params.emission_probs;
+
+    for i in (0..v.len()).rev() {
+        let band_middle = (w.len() * i) / v.len();
+        let band_start = if band_middle >= band_width / 2 {
+            band_middle - band_width / 2
+        } else {
+            0
+        };
+        let band_end = if band_middle + band_width / 2 < w.len() {
+            band_middle + band_width / 2
+        } else {
+            w.len()-1
+        };
+
+        for j in (band_start..(band_end + 1)).rev() {
+            let lower_continue = backward_lower[i+1][j] * t.insertion_from_insertion;
+            let lower_from_middle = backward_middle[i+1][j] * t.match_from_insertion;
+            backward_lower[i][j] = e.insertion * (lower_continue + lower_from_middle);
+
+            let upper_continue = backward_upper[i][j+1] * t.deletion_from_deletion;
+            let upper_from_middle = backward_middle[i][j+1] * t.match_from_deletion;
+            backward_upper[i][j] = e.deletion * (upper_continue + upper_from_middle);
+
+            let middle_from_lower = backward_lower[i+1][j+1] * t.insertion_from_match;
+            let middle_continue = backward_middle[i+1][j+1] * t.match_from_match;
+            let middle_from_upper = backward_upper[i+1][j+1] * t.deletion_from_match;
+
+            let match_emission: f64 = if v[i] == w[j] {
+                e.equal
+            } else {
+                e.not_equal
+            };
+            backward_middle[i][j] =
+                match_emission * (middle_from_lower + middle_continue + middle_from_upper);
+        }
+    }
+
+    eprintln!("forward_lower:");
+    for i in 0..(v.len()+1) {
+        eprintln!("{:?}",forward_lower[i]);
+    }
+
+    eprintln!("forward_middle:");
+    for i in 0..(v.len()+1) {
+        eprintln!("{:?}",forward_middle[i]);
+    }
+    eprintln!("forward_upper:");
+    for i in 0..(v.len()+1) {
+        eprintln!("{:?}",forward_upper[i]);
+    }
+
+    eprintln!("\n\nbackward_lower:");
+    for i in 0..(v.len()+1) {
+        eprintln!("{:?}",backward_lower[i]);
+    }
+
+    eprintln!("backward_middle:");
+    for i in 0..(v.len()+1) {
+        eprintln!("{:?}",backward_middle[i]);
+    }
+    eprintln!("backward_upper:");
+    for i in 0..(v.len()+1) {
+        eprintln!("{:?}",backward_upper[i]);
+    }
+
+    let x = forward_lower[v.len()][w.len()]*params.transition_probs.match_from_insertion+
+    forward_middle[v.len()][w.len()]*params.transition_probs.match_from_match+
+        forward_upper[v.len()][w.len()]*params.transition_probs.deletion_from_insertion;
+
+    let y = backward_lower[0][0]*params.transition_probs.insertion_from_match+
+        backward_middle[0][0]*params.transition_probs.match_from_match+
+        backward_upper[0][0]*params.transition_probs.deletion_from_match;
+
+    println!("{} {}", x, y);
+
+    //(forward_middle[v.len()][w.len()],backward_middle[0][0])
+    params.clone()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_baumwelch() {
+
+        let v = vec!['A','C','T','G'];
+        let w = vec!['A','C','C','G'];
+        let alignment_parameters = AlignmentParameters {
+            emission_probs: EmissionProbs {equal: 0.982, not_equal: 0.006, insertion: 1.0, deletion:1.0},
+            transition_probs: TransitionProbs {match_from_match: 0.879,
+                insertion_from_match: 0.06,
+                deletion_from_match: 0.06,
+                match_from_deletion: 0.85,
+                deletion_from_deletion: 0.15,
+                match_from_insertion: 0.85,
+                insertion_from_insertion: 0.15}
+        };
+
+        baum_welch_non_numerically_stable(&v,&w,alignment_parameters,20);
+        assert!(true);
+    }
+}

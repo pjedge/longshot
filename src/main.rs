@@ -49,7 +49,7 @@ use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
-use realignment::{AlignmentType, AlignmentParameters, EmissionProbs, TransitionProbs};
+use realignment::{AlignmentType, AlignmentParameters, EmissionProbs, TransitionProbs, baum_welch_non_numerically_stable};
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
 use std::fs::File;
@@ -106,6 +106,25 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
     // READ COMMAND LINE ARGUMENTS
     /***********************************************************************************************/
+
+    {
+
+        let v = vec!['A','C','T','G'];
+        let w = vec!['A','C','C','G'];
+        let alignment_parameters = AlignmentParameters {
+            emission_probs: EmissionProbs {equal: 0.982, not_equal: 0.006, insertion: 1.0, deletion:1.0},
+            transition_probs: TransitionProbs {match_from_match: 0.879,
+                insertion_from_match: 0.08,
+                deletion_from_match: 0.04,
+                match_from_deletion: 0.9,
+                deletion_from_deletion: 0.1,
+                match_from_insertion: 0.8,
+                insertion_from_insertion: 0.2}
+        };
+
+        baum_welch_non_numerically_stable(&v,&w,alignment_parameters,20);
+        assert!(true);
+    }
 
     eprintln!("");
 
