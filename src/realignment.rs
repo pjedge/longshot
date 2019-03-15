@@ -554,7 +554,7 @@ pub fn baum_welch_non_numerically_stable(
 
     let x = forward_lower[v.len()][w.len()]*params.transition_probs.match_from_insertion+
     forward_middle[v.len()][w.len()]*params.transition_probs.match_from_match+
-        forward_upper[v.len()][w.len()]*params.transition_probs.deletion_from_insertion;
+        forward_upper[v.len()][w.len()]*params.transition_probs.match_from_deletion;
 
     let y = backward_lower[0][0]*params.transition_probs.insertion_from_match+
         backward_middle[0][0]*params.transition_probs.match_from_match+
