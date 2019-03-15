@@ -542,7 +542,7 @@ fn run() -> Result<()> {
         store_read_id,
     };
 
-
+    /*
     eprintln!("{} Estimating alignment parameters...", print_time());
     let alignment_parameters = estimate_alignment_parameters(
         &bamfile_name,
@@ -552,8 +552,8 @@ fn run() -> Result<()> {
         max_cigar_indel as u32,
     )
     .chain_err(|| "Error estimating alignment parameters.")?;
+    */
 
-    /*
     let alignment_parameters = AlignmentParameters {
         emission_probs: EmissionProbs {equal: 0.982, not_equal: 0.006, insertion: 1.0, deletion:1.0},
         transition_probs: TransitionProbs {match_from_match: 0.879,
@@ -564,7 +564,7 @@ fn run() -> Result<()> {
             match_from_insertion: 0.85,
             insertion_from_insertion: 0.15}
     };
-    */
+
 
     /***********************************************************************************************/
     // GET GENOTYPE PRIORS

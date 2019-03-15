@@ -669,7 +669,7 @@ fn extract_var_cluster(
     //(anchors.right_anchor_ref as usize) + 1]
     //        .to_vec();
 
-    let test_pos = 72968; //67624;
+    let test_pos = 237496;
     let mut print_stuff: bool = false;
     for v in 0..var_cluster.len() {
         if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
