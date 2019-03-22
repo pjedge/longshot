@@ -647,7 +647,8 @@ fn extract_var_cluster(
     var_cluster: Vec<Var>,
     anchors: AnchorPositions,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
+    align_params: &AlignmentParameters,
+    ln_align_params: &LnAlignmentParameters,
 ) -> Vec<FragCall> {
     let mut calls: Vec<FragCall> = vec![];
 
@@ -717,7 +718,7 @@ fn extract_var_cluster(
                 forward_algorithm_numerically_stable(
                     &read_window,
                     &hap_window,
-                    align_params.ln(),
+                    ln_align_params,
                     extract_params.band_width,
                 )
             }
@@ -732,7 +733,7 @@ fn extract_var_cluster(
             AlignmentType::ViterbiMaxScoringAlignment => viterbi_max_scoring_alignment(
                 &read_window,
                 &hap_window,
-                align_params.ln(),
+                ln_align_params,
                 extract_params.band_width,
             ),
         };
@@ -812,7 +813,8 @@ pub fn extract_fragment(
     ref_seq: &Vec<char>,
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
+    align_params: &AlignmentParameters,
+    ln_align_params: &LnAlignmentParameters,
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -937,6 +939,7 @@ pub fn extract_fragment(
             anchors,
             extract_params,
             align_params,
+            ln_align_params
         ) {
             fragment.calls.push(call);
         }
@@ -951,7 +954,8 @@ pub fn extract_fragments(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
-    align_params: AlignmentParameters,
+    align_params: &AlignmentParameters,
+    ln_align_params: &LnAlignmentParameters
 ) -> Result<Vec<Fragment>> {
     let t_names = parse_target_names(&bam_file)?;
 
@@ -1047,6 +1051,7 @@ pub fn extract_fragments(
                 &t_names,
                 extract_params,
                 align_params,
+                ln_align_params
             )
             .chain_err(|| "Error extracting fragment from read.")?;
 

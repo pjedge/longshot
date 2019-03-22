@@ -42,7 +42,7 @@ use bio::stats::{LogProb, PHREDProb, Prob};
 use call_genotypes::*;
 use clap::{App, Arg};
 use errors::*;
-use estimate_alignment_parameters::estimate_alignment_parameters;
+use estimate_alignment_parameters::{estimate_alignment_parameters};
 use estimate_read_coverage::calculate_mean_coverage;
 use extract_fragments::ExtractFragmentParameters;
 use fishers_exact::fishers_exact;
@@ -621,7 +621,8 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         extract_fragment_parameters,
-        alignment_parameters,
+        &alignment_parameters,
+        &alignment_parameters.ln()
     )
     .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 

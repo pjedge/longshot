@@ -8,6 +8,7 @@
 use bio::io::fasta;
 use errors::*;
 use extract_fragments::{create_augmented_cigarlist, CigarPos};
+use hashbrown::HashMap;
 use realignment::*;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
@@ -55,10 +56,56 @@ pub struct EmissionCounts {
 /// a struct to hold counts of transition events and emission events from the BAM file
 ///
 /// together these counts represent all of the counts necessary to estimate the HMM parameters
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct AlignmentCounts {
     transition_counts: TransitionCounts,
     emission_counts: EmissionCounts,
+    homopolymer_counts: HomopolymerCounts
+}
+
+/// a struct to hold counts of homopolymer expansions
+///
+/// these counts are used to estimate the HMM parameters for homopolymers
+#[derive(Clone)]
+pub struct HomopolymerCounts(HashMap<(char, usize, usize),usize>); // hc[(base, ref_len, alt_len)]
+
+impl HomopolymerCounts {
+
+    fn to_probs(&self) -> HomopolymerProbs {
+
+        let mut denom_counts: HashMap<(char,usize), usize> = HashMap::new();
+
+        // iterate over all of the homopolymer counts
+        // count occurrences of (reference base, homopolymer length) pairs
+        for (&(ref base, ref ref_len, ref _alt_len), &count) in &self.0 {
+            *denom_counts.entry((*base,*ref_len)).or_insert(0) += count;
+        }
+
+        let mut probs: HashMap<(char,usize,usize), f64> = HashMap::new();
+        // then iterate over the homopolymer counts again
+        // divide each count for the observed length by the total
+        for (&(ref base, ref ref_len, ref alt_len), &count) in &self.0 {
+
+            let frac = (count as f64) / (*denom_counts.get(&(*base, *ref_len)).unwrap() as f64);
+
+            probs.insert((*base, *ref_len, *alt_len), frac);
+
+        }
+
+        // return as a HomopolymerProbs
+        HomopolymerProbs(probs)
+    }
+
+    /// add the corresponding counts inside two ```HomopolymerCount```s together
+    ///
+    /// this function allows us to create separate ```HomopolymerCount``` structs for each newly
+    /// observed read, and then just add those counts onto a grand total count for the BAM file.
+    fn add(&mut self, other: HomopolymerCounts) {
+        for (&(ref base, ref len_on_ref, ref len_on_read), &count) in &other.0 {
+            *self.0.entry((*base, *len_on_ref, *len_on_read))
+                .or_insert(0) += count;
+        }
+    }
 }
 
 impl TransitionCounts {
@@ -139,8 +186,127 @@ impl AlignmentCounts {
         AlignmentParameters {
             transition_probs: self.transition_counts.to_probs(),
             emission_probs: self.emission_counts.to_probs(),
+            homopolymer_probs: self.homopolymer_counts.to_probs()
         }
     }
+}
+
+pub fn process_alignments(aln_seq: &Vec<char>, aln_ref: &Vec<char>) -> (TransitionCounts, EmissionCounts, HomopolymerCounts) {
+
+    // initialize TransitionCounts and EmissionCounts with all counts set to 0
+    let mut transition_counts = TransitionCounts {
+        match_from_match: 0,
+        insertion_from_match: 0,
+        deletion_from_match: 0,
+        insertion_from_insertion: 0,
+        match_from_insertion: 0,
+        deletion_from_deletion: 0,
+        match_from_deletion: 0,
+    };
+
+    let mut emission_counts = EmissionCounts {
+        equal: 0,
+        not_equal: 0,
+    };
+
+    let mut homopolymer_counts = HomopolymerCounts(HashMap::new());
+
+    // assume the initial state is MATCH
+    let mut state: AlignmentState = AlignmentState::Match;
+
+    let mut i = 0;
+
+    // step across the whole length of the alignment
+    while i < aln_seq.len() {
+
+        // these will hold either single aligned bases, or aligned homopolymer stretches
+        let mut seq_window = vec![];
+        let mut ref_window = vec![];
+
+        let current_base = if aln_ref[i] != '-' {
+            aln_ref[i]
+        } else {
+            aln_seq[i]
+        };
+
+        assert_ne!(current_base, '-');
+
+        if aln_ref[i] != '-' && aln_seq[i] != '-' && aln_seq[i] != aln_ref[i] {
+            seq_window.push(aln_seq[i]);
+            ref_window.push(aln_ref[i]);
+            i += 1;
+        } else {
+            while i < aln_seq.len() && (aln_ref[i] == current_base || (aln_ref[i] == '-' && aln_seq[i] == current_base)){
+                seq_window.push(aln_seq[i]);
+                ref_window.push(aln_ref[i]);
+                i += 1;
+            }
+        }
+
+        if ref_window.len() == 1 && seq_window.len() == 1 {
+
+            // standard alignment operations -- match, insertion, or deletion
+
+            if ref_window[0] != '-' && seq_window[0] != '-' {
+                // MATCH
+                if ref_window[0] == seq_window[0] {
+                    emission_counts.equal += 1;
+                } else {
+                    emission_counts.not_equal += 1;
+                }
+
+                match state {
+                    AlignmentState::Match => {transition_counts.match_from_match += 1;},
+                    AlignmentState::Insertion => {transition_counts.match_from_insertion += 1;},
+                    AlignmentState::Deletion => {transition_counts.match_from_deletion += 1;},
+                }
+
+                state = AlignmentState::Match;
+
+            } else if ref_window[0] == '-' && seq_window[0] != '-' {
+                // INSERTION
+                match state {
+                    AlignmentState::Match => {transition_counts.insertion_from_match += 1;},
+                    AlignmentState::Insertion => {transition_counts.insertion_from_insertion += 1;},
+                    AlignmentState::Deletion => {transition_counts.match_from_deletion += 1;
+                                                 transition_counts.insertion_from_match += 1;},
+                }
+
+                state = AlignmentState::Insertion;
+
+            } else if ref_window[0] != '-' && seq_window[0] == '-' {
+                // DELETION
+                match state {
+                    AlignmentState::Match => {transition_counts.deletion_from_match += 1;},
+                    AlignmentState::Insertion => {transition_counts.match_from_insertion += 1;
+                                                  transition_counts.deletion_from_match += 1;},
+                    AlignmentState::Deletion => {transition_counts.deletion_from_deletion += 1;},
+                }
+
+                state = AlignmentState::Deletion;
+
+            }
+        } else {
+            // homopolymer run
+
+            match state {
+                AlignmentState::Match => {transition_counts.match_from_match += 1;},
+                AlignmentState::Insertion => {transition_counts.match_from_insertion += 1;},
+                AlignmentState::Deletion => {transition_counts.match_from_deletion += 1;},
+            }
+
+            let len_on_ref = ref_window.iter().filter(|&n| *n == current_base).count();
+            let len_on_read = seq_window.iter().filter(|&n| *n == current_base).count();
+
+            *homopolymer_counts.0.entry((current_base, len_on_ref, len_on_read))
+                .or_insert(0) += 1;
+
+            state = AlignmentState::Match;
+
+        }
+    }
+
+    (transition_counts, emission_counts, homopolymer_counts)
 }
 
 //************************************************************************************************
@@ -187,25 +353,10 @@ pub fn count_alignment_events(
     ref_seq: &Vec<char>,
     read_seq: &Vec<char>,
     max_cigar_indel: u32,
-) -> Result<(TransitionCounts, EmissionCounts)> {
-    // initialize TransitionCounts and EmissionCounts with all counts set to 0
-    let mut transition_counts = TransitionCounts {
-        match_from_match: 0,
-        insertion_from_match: 0,
-        deletion_from_match: 0,
-        insertion_from_insertion: 0,
-        match_from_insertion: 0,
-        deletion_from_deletion: 0,
-        match_from_deletion: 0,
-    };
+) -> Result<(TransitionCounts, EmissionCounts, HomopolymerCounts)> {
 
-    let mut emission_counts = EmissionCounts {
-        equal: 0,
-        not_equal: 0,
-    };
-
-    // assume the initial state is MATCH
-    let mut state: AlignmentState = AlignmentState::Match;
+    let mut aln_seq = vec![];
+    let mut aln_ref = vec![];
 
     // for each cigar operation in the BAM record
     for cigarpos in cigarpos_list {
@@ -222,31 +373,11 @@ pub fn count_alignment_events(
                         break; // break if we've reached the end of the read or reference
                     }
 
-                    // we add the transition from the current state
-                    // to the new state (which is match)
-                    match state {
-                        AlignmentState::Match => {
-                            transition_counts.match_from_match += 1;
-                        }
-                        AlignmentState::Deletion => {
-                            transition_counts.match_from_deletion += 1;
-                        }
-                        AlignmentState::Insertion => {
-                            transition_counts.match_from_insertion += 1;
-                        }
-                    }
-
-                    // we have transitioned to a match so set the current state to match
-                    state = AlignmentState::Match;
-
                     // check if the aligned bases match or mismatch and use these to iterate the
                     // emission counts (whether bases match or mismatch)
                     if ref_seq[ref_pos] != 'N' && read_seq[read_pos] != 'N' {
-                        if ref_seq[ref_pos] == read_seq[read_pos] {
-                            emission_counts.equal += 1;
-                        } else {
-                            emission_counts.not_equal += 1;
-                        }
+                        aln_seq.push(read_seq[read_pos]);
+                        aln_ref.push(ref_seq[ref_pos]);
                     }
 
                     // it's a match operation so both read and reference move forward one position
@@ -270,25 +401,11 @@ pub fn count_alignment_events(
                         break; // break if we've reached the end of the read or reference
                     }
 
-                    // we add the transition from the current state
-                    // to the new state (which is insertion)
-                    match state {
-                        AlignmentState::Insertion => {
-                            transition_counts.insertion_from_insertion += 1;
-                        }
-                        AlignmentState::Match => {
-                            transition_counts.insertion_from_match += 1;
-                        }
-                        AlignmentState::Deletion => {
-                            // MINIMAP2 sometimes goes directly from insertion <-> deletion
-                            // we will just add an implicit deletion -> match -> insertion
-                            transition_counts.match_from_deletion += 1;
-                            transition_counts.insertion_from_match += 1;
-                        }
+                    if read_seq[read_pos] != 'N' {
+                        aln_seq.push(read_seq[read_pos]);
+                        aln_ref.push('-');
                     }
 
-                    // we have transitioned to an insertion so set the current state as insertion
-                    state = AlignmentState::Insertion;
                     // this is an insertion so only the read position is moved forward
                     read_pos += 1;
                 }
@@ -308,25 +425,11 @@ pub fn count_alignment_events(
                     if ref_pos >= ref_seq.len() - 1 || read_pos >= read_seq.len() - 1 {
                         break; // break if we've reached the end of the read or reference
                     }
-                    // we add the transition from the current state
-                    // to the new state (which is deletion)
-                    match state {
-                        AlignmentState::Deletion => {
-                            transition_counts.deletion_from_deletion += 1;
-                        }
-                        AlignmentState::Match => {
-                            transition_counts.deletion_from_match += 1;
-                        }
-                        AlignmentState::Insertion => {
-                            // MINIMAP2 sometimes goes directly from insertion <-> deletion
-                            // we will just add an implicit Insertion -> match -> deletion
-                            transition_counts.match_from_insertion += 1;
-                            transition_counts.deletion_from_match += 1;
-                        }
-                    }
 
-                    // we have transitioned to deletion so set the current state to deletion
-                    state = AlignmentState::Deletion;
+                    if ref_seq[ref_pos] != 'N' {
+                        aln_seq.push('-');
+                        aln_ref.push(ref_seq[ref_pos]);
+                    }
                     // this is a deletion so only the reference position is moved forward
                     ref_pos += 1;
                 }
@@ -339,7 +442,9 @@ pub fn count_alignment_events(
         }
     }
 
-    return Ok((transition_counts, emission_counts));
+    assert_eq!(aln_seq.len(), aln_ref.len());
+
+    return Ok(process_alignments(&aln_seq, &aln_ref));
 }
 
 //************************************************************************************************
@@ -403,6 +508,8 @@ pub fn estimate_alignment_parameters(
         not_equal: 1,
     };
 
+    let mut homopolymer_counts = HomopolymerCounts(HashMap::new());
+
     // interval_lst has either the single specified genomic region, or list of regions covering all chromosomes
     // for more information about this design decision, see get_interval_lst implementation in util.rs
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
@@ -453,13 +560,14 @@ pub fn estimate_alignment_parameters(
                     .chain_err(|| "Error creating augmented cigarlist.")?;
 
             // count the emission and transition events directly from the record's CIGAR and sequences
-            let (read_transition_counts, read_emission_counts) =
+            let (read_transition_counts, read_emission_counts, read_homopolymer_counts) =
                 count_alignment_events(&cigarpos_list, &ref_seq, &read_seq, max_cigar_indel)
                     .chain_err(|| "Error counting cigar alignment events.")?;
 
             // add emission and transition counts to the running total
             transition_counts.add(read_transition_counts);
             emission_counts.add(read_emission_counts);
+            homopolymer_counts.add(read_homopolymer_counts);
 
             prev_tid = tid;
         }
@@ -469,6 +577,7 @@ pub fn estimate_alignment_parameters(
     let alignment_counts = AlignmentCounts {
         transition_counts: transition_counts,
         emission_counts: emission_counts,
+        homopolymer_counts: homopolymer_counts
     };
 
     // convert the alignment counts from the BAM into probabilities
@@ -527,6 +636,37 @@ pub fn estimate_alignment_parameters(
         SPACER, params.emission_probs.deletion
     );
     eprintln!("");
+
+    // then iterate over the homopolymer counts again
+    // divide each count for the observed length by the total
+    /*
+    for (&(ref base, ref ref_len, ref alt_len), &prob) in &params.homopolymer_probs.0 {
+
+        eprintln!(
+            "{} {} {} {}:                {:.3}",
+            SPACER, *base, *ref_len, *alt_len, prob
+        );
+
+    }
+    */
+
+    for base in ['A','C','G','T'].iter() {
+        for len_on_ref in 1..20 {
+            for len_on_read in 1..20 {
+                let opt_prob = params.homopolymer_probs.0.get(&(*base, len_on_ref, len_on_read));
+                let prob = match opt_prob {
+                    Some(prob) => {
+                        *prob
+                    },
+                    None => {0.0}
+                };
+                eprintln!(
+                    "{} {} {} {}:                {:.3}",
+                    SPACER, base, len_on_ref, len_on_read, prob
+                );
+            }
+        }
+    }
 
     Ok(params)
 }

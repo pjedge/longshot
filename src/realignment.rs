@@ -3,6 +3,7 @@
 // modified: Peter Edge, September 2017
 
 use bio::stats::{LogProb, Prob};
+use hashbrown::HashMap;
 use std::f64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -38,6 +39,21 @@ pub struct LnTransitionProbs {
     pub match_from_insertion: LogProb,
     pub deletion_from_deletion: LogProb,
     pub match_from_deletion: LogProb,
+}
+
+#[derive(Clone)]
+pub struct HomopolymerProbs(pub HashMap<(char, usize, usize), f64>); // key is (base, length on ref, length on read). value is probability of observing that length on read given the base and length on ref
+#[derive(Clone)]
+pub struct LnHomopolymerProbs(pub HashMap<(char, usize, usize), LogProb>); // key is (base, length on ref, length on read). value is log probability of observing that length on read given the base and length on ref
+
+impl HomopolymerProbs {
+    pub fn ln(&self) -> LnHomopolymerProbs {
+        let mut map: HashMap<(char, usize, usize), LogProb> = HashMap::new();
+        for ((base, len_on_ref, len_on_read), prob) in &self.0 {
+            map.insert((*base, *len_on_ref, *len_on_read), LogProb::from(Prob(*prob)));
+        }
+        LnHomopolymerProbs(map)
+    }
 }
 
 impl TransitionProbs {
@@ -81,16 +97,18 @@ impl EmissionProbs {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct AlignmentParameters {
     pub transition_probs: TransitionProbs,
     pub emission_probs: EmissionProbs,
+    pub homopolymer_probs: HomopolymerProbs
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct LnAlignmentParameters {
     pub transition_probs: LnTransitionProbs,
     pub emission_probs: LnEmissionProbs,
+    pub homopolymer_probs: LnHomopolymerProbs
 }
 
 impl AlignmentParameters {
@@ -98,6 +116,7 @@ impl AlignmentParameters {
         LnAlignmentParameters {
             transition_probs: self.transition_probs.ln(),
             emission_probs: self.emission_probs.ln(),
+            homopolymer_probs: self.homopolymer_probs.ln()
         }
     }
 }
@@ -105,7 +124,7 @@ impl AlignmentParameters {
 pub fn forward_algorithm_non_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
-    params: AlignmentParameters,
+    params: &AlignmentParameters,
     min_band_width: usize,
 ) -> (LogProb) {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
@@ -195,17 +214,15 @@ pub fn forward_algorithm_non_numerically_stable(
         lower_curr[band_start] = 0.0;
     }
 
-    if middle_prev[w.len()] != 0.0 {
-        LogProb::from(Prob(middle_prev[w.len()]))
-    } else {
-        forward_algorithm_numerically_stable(v, w, params.ln(), band_width)
-    }
+
+    LogProb::from(Prob(middle_prev[w.len()]))
+
 }
 
 pub fn forward_algorithm_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
-    params: LnAlignmentParameters,
+    params: &LnAlignmentParameters,
     min_band_width: usize,
 ) -> (LogProb) {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
@@ -295,7 +312,7 @@ pub fn forward_algorithm_numerically_stable(
 pub fn viterbi_max_scoring_alignment(
     v: &Vec<char>,
     w: &Vec<char>,
-    params: LnAlignmentParameters,
+    params: &LnAlignmentParameters,
     min_band_width: usize,
 ) -> LogProb {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
