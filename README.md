@@ -31,7 +31,7 @@ It is recommended to install Longshot using [Bioconda](https://bioconda.github.i
 ```
 conda install longshot
 ```
-
+This method supports Linux and Mac.
 If you do not have Bioconda, you can install it with these steps:
 First, install Miniconda (or Anaconda). Miniconda can be installed using the
 scripts [here](https://docs.conda.io/en/latest/miniconda.html). 
