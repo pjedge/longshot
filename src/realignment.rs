@@ -121,6 +121,59 @@ impl AlignmentParameters {
     }
 }
 
+/// given a vector seq of chars, return the vector occ such that
+/// for each seq[i], occ[i] returns the first occurrence of that
+/// character in the current run of same letters.
+///
+/// example:
+/// seq = ['A','T','C','C','C','C','T']
+/// occ = [0,1,2,2,2,2,6]
+pub fn first_occ_vector(seq: &Vec<char>) -> Vec<usize> {
+
+    let mut occ = Vec::with_capacity(seq.len());
+    let mut prev_char = 'N';
+    let mut prev_occ = 0;
+    for (i,c) in seq.iter().enumerate() {
+        if *c == prev_char {
+            occ.push(prev_occ);
+        } else {
+            occ.push(i);
+            prev_occ = i;
+        }
+
+        prev_char = *c;
+    }
+
+    occ
+}
+
+/// given a vector seq of chars, return the vector occ such that
+/// for each seq[i], occ[i] returns the last occurrence of that
+/// character in the current run of same letters.
+///
+/// example:
+/// seq = ['A','T','C','C','C','C','T']
+/// occ = [0,1,5,5,5,5,6]
+pub fn last_occ_vector(seq: &Vec<char>) -> Vec<usize> {
+
+    let mut occ = Vec::with_capacity(seq.len());
+    let mut prev_char = 'N';
+    let mut prev_occ = seq.len()-1;
+    for (i,c) in seq.iter().enumerate().rev() {
+        if *c == prev_char {
+            occ.push(prev_occ);
+        } else {
+            occ.push(i);
+            prev_occ = i;
+        }
+
+        prev_char = *c;
+    }
+
+    occ.reverse();
+    occ
+}
+
 pub fn forward_algorithm_non_numerically_stable(
     v: &Vec<char>,
     w: &Vec<char>,
@@ -134,7 +187,10 @@ pub fn forward_algorithm_non_numerically_stable(
     let mut forward_middle: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
     let mut forward_upper: Vec<Vec<f64>> = vec![vec![0.0; w.len() + 1]; v.len()+1];
 
-    let mut last_hp: Vec<Vec<(char,usize,usize)>> = vec![vec![('N',0,0); w.len() + 1]; v.len()+1];
+    let first_occ_v = first_occ_vector(&v);
+    let first_occ_w = first_occ_vector(&w);
+    let last_occ_v = last_occ_vector(&v);
+    let last_occ_w = last_occ_vector(&w);
 
     forward_middle[0][0] = 1.0;
 
@@ -166,37 +222,82 @@ pub fn forward_algorithm_non_numerically_stable(
 
         for j in band_start..(band_end + 1) {
 
-            last_hp[i][j] = if v[i - 1] == w[j - 1] {
-                if v[i - 1] == last_hp[i][j-1].0 {
-                    last_hp[i][j-1]
-                } else if w[j - 1] == last_hp[i-1][j].0 {
-                    last_hp[i-1][j]
-                } else {
-                    (v[i - 1], i, j)
+            if v[i - 1] == w[j - 1]  && (first_occ_v[i-1] != i-1 || first_occ_w[j-1] != j-1 ){
+
+                // only necessary to fill in these table entries for the bottom and right of the
+                // homopolymer square
+                if !(last_occ_v[i-1] == i-1 || last_occ_w[j-1] == j-1) {
+                    continue;
                 }
+                // Homopolymer run
+                let hp_base = v[i - 1];
+                let mut indices = vec![];
+                // build list of (l_i,l_j) index pairs that represent the outer perimeter of
+                // the homopolymer "square"
+                for h_i in (first_occ_v[i-1]+1..i).rev() {
+                    indices.push((h_i,first_occ_w[j-1]));
+                }
+
+                indices.push((first_occ_v[i-1],first_occ_w[j-1]));
+
+                for h_j in first_occ_w[j-1]+1..j {
+                    indices.push((first_occ_v[i-1],h_j));
+                }
+
+                //eprintln!("Calculating homopolymer square...");
+                for (h_i,h_j) in indices.iter() {
+
+                    let hp_len_read = i - h_i;
+                    let hp_len_ref = j - h_j;
+
+                    let prob_homopolymer = match params.homopolymer_probs.0.get(&(hp_base, hp_len_ref, hp_len_read)) {
+                        Some(prob) => *prob,
+                        None => 0.0
+                    };
+
+                    /*
+                    eprintln!("h_i={}; h_j={}; i={}; j={};",h_i,h_j,i,j);
+                    eprintln!("{} {} {}", hp_base, hp_len_ref, hp_len_read);
+                    let v_pref: String = v[0..i].iter().collect();
+                    let w_pref: String = w[0..j].iter().collect();
+                    let hp_read_str: String = vec![hp_base; hp_len_read].iter().collect();
+                    let hp_ref_str: String = vec![hp_base; hp_len_ref].iter().collect();
+                    let vprime_pref: String = v[0..*h_i].iter().collect();
+                    let wprime_pref: String = w[0..*h_j].iter().collect();
+
+                    eprintln!("f({} | {}) = P({} | {}) * f({} | {})",v_pref, w_pref, hp_read_str, hp_ref_str, vprime_pref, wprime_pref);
+                    */
+                    forward_middle[i][j] += (forward_lower[*h_i][*h_j] +
+                                             forward_middle[*h_i][*h_j] +
+                                             forward_upper[*h_i][*h_j]) * prob_homopolymer;
+
+                }
+
             } else {
-                ('N', i, j)
-            };
 
-            let lower_continue = forward_lower[i-1][j] * t.insertion_from_insertion;
-            let lower_from_middle = forward_middle[i-1][j] * t.insertion_from_match;
-            forward_lower[i][j] = e.insertion * (lower_continue + lower_from_middle);
+                // Not a homopolymer run
 
-            let upper_continue = forward_upper[i][j - 1] * t.deletion_from_deletion;
-            let upper_from_middle = forward_middle[i][j - 1] * t.deletion_from_match;
-            forward_upper[i][j] = e.deletion * (upper_continue + upper_from_middle);
+                let lower_continue = forward_lower[i-1][j] * t.insertion_from_insertion;
+                let lower_from_middle = forward_middle[i-1][j] * t.insertion_from_match;
+                forward_lower[i][j] = e.insertion * (lower_continue + lower_from_middle);
 
-            let middle_from_lower = forward_lower[i-1][j - 1] * t.match_from_insertion;
-            let middle_continue = forward_middle[i-1][j - 1] * t.match_from_match;
-            let middle_from_upper = forward_upper[i-1][j - 1] * t.match_from_deletion;
+                let upper_continue = forward_upper[i][j - 1] * t.deletion_from_deletion;
+                let upper_from_middle = forward_middle[i][j - 1] * t.deletion_from_match;
+                forward_upper[i][j] = e.deletion * (upper_continue + upper_from_middle);
 
-            let match_emission: f64 = if v[i - 1] == w[j - 1] {
-                e.equal
-            } else {
-                e.not_equal
-            };
-            forward_middle[i][j] =
-                match_emission * (middle_from_lower + middle_continue + middle_from_upper);
+                let middle_from_lower = forward_lower[i-1][j - 1] * t.match_from_insertion;
+                let middle_continue = forward_middle[i-1][j - 1] * t.match_from_match;
+                let middle_from_upper = forward_upper[i-1][j - 1] * t.match_from_deletion;
+
+                let match_emission: f64 = if v[i - 1] == w[j - 1] {
+                    e.equal
+                } else {
+                    e.not_equal
+                };
+                forward_middle[i][j] =
+                    match_emission * (middle_from_lower + middle_continue + middle_from_upper);
+
+            }
         }
     }
 
@@ -398,4 +499,47 @@ pub fn viterbi_max_scoring_alignment(
     }
 
     middle_prev[w.len()]
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_first_occ_vector1() {
+
+        let seq = vec!['A','T','C','C','C','C','T'];
+        let exp_occ = vec![0,1,2,2,2,2,6];
+
+        assert_eq!(first_occ_vector(&seq), exp_occ);
+    }
+
+    #[test]
+    fn test_first_occ_vector2() {
+
+        let seq = vec!['A','A','A','C','C','C'];
+        let exp_occ = vec![0,0,0,3,3,3];
+
+        assert_eq!(first_occ_vector(&seq), exp_occ);
+    }
+
+    #[test]
+    fn test_last_occ_vector1() {
+
+        let seq = vec!['A','T','C','C','C','C','T'];
+        let exp_occ = vec![0,1,5,5,5,5,6];
+
+        assert_eq!(last_occ_vector(&seq), exp_occ);
+    }
+
+    #[test]
+    fn test_last_occ_vector2() {
+
+        let seq = vec!['A','A','A','C','C','C'];
+        let exp_occ = vec![2,2,2,5,5,5];
+
+        assert_eq!(last_occ_vector(&seq), exp_occ);
+    }
 }

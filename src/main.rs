@@ -49,7 +49,7 @@ use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
-use realignment::AlignmentType;
+use realignment::*;
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
 use std::fs::File;
