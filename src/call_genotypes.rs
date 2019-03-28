@@ -156,6 +156,26 @@ pub fn call_genotypes_no_haplotypes(
 
     assert_eq!(pileup_lst.len(), varlist.lst.len());
 
+/*    let mut probs: Vec<GenotypeProbs> = vec![];
+
+    for var in &varlist {
+        // this probability matrix initially holds the genotype priors p(g),
+        // and after the loop it holds P(data | g) * p(g)
+        let p: GenotypeProbs = genotype_priors
+            .get_all_priors(&var.alleles)
+            .chain_err(|| "Error getting all genotype priors while calculating genotypes.")?;
+
+        probs.push(p);
+    }
+
+    for fragment in &flist {
+        for cluster in &fragment.clusters {
+            for (i,(var_ix,allele)) in &cluster.var_ixs.zip(&cluster.alleles) {
+
+            }
+        }
+    }*/
+
     // for each variant in the VarList
     for i in 0..varlist.lst.len() {
         let pileup = &pileup_lst[i];
@@ -284,6 +304,19 @@ pub fn call_genotypes_with_haplotypes(
         }
     }
 
+    // obtain cluster_ixs. cluster_ixs[i][(f1,c1,v1),(f2,c2,v2)...] is a vector of tuples, where each tuple
+    // (f1,c1,v1) contains a fragment index (f1) and a cluster index (c1) and index into the cluster
+    // variants (v1) that overlaps variant i.
+    let mut cluster_ixs: Vec<Vec<(usize,usize,usize)>> = vec![vec![]; varlist.lst.len()];
+
+    for (f, fragment) in flist.iter().enumerate() {
+        for (c, cluster) in fragment.clusters.iter().enumerate() {
+            for (v,var_ix) in cluster.var_ixs.iter().enumerate() {
+                cluster_ixs[*var_ix].push((f,c,v));
+            }
+        }
+    }
+
     let mut haps: Vec<Vec<u8>> = vec![vec![0u8; n_var]; 2];
     let mut prev_likelihood = LogProb::ln_zero();
 
@@ -344,11 +377,13 @@ pub fn call_genotypes_with_haplotypes(
             // pr[0] holds P(read | H1), pr[1] holds P(read | H2)
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
             for hap_ix in &hap_ixs {
-                for call in &flist[f].calls {
 
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
-
+                for cluster in &flist[f].clusters {
+                    let mut alleles = vec![];
+                    for v_ix in &cluster.var_ixs {
+                        alleles.push(haps[*hap_ix][*v_ix] as u8);
+                    }
+                    pr[*hap_ix] = pr[*hap_ix] + cluster.get_hap_prob(&alleles);
                 }
             }
             // L = L * ( 0.5*P(read | H1) + 0.5*P(read | H2) )
@@ -447,9 +482,7 @@ pub fn call_genotypes_with_haplotypes(
                         varlist.lst[i].phase_set = None;
                     }
                 }
-                _ => {
-                    var_phased[i] = false;
-                }
+                _ => {}
             }
 
             haps[0][i] = varlist.lst[i].genotype.0;
@@ -483,9 +516,12 @@ pub fn call_genotypes_with_haplotypes(
         for f in 0..flist.len() {
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
             for hap_ix in &hap_ixs {
-                for call in &flist[f].calls {
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
+                for cluster in &flist[f].clusters {
+                    let mut alleles = vec![];
+                    for v_ix in &cluster.var_ixs {
+                        alleles.push(haps[*hap_ix][*v_ix] as u8);
+                    }
+                    pr[*hap_ix] = pr[*hap_ix] + cluster.get_hap_prob(&alleles);
                 }
             }
             total_likelihood =
@@ -500,11 +536,12 @@ pub fn call_genotypes_with_haplotypes(
 
         for hap_ix in &hap_ixs {
             for f in 0..flist.len() {
-                for call in &flist[f].calls {
-
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + call.allele_probs[a];
-
+                for cluster in &flist[f].clusters {
+                    let mut alleles = vec![];
+                    for v_ix in &cluster.var_ixs {
+                        alleles.push(haps[*hap_ix][*v_ix] as u8);
+                    }
+                    p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + cluster.get_hap_prob(&alleles);
                 }
             }
         }
@@ -535,56 +572,59 @@ pub fn call_genotypes_with_haplotypes(
                 let mut p_read_lst_genotype: Vec<Vec<Vec<(usize, LogProb, LogProb)>>> =
                     vec![vec![vec![]; var.alleles.len()]; var.alleles.len()];
 
-                // p_read_hap contains the probability of reads given haplotypes,
-                // ONLY for variants in variant_phased.
-                // so to correctly calculate p_reads for a variant, if the variant isn't in var_phased
-                // we should simply multiply in the values
-                // if it is in var phased we do the whole divide out, multiply in stuff
                 for g in var.possible_genotypes() {
-                    for call in &pileup_lst[v as usize] {
+                    for (f_ix, c_ix, cv_ix) in &cluster_ixs[v as usize] {
+
+                        let cluster: &CallCluster = &flist[*f_ix].clusters[*c_ix];
+
+                        let mut alleles_h0 = vec![];
+                        let mut alleles_h1 = vec![];
+                        for v_ix in &cluster.var_ixs {
+                            alleles_h0.push(haps[0][*v_ix] as u8);
+                            alleles_h1.push(haps[1][*v_ix] as u8);
+                        }
 
                         // get the value of the read likelihood given each haplotype
-                        let (mut p_read_h0, mut p_read_h1) = (p_read_hap[0][call.frag_ix as usize],
-                                                              p_read_hap[1][call.frag_ix as usize]);
+                        let (mut p_read_h0, mut p_read_h1) = (p_read_hap[0][cluster.frag_ix as usize],
+                                                              p_read_hap[1][cluster.frag_ix as usize]);
 
-                        if var_phased[v as usize] {
-                            // for each haplotype allele
-                            // if that allele on the haplotype changes in g = [g1,g2],
-                            // then we divide out the old value and multiply in the new value
+                        // for each haplotype allele
+                        // if that allele on the haplotype changes in g = [g1,g2],
+                        // then we divide out the old value and multiply in the new value
 
-                            // haplotype 0 at site j will change under this genotype
-                            // therefore p_read_h0 needs to change
-                            if haps[0][v as usize] != g.0 as u8 {
+                        // haplotype 0 at site j will change under this genotype
+                        // therefore p_read_h0 needs to change
+                        if haps[0][v as usize] != g.0 as u8 {
 
-                                let old_a = haps[0][v as usize] as usize;
-                                let new_a = g.0 as usize;
-                                p_read_h0 = p_read_h0 - call.allele_probs[old_a] + call.allele_probs[new_a];
+                            let old_prob = cluster.get_hap_prob(&alleles_h0);
+                            let bak = alleles_h0[*cv_ix];
+                            alleles_h0[*cv_ix] = g.0;
+                            let new_prob = cluster.get_hap_prob(&alleles_h0);
+                            alleles_h0[*cv_ix] = bak;
 
-                            }
-
-                            // haplotype 1 at site j will change under this genotype
-                            // therefore p_read_h1 needs to change
-                            if haps[1][v as usize] != g.1 as u8 {
-
-                                let old_a = haps[1][v as usize] as usize;
-                                let new_a = g.1 as usize;
-                                p_read_h1 = p_read_h1 - call.allele_probs[old_a] + call.allele_probs[new_a];
-
-                            }
-                        } else {
-
-                            p_read_h0 = p_read_h0 + call.allele_probs[g.0 as usize];
-                            p_read_h1 = p_read_h1 + call.allele_probs[g.1 as usize];
+                            p_read_h0 = p_read_h0 - old_prob + new_prob;
 
                         }
 
-                        if var_phased[v as usize] {
-                            p_read_lst_genotype[g.0 as usize][g.1 as usize].push((
-                                call.frag_ix as usize,
+                        // haplotype 1 at site j will change under this genotype
+                        // therefore p_read_h1 needs to change
+                        if haps[1][v as usize] != g.1 as u8 {
+
+                            let old_prob = cluster.get_hap_prob(&alleles_h1);
+                            let bak = alleles_h1[*cv_ix];
+                            alleles_h1[*cv_ix] = g.1;
+                            let new_prob = cluster.get_hap_prob(&alleles_h1);
+                            alleles_h1[*cv_ix] = bak;
+
+                            p_read_h1 = p_read_h1 - old_prob + new_prob;
+
+                        }
+
+                         p_read_lst_genotype[g.0 as usize][g.1 as usize].push((
+                                cluster.frag_ix as usize,
                                 p_read_h0,
                                 p_read_h1,
                             ));
-                        }
 
                         let p_read = LogProb::ln_add_exp(ln_half + p_read_h0, ln_half + p_read_h1);
 
@@ -606,14 +646,13 @@ pub fn call_genotypes_with_haplotypes(
                     // if this variant was phased with HapCUT2 and used in calculating P(read | h),
                     // then we need to update the P(read | h1) and P(read | h2) values that changed
                     // when we changed h1 and h2
-                    if var_phased[v as usize] {
-                        for &(frag_ix, p_read_h0, p_read_h1) in
-                            &p_read_lst_genotype[max_g.0 as usize][max_g.1 as usize]
-                            {
-                                p_read_hap[0][frag_ix] = p_read_h0;
-                                p_read_hap[1][frag_ix] = p_read_h1;
-                            }
-                    }
+                    for &(frag_ix, p_read_h0, p_read_h1) in
+                        &p_read_lst_genotype[max_g.0 as usize][max_g.1 as usize]
+                        {
+                            p_read_hap[0][frag_ix] = p_read_h0;
+                            p_read_hap[1][frag_ix] = p_read_h1;
+                        }
+
                 }
 
                 // update the haplotype vectors with the max scoring phased genotype
@@ -653,11 +692,12 @@ pub fn call_genotypes_with_haplotypes(
         for f in 0..flist.len() {
             let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
             for hap_ix in &hap_ixs {
-                for call in &flist[f].calls {
-
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
-
+                for cluster in &flist[f].clusters {
+                    let mut alleles = vec![];
+                    for v_ix in &cluster.var_ixs {
+                        alleles.push(haps[*hap_ix][*v_ix] as u8);
+                    }
+                    pr[*hap_ix] = pr[*hap_ix] + cluster.get_hap_prob(&alleles);
                 }
             }
             total_likelihood =

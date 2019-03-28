@@ -23,9 +23,46 @@ pub struct FragCall {
 }
 
 #[derive(Clone)]
+pub struct CallCluster {
+    pub frag_ix: usize,            // index into fragment list
+    pub var_ixs: Vec<usize>,             // index into variant list
+    pub alleles: Vec<u8>,                // allele call
+    pub max_allele_ct: u8,
+    pub haplotype_probs: Vec<LogProb> // the probability of each allele
+}
+
+impl CallCluster {
+
+    fn get_hap_ix(&self, hap: &Vec<u8>) -> usize {
+        let mut x = 1;
+        let mut ix = 0;
+        for a in hap {
+            ix += x * (*a as usize);
+            x *= self.max_allele_ct as usize;
+        }
+        ix
+    }
+
+    pub fn set_hap_prob(&mut self, hap: &Vec<u8>, prob: LogProb) {
+        assert_eq!(self.var_ixs.len(), hap.len());
+        if self.haplotype_probs.len() == 0 {
+            let size = (self.max_allele_ct as usize).pow(self.var_ixs.len() as u32 +1);
+            self.haplotype_probs.append(&mut vec![LogProb::ln_zero(); size]);
+        }
+        let ix = self.get_hap_ix(hap);
+        self.haplotype_probs[ix] = prob;
+    }
+
+    pub fn get_hap_prob(&self, hap: &Vec<u8>) -> LogProb {
+        self.haplotype_probs[self.get_hap_ix(hap)]
+    }
+}
+
+#[derive(Clone)]
 pub struct Fragment {
     pub id: Option<String>,
     pub calls: Vec<FragCall>,
+    pub clusters: Vec<CallCluster>,
     pub p_read_hap: [LogProb; 2],
     pub reverse_strand: bool
 }

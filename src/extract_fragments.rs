@@ -648,8 +648,26 @@ fn extract_var_cluster(
     anchors: AnchorPositions,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-) -> Vec<FragCall> {
+) -> (Vec<FragCall>,CallCluster) {
     let mut calls: Vec<FragCall> = vec![];
+
+    // initialize CallCluster struct
+    let mut max_allele_ct = 0;
+    let mut var_ixs = vec![];
+    for var in &var_cluster {
+        var_ixs.push(var.ix);
+        if var.alleles.len() > max_allele_ct {
+            max_allele_ct = var.alleles.len();
+        }
+    }
+
+    let mut cluster: CallCluster = CallCluster{
+        frag_ix: 0,
+        var_ixs,
+        alleles: vec![],
+        max_allele_ct: max_allele_ct as u8,
+        haplotype_probs: vec![]
+    };
 
     //let ref_window = ref_seq[(anchors.left_anchor_ref as usize)..
     //(anchors.right_anchor_ref as usize) + 1]
@@ -755,6 +773,8 @@ fn extract_var_cluster(
         // add current alignment score to the total score sum
         score_total = LogProb::ln_add_exp(score_total, score);
 
+        cluster.set_hap_prob(&hap, score);
+
         if score > max_score {
             max_score = score;
             max_hap = hap.clone();
@@ -789,15 +809,17 @@ fn extract_var_cluster(
             frag_ix: usize::MAX, // this will be assigned a correct value soon after all fragments extracted
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
-            allele_probs: allele_probs
+            allele_probs
         });
+
     }
 
     if VERBOSE {
         eprintln!("--------------------------------------");
     }
+    cluster.alleles = max_hap.clone();
 
-    calls
+    (calls, cluster)
 }
 
 pub fn extract_fragment(
@@ -824,7 +846,7 @@ pub fn extract_fragment(
     let mut fragment = Fragment {
         id: Some(id),
         calls: vec![],
-        // ln(0.5) stored as f16 for compactness
+        clusters: vec![],
         p_read_hap: [LogProb::from(Prob(0.5)),
                      LogProb::from(Prob(0.5))],
         reverse_strand: bam_record.is_reverse()
@@ -925,16 +947,19 @@ pub fn extract_fragment(
 
     for (anchors, var_cluster) in cluster_lst {
         // extract the calls for the fragment
-        for call in extract_var_cluster(
+
+        let (mut calls, cluster) = extract_var_cluster(
             &read_seq,
             ref_seq,
             var_cluster,
             anchors,
             extract_params,
-            align_params,
-        ) {
-            fragment.calls.push(call);
-        }
+            align_params);
+
+        fragment.clusters.push(cluster);
+
+        fragment.calls.append(&mut calls);
+
     }
 
     Ok(Some(fragment))
@@ -1061,6 +1086,9 @@ pub fn extract_fragments(
     for i in 0..flist.len() {
         for j in 0..flist[i].calls.len() {
             flist[i].calls[j].frag_ix = i;
+        }
+        for j in 0..flist[i].clusters.len() {
+            flist[i].clusters[j].frag_ix = i;
         }
     }
 
