@@ -7,7 +7,7 @@ extern "C" {
     unsigned poa_func(char** seqs, int num_seqs,
                       char* seed_seq, int num_seeds,
                       char* consensus, int consensus_len,
-                      int alignment_type, int match_score, int mismatch_score, int gap_score) {
+                      int alignment_type, int match_score, int mismatch_score, int gap_open, int gap_extend) {
 
         if (num_seqs == 0) {
             return (unsigned) 0;
@@ -24,7 +24,8 @@ extern "C" {
         auto alignment_engine = spoa::createAlignmentEngine(static_cast<spoa::AlignmentType>(alignment_type),
                                                             (int8_t) match_score,
                                                             (int8_t) mismatch_score,
-                                                            (int8_t) gap_score);
+                                                            (int8_t) gap_open,
+                                                            (int8_t) gap_extend);
         auto graph = spoa::createGraph();
 
         // seed the POA with a seed sequence (e.g. reference sequence)
@@ -34,10 +35,10 @@ extern "C" {
         // but each subsequent alignment is going to be the same, and is only to increase the seed sequence's weight.
         // so for each subsequent addition we save computation by just adding the same alignment onto the graph over and over.
         if (num_seeds > 0) {
-            auto first_seed_aln = alignment_engine->align_sequence_with_graph(seed_sequence, graph);
+            auto first_seed_aln = (*alignment_engine)(seed_sequence, graph);
             graph->add_alignment(first_seed_aln, seed_sequence);
 
-            auto next_seed_aln = alignment_engine->align_sequence_with_graph(seed_sequence, graph);
+            auto next_seed_aln = (*alignment_engine)(seed_sequence, graph);
             for (int i = 1; i < num_seeds; i++){
                 graph->add_alignment(next_seed_aln, seed_sequence);
             }
@@ -45,7 +46,7 @@ extern "C" {
 
         // add each of the real sequences (e.g. noisy sequence reads) to the graph
         for (const auto& it: sequences) {
-            auto alignment = alignment_engine->align_sequence_with_graph(it, graph);
+            auto alignment = (*alignment_engine)(it, graph);
             graph->add_alignment(alignment, it);
         }
 

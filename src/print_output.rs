@@ -20,6 +20,7 @@ pub fn print_vcf(
     density_params: &DensityParameters,
     sample_name: &String,
     print_outside_region: bool,
+    min_gq: f64
 ) -> Result<()> {
     // first, add filter flags for variant density
     var_filter(
@@ -99,6 +100,10 @@ pub fn print_vcf(
             if var.genotype == Genotype(0, 0) {
                 continue;
             }
+        }
+
+        if var.gq < min_gq {
+            continue;
         }
 
         match fasta {
@@ -242,6 +247,7 @@ pub fn print_variant_debug(
                 density_params,
                 sample_name,
                 true,
+                0.0
             )
             .chain_err(|| "Error printing debug VCF file.")?;
         }

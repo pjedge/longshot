@@ -143,7 +143,6 @@ pub fn forward_algorithm_non_numerically_stable(
             w.len()
         };
 
-
         if band_start == 1 {
             upper_curr[0] = 0.0;
             middle_curr[0] = 0.0;
@@ -168,6 +167,8 @@ pub fn forward_algorithm_non_numerically_stable(
             let middle_from_lower = lower_prev[j - 1] * t.match_from_insertion;
             let middle_continue = middle_prev[j - 1] * t.match_from_match;
             let middle_from_upper = upper_prev[j - 1] * t.match_from_deletion;
+            //eprintln!("Aligning v[{}]=={} to w[{}]=={}",i-1,v[i-1],j-1,w[j-1]);
+
             let match_emission: f64 = if v[i - 1] == w[j - 1] {
                 e.equal
             } else {
@@ -194,6 +195,7 @@ pub fn forward_algorithm_non_numerically_stable(
         middle_curr[band_start] = 0.0;
         lower_curr[band_start] = 0.0;
     }
+    //eprintln!("{:?}", middle_prev);
 
     if middle_prev[w.len()] != 0.0 {
         LogProb::from(Prob(middle_prev[w.len()]))

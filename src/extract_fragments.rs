@@ -32,10 +32,10 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
-use util::*;
-use variants_and_fragments::*;
 use std::u32;
 use std::usize;
+use util::*;
+use variants_and_fragments::*;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -66,7 +66,7 @@ pub struct ExtractFragmentParameters {
     pub max_cigar_indel: usize,
     /// whether or not to store the read id.
     /// we store the read ID if we'll be separating reads by haplotype and otherwise we don't
-    pub store_read_id: bool
+    pub store_read_id: bool,
 }
 
 /// an extension of the rust-htslib cigar representation that has the cigar operation and length as
@@ -302,8 +302,8 @@ pub fn find_anchors(
     let mut left_anchor_read: u32 = 0;
     let mut right_anchor_read: u32 = 0;
 
-    let mut left_ix = 0;
-    let mut right_ix = 0;
+    let mut left_ix = None;
+    let mut right_ix = None;
 
     let contains_pos = |pos: u32, cigar_op_start: u32, cigar_op_length: u32| {
         cigar_op_start <= pos && cigar_op_start + cigar_op_length > pos
@@ -323,10 +323,10 @@ pub fn find_anchors(
             | Cigar::Del(l)
             | Cigar::RefSkip(l) => {
                 if contains_pos(var_interval.start_pos, cigarpos.ref_pos, l) {
-                    left_ix = i;
+                    left_ix = Some(i);
                 }
                 if contains_pos(var_interval.end_pos, cigarpos.ref_pos, l) {
-                    right_ix = i;
+                    right_ix = Some(i);
                     break;
                 }
             }
@@ -350,7 +350,12 @@ pub fn find_anchors(
         eprint!("Finding left anchor: ");
     }
 
-    for i in (0..left_ix + 1).rev() {
+    let l_ix = match left_ix {
+        Some(l_ix) => {l_ix},
+        None => {return Ok(None);}
+    };
+
+    for i in (0..l_ix + 1).rev() {
         if cigarpos_list[i].ref_pos <= anchor_length
             || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length
         {
@@ -447,6 +452,12 @@ pub fn find_anchors(
         return Ok(None); // failed to find a left anchor
     }
 
+
+    let r_ix = match right_ix {
+        Some(r_ix) => {r_ix},
+        None => {return Ok(None);}
+    };
+
     //println!("**************************************************");
     if VERBOSE {
         eprint!("Finding right anchor: ");
@@ -454,7 +465,7 @@ pub fn find_anchors(
     let mut match_len_right = 0;
     let mut seen_indel_right = false;
     let mut found_anchor_right = false;
-    for i in right_ix..cigarpos_list.len() {
+    for i in r_ix..cigarpos_list.len() {
         if cigarpos_list[i].ref_pos <= anchor_length
             || cigarpos_list[i].ref_pos >= ref_seq.len() as u32 - anchor_length
         {
@@ -552,6 +563,9 @@ pub fn find_anchors(
     if !found_anchor_right {
         return Ok(None); // failed to find a right anchor
     }
+
+    assert!(left_anchor_ref < right_anchor_ref);
+    assert!(left_anchor_read < right_anchor_read);
 
     // return none if any of the anchors are out of bounds
     if right_anchor_ref as usize >= ref_seq.len()
@@ -672,6 +686,13 @@ fn extract_var_cluster(
     //let ref_window = ref_seq[(anchors.left_anchor_ref as usize)..
     //(anchors.right_anchor_ref as usize) + 1]
     //        .to_vec();
+
+    let test_pos = 237496;
+    let mut print_stuff: bool = false;
+    for v in 0..var_cluster.len() {
+        if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
+    }
+
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
     let read_window: Vec<char> = read_seq
@@ -693,7 +714,7 @@ fn extract_var_cluster(
 
     let mut score_total: LogProb = LogProb::ln_zero();
 
-    if VERBOSE {
+    if VERBOSE || print_stuff {
         for var in var_cluster.clone() {
             eprint!("{} {}", var.tid, var.pos0);
             for allele in var.alleles {
@@ -761,7 +782,7 @@ fn extract_var_cluster(
             allele_scores[var][hap[var] as usize] =
                 LogProb::ln_add_exp(allele_scores[var][hap[var] as usize], score);
         }
-        if VERBOSE {
+        if VERBOSE || print_stuff{
             let hap_seq_str: String = hap_window.into_iter().collect();
             eprintln!(
                 "hap:{:?} {} PHRED: {}",
@@ -792,7 +813,7 @@ fn extract_var_cluster(
             allele_probs.push(allele_scores[v][i]);
         }
 
-        if VERBOSE {
+        if VERBOSE || print_stuff{
             eprint!(
                 "adding call: {} {}",
                 var_cluster[v].tid, var_cluster[v].pos0
@@ -814,7 +835,7 @@ fn extract_var_cluster(
 
     }
 
-    if VERBOSE {
+    if VERBOSE || print_stuff{
         eprintln!("--------------------------------------");
     }
     cluster.alleles = max_hap.clone();
@@ -871,8 +892,8 @@ pub fn extract_fragment(
         let var_interval = GenomicInterval {
             tid: var.tid as u32,
             chrom: target_names[var.tid as usize].clone(),
-            start_pos: var.pos0 as u32,
-            end_pos: var.pos0 as u32,
+            start_pos: var.pos0 as u32 - 10,
+            end_pos: var.pos0 as u32 + 10,
         };
         match find_anchors(
             &bam_record,
@@ -973,6 +994,7 @@ pub fn extract_fragments(
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
 ) -> Result<Vec<Fragment>> {
+    
     let t_names = parse_target_names(&bam_file)?;
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter

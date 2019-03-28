@@ -47,7 +47,6 @@ impl GenotypeProbs {
 
         for i in 0..self.n_alleles() {
             for j in 0..self.n_alleles() {
-
                 let post: LogProb = self.tab[i][j];
 
                 if post > max_post {

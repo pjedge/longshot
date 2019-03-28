@@ -64,7 +64,7 @@ pub struct Fragment {
     pub calls: Vec<FragCall>,
     pub clusters: Vec<CallCluster>,
     pub p_read_hap: [LogProb; 2],
-    pub reverse_strand: bool
+    pub reverse_strand: bool,
 }
 
 #[repr(u8)]
@@ -146,7 +146,7 @@ pub struct Var {
     // e.g. genotype_posteriors[2][0] is the log posterior probability of 2|0 haplotype
     pub phase_set: Option<usize>,
     pub strand_bias_pvalue: f64, // fisher's exact test strand bias Pvalue
-    pub mec: usize,                // mec for variant
+    pub mec: usize,              // mec for variant
     pub mec_frac_variant: f64,   // mec fraction for this variant
     pub mec_frac_block: f64,     // mec fraction for this haplotype block
     pub mean_allele_qual: f64,
@@ -280,7 +280,7 @@ pub fn parse_vcf_potential_variants(
             mq20_frac: 0.0,
             mq30_frac: 0.0,
             mq40_frac: 0.0,
-            mq50_frac: 0.0
+            mq50_frac: 0.0,
         };
         varlist.push(new_var);
     }

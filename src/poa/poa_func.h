@@ -14,7 +14,8 @@ unsigned poa_func(char** seqs,        // the sequences (null-terminated) to perf
                   int alignment_type, // the alignment type: 0 = local align, 1 = global align, 2 = semi-global
                   int match_score,    // the score to give a sequence match in alignment, e.g. 5
                   int mismatch_score, // the score to give a sequence mismatch in alignment, e.g. -4
-                  int gap_score);     // the score to give a sequence gap in alignment, e.g. -8
+                  int gap_open,
+                  int gap_extend);     // the score to give a sequence gap in alignment, e.g. -8
 
 #ifdef __cplusplus
 }

@@ -187,7 +187,7 @@ pub fn call_genotypes_no_haplotypes(
             &genotype_priors,
             &var.alleles,
         )
-            .chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
+        .chain_err(|| "Error calculating genotype posteriors for haplotype-free genotyping")?;
 
         // get the genotype with maximum genotype posterior
         let (max_g, max_post) = posts.max_genotype_post(false, false);
@@ -412,7 +412,8 @@ pub fn call_genotypes_with_haplotypes(
             if var.alleles.len() == 2
                 && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
                 && var.alleles[0].len() == 1
-                && var.alleles[1].len() == 1 {
+                && var.alleles[1].len() == 1
+            {
                 var_phased[i] = true;
 
                 if var.genotype == Genotype(0, 1) {
@@ -646,8 +647,10 @@ pub fn call_genotypes_with_haplotypes(
                     // if this variant was phased with HapCUT2 and used in calculating P(read | h),
                     // then we need to update the P(read | h1) and P(read | h2) values that changed
                     // when we changed h1 and h2
+
                     for &(frag_ix, p_read_h0, p_read_h1) in
                         &p_read_lst_genotype[max_g.0 as usize][max_g.1 as usize]
+
                         {
                             p_read_hap[0][frag_ix] = p_read_h0;
                             p_read_hap[1][frag_ix] = p_read_h1;
@@ -757,7 +760,7 @@ pub fn call_genotypes_with_haplotypes(
             "{}.{}.haplotype_genotype_iteration.vcf",
             program_step, hapcut2_iter
         )
-            .to_owned();
+        .to_owned();
         print_variant_debug(
             varlist,
             &interval,
@@ -793,11 +796,11 @@ mod tests {
     fn test_generate_fragcall_pileup() {
         let fcall = |f_ix, v_ix, a| {
             FragCall {
-                frag_ix: f_ix,                       // index into fragment list
-                var_ix: v_ix,                              // index into variant list
-                allele: a,                                 // allele call
+                frag_ix: f_ix,                   // index into fragment list
+                var_ix: v_ix,                    // index into variant list
+                allele: a,                       // allele call
                 qual: LogProb::from(Prob(0.01)), // LogProb probability the call is an error
-                one_minus_qual: LogProb::from(Prob(0.99))
+                one_minus_qual: LogProb::from(Prob(0.99)),
             }
         };
         let p50 = LogProb::from(Prob(0.5));
