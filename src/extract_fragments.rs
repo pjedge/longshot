@@ -767,13 +767,9 @@ fn extract_var_cluster(
         let mut qual =
             LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total));
 
-        //assert_ne!(qual, LogProb::ln_zero());
-
-        // TODO: BUG: qual should never ever be 0.
-        // need to investigate why this happens
-        if qual == LogProb::ln_zero() {
-            //eprintln!("WARNING: Qual being set to ln(0.00001) due to zero-probability value.");
-            qual = LogProb::from(Prob(0.00001));
+        let mut allele_probs = vec![];
+        for i in 0..var_cluster[v].alleles.len() {
+            allele_probs.push(allele_scores[v][i]);
         }
 
         if VERBOSE {
@@ -793,8 +789,7 @@ fn extract_var_cluster(
             frag_ix: usize::MAX, // this will be assigned a correct value soon after all fragments extracted
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
-            qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+            allele_probs: allele_probs
         });
     }
 
@@ -1067,25 +1062,6 @@ pub fn extract_fragments(
         for j in 0..flist[i].calls.len() {
             flist[i].calls[j].frag_ix = i;
         }
-    }
-
-    // annotate each variant with its mean allele quality
-
-    let mut var_qual_sum: Vec<LogProb> = vec![LogProb::ln_zero(); varlist.lst.len()];
-    let mut var_num_alleles: Vec<usize> = vec![0; varlist.lst.len()];
-
-    for i in 0..flist.len() {
-        for j in 0..flist[i].calls.len() {
-            let vix = flist[i].calls[j].var_ix as usize;
-            let qual = flist[i].calls[j].qual;
-            var_qual_sum[vix] = LogProb::ln_add_exp(var_qual_sum[vix], qual);
-            var_num_alleles[vix] += 1;
-        }
-    }
-
-    for (i, ref mut var) in varlist.lst.iter_mut().enumerate() {
-        let q = var_qual_sum[i] - LogProb::from(Prob(var_num_alleles[i] as f64)); // q is LogProb of mean allele qual
-        var.mean_allele_qual = *PHREDProb::from(q);
     }
 
     Ok(flist)

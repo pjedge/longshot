@@ -1,6 +1,6 @@
 //! Contains functions related to haplotype assembly, including a FFI wrapper function for HapCUT2,
 //! MEC criteria, haplotype read separation, etc.
-use bio::stats::{LogProb, PHREDProb, Prob};
+use bio::stats::{LogProb, PHREDProb};
 use errors::*;
 use hashbrown::{HashMap, HashSet};
 use rust_htslib::bam;
@@ -142,7 +142,6 @@ pub fn separate_bam_reads_by_haplotype(
 pub fn generate_flist_buffer(
     flist: &Vec<Fragment>,
     phase_variant: &Vec<bool>,
-    max_p_miscall: f64,
     single_reads: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
@@ -154,7 +153,7 @@ pub fn generate_flist_buffer(
         let mut n_calls: usize = 0;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
+            if phase_variant[c.var_ix as usize] {
                 n_calls += 1;
                 if prev_call > phase_variant.len() || c.var_ix as usize - prev_call != 1 {
                     blocks += 1;
@@ -188,7 +187,7 @@ pub fn generate_flist_buffer(
         let mut prev_call = phase_variant.len() + 1;
 
         for c in frag.clone().calls {
-            if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
+            if phase_variant[c.var_ix as usize] {
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
                     ensure!(
                         c.allele == 0 as u8 || c.allele == 1 as u8,
@@ -215,7 +214,11 @@ pub fn generate_flist_buffer(
                             as u8,
                     )
                 }
-                let mut qint = *PHREDProb::from(c.qual) as u32 + 33;
+
+                let qual = LogProb::ln_one_minus_exp(&(c.allele_probs[c.allele as usize]
+                       - LogProb::ln_sum_exp(&c.allele_probs)));
+
+                let mut qint = *PHREDProb::from(qual) as u32 + 33;
                 if qint > 126 {
                     qint = 126;
                 }
@@ -278,11 +281,9 @@ pub fn call_hapcut2(
 
 pub fn calculate_mec(
     flist: &Vec<Fragment>,
-    varlist: &mut VarList,
-    max_p_miscall: f64,
+    varlist: &mut VarList
 ) -> Result<()> {
     let hap_ixs = vec![0, 1];
-    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
     for mut var in &mut varlist.lst {
         var.mec = 0;
@@ -295,23 +296,21 @@ pub fn calculate_mec(
 
         for &hap_ix in &hap_ixs {
             for call in &flist[f].calls {
-                if call.qual < ln_max_p_miscall {
-                    let var = &varlist.lst[call.var_ix as usize]; // the variant that the fragment call covers
+                let var = &varlist.lst[call.var_ix as usize]; // the variant that the fragment call covers
 
-                    if var.phase_set == None {
-                        continue; // only care about phased variants.
-                    }
+                if var.phase_set == None {
+                    continue; // only care about phased variants.
+                }
 
-                    let hap_allele = if hap_ix == 0 {
-                        var.genotype.0
-                    } else {
-                        var.genotype.1
-                    };
+                let hap_allele = if hap_ix == 0 {
+                    var.genotype.0
+                } else {
+                    var.genotype.1
+                };
 
-                    // read allele matches haplotype allele
-                    if call.allele != hap_allele {
-                        mismatched_vars[hap_ix].push(call.var_ix);
-                    }
+                // read allele matches haplotype allele
+                if call.allele != hap_allele {
+                    mismatched_vars[hap_ix].push(call.var_ix);
                 }
             }
         }
