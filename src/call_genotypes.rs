@@ -501,10 +501,10 @@ pub fn call_genotypes_with_haplotypes(
         for hap_ix in &hap_ixs {
             for f in 0..flist.len() {
                 for call in &flist[f].calls {
-
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + call.allele_probs[a];
-
+                    if var_phased[call.var_ix as usize] {
+                        let a = haps[*hap_ix][call.var_ix as usize] as usize;
+                        p_read_hap[*hap_ix][f] = p_read_hap[*hap_ix][f] + call.allele_probs[a];
+                    }
                 }
             }
         }
