@@ -738,7 +738,9 @@ fn extract_var_cluster(
             ),
         };
 
-        assert!(score > LogProb::ln_zero());
+        if (score == LogProb::ln_zero()){
+            return vec![];
+        }
 
         for var in 0..n_vars {
             allele_scores[var][hap[var] as usize] =
