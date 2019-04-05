@@ -150,19 +150,7 @@ impl GenotypeProbs {
 
     pub fn assert_approx_normalized(&self) {
         let total: LogProb = self.sum();
-        let err: LogProb = if total > LogProb::ln_one() {
-            LogProb::ln_sub_exp(total, LogProb::ln_one())
-        } else {
-            LogProb::ln_sub_exp(LogProb::ln_one(), total)
-        };
-
-        let margin = 0.00001;
-        if err > LogProb::from(Prob(margin)) {
-            println!("ERROR");
-            println!("{:?}", self.tab);
-            println!("{}", *Prob::from(total))
-        }
-        assert!(err < LogProb::from(Prob(margin)));
+        total.cap_numerical_overshoot(0.001);
     }
 
     pub fn ln_times_equals(&mut self, g: Genotype, p: LogProb) {
@@ -283,7 +271,7 @@ impl GenotypePriors {
 
             haploid_genotype_priors.insert(
                 (allele, allele),
-                LogProb::ln_one_minus_exp(&(het_snv_rate + het_indel_rate)),
+                LogProb::ln_one_minus_exp(&((het_snv_rate + het_indel_rate).cap_numerical_overshoot(0.001))),
             );
             haploid_genotype_priors.insert(
                 (
@@ -325,7 +313,7 @@ impl GenotypePriors {
                         hom_indel_rate,
                         het_indel_rate,
                     ]);
-                    let one_minus_snp_rate = LogProb::ln_one_minus_exp(&var_rate);
+                    let one_minus_snp_rate = LogProb::ln_one_minus_exp(&var_rate.cap_numerical_overshoot(0.001));
                     diploid_genotype_priors.insert((allele, *gt), one_minus_snp_rate);
                 } else if g1 == g2 && g1 != allele {
                     // this could be multiple indels, must handle indel case first
