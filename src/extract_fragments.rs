@@ -765,11 +765,8 @@ fn extract_var_cluster(
         let best_allele = max_hap[v];
         assert_ne!(allele_scores[v][best_allele as usize], LogProb::ln_zero());
 
-        let mut qual = if allele_scores[v][best_allele as usize] == LogProb::ln_zero() {
-            LogProb::from(Prob(0.5))
-        } else {
-            LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - score_total))
-        };
+        let mut qual =
+            LogProb::ln_one_minus_exp(&((allele_scores[v][best_allele as usize] - score_total).cap_numerical_overshoot(0.001)));
 
         //assert_ne!(qual, LogProb::ln_zero());
 
@@ -798,7 +795,7 @@ fn extract_var_cluster(
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
             qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual.cap_numerical_overshoot(0.001))
         });
     }
 
