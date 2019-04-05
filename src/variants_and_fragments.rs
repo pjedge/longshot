@@ -14,13 +14,12 @@ use std::convert::From;
 use std::fmt;
 use util::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct FragCall {
-    pub frag_ix: usize,          // index into fragment list
-    pub var_ix: usize,           // index into variant list
-    pub allele: u8,              // allele call
-    pub qual: LogProb,           // LogProb probability the call is an error
-    pub one_minus_qual: LogProb, // LogProb 1-probability the call is an error
+    pub frag_ix: usize,            // index into fragment list
+    pub var_ix: usize,             // index into variant list
+    pub allele: u8,                // allele call
+    pub allele_probs: Vec<LogProb> // the probability of each allele
 }
 
 #[derive(Clone)]

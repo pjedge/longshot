@@ -666,7 +666,7 @@ fn run() -> Result<()> {
             // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
             // together the lines represent the contents of a fragment file in HapCUT-like format
             let mut fragment_buffer =
-                generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true)
+                generate_flist_buffer(&flist, &phase_variant,  true)
                     .chain_err(|| "Error generating fragment list buffer.")?;
 
             // convert the buffer of u8s into strings and print them to the fragment file
@@ -682,6 +682,18 @@ fn run() -> Result<()> {
         &None => {}
     }
 
+    // filter out allele calls below the minimum quality score
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
+    for f in 0..flist.len() {
+        &flist[f].calls.retain(|ref c| {
+            let probs = &c.allele_probs;
+            let qual = LogProb::ln_one_minus_exp(&(probs[c.allele as usize] - LogProb::ln_sum_exp(&probs)));
+            if qual > ln_max_p_miscall {
+                varlist.lst[c.var_ix].ambiguous_count += 1
+            }
+            qual <= ln_max_p_miscall
+        });
+    }
     /***********************************************************************************************/
     // CALL GENOTYPES USING REFINED QUALITY SCORES
     /***********************************************************************************************/
@@ -690,7 +702,7 @@ fn run() -> Result<()> {
         "{} Calling initial genotypes using pair-HMM realignment...",
         print_time()
     );
-    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall)
+    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors)
         .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
 
     // use Fishers exact test to check if allele observations are biased toward one strand or the other
@@ -722,7 +734,7 @@ fn run() -> Result<()> {
     }
 
     for f in 0..flist.len() {
-        &flist[f].calls.retain(|&c| {
+        &flist[f].calls.retain(|ref c| {
             !varlist.lst[c.var_ix as usize]
                 .filter
                 .has_filter(VarFilter::StrandBias)
@@ -773,7 +785,6 @@ fn run() -> Result<()> {
         3,
         max_cov,
         &density_params,
-        max_p_miscall,
         &sample_name,
         ll_delta,
     )
@@ -886,7 +897,7 @@ fn run() -> Result<()> {
         )
         .chain_err(|| "Error extracting fragments for new POA variants.")?;
 
-        call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall)
+        call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors)
             .chain_err(|| "Error calling initial genotypes for new POA variants.")?;
 
         print_variant_debug(
@@ -912,7 +923,6 @@ fn run() -> Result<()> {
             7,
             max_cov,
             &density_params,
-            max_p_miscall,
             &sample_name,
             ll_delta,
         )
@@ -927,7 +937,7 @@ fn run() -> Result<()> {
     }
 
     // calculate MEC-based statistics for variants and blocks
-    calculate_mec(&flist, &mut varlist, max_p_miscall)
+    calculate_mec(&flist, &mut varlist)
         .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
 
     let debug_filename = if use_poa {
