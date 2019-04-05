@@ -216,8 +216,8 @@ pub fn generate_flist_buffer(
                     )
                 }
 
-                let qual = LogProb::ln_one_minus_exp(&(c.allele_probs[c.allele as usize]
-                       - LogProb::ln_sum_exp(&c.allele_probs)));
+                let qual = LogProb::ln_one_minus_exp(&((c.allele_probs[c.allele as usize]
+                       - LogProb::ln_sum_exp(&c.allele_probs)).cap_numerical_overshoot(0.001)));
 
                 let mut qint = *PHREDProb::from(qual) as u32 + 33;
                 if qint > 126 {

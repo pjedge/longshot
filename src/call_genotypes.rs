@@ -173,7 +173,7 @@ pub fn call_genotypes_no_haplotypes(
         let (max_g, max_post) = posts.max_genotype_post(false, false);
 
         // convert genotype quality into a PHRED scaled value
-        let genotype_qual: f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post));
+        let genotype_qual: f64 = *PHREDProb::from(LogProb::ln_one_minus_exp(&max_post.cap_numerical_overshoot(0.001)));
 
         // count the number of alleles (for annotating the VCF fields)
         let (allele_counts, counts_forward, counts_reverse) =

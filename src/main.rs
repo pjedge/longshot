@@ -687,7 +687,7 @@ fn run() -> Result<()> {
     for f in 0..flist.len() {
         &flist[f].calls.retain(|ref c| {
             let probs = &c.allele_probs;
-            let qual = LogProb::ln_one_minus_exp(&(probs[c.allele as usize] - LogProb::ln_sum_exp(&probs)));
+            let qual = LogProb::ln_one_minus_exp(&((probs[c.allele as usize] - LogProb::ln_sum_exp(&probs)).cap_numerical_overshoot(0.001)));
             if qual > ln_max_p_miscall {
                 varlist.lst[c.var_ix].ambiguous_count += 1
             }
