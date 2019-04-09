@@ -416,6 +416,28 @@ impl VarList {
     }
 
     fn combine_variant_group(var_group: &mut Vec<Var>) -> Var {
+
+        if var_group.len() == 1 {
+            // just one variant
+            return var_group[0].clone()
+        } else if var_group.len() == 2 {
+            // two variants
+            let v1 = &var_group[0];
+            let v2 = &var_group[1];
+
+            // handle the most common case that the two variants are equivalent
+            if v1.tid == v2.tid && v1.pos0 == v2.pos0 && v1.alleles == v2.alleles {
+                // this is the same variant, so just return the variant that has genotype information already
+                if v1.gq > 0.0 || v1.allele_counts != vec![0; v1.alleles.len()] {
+                    return v1.clone()
+                } else if v2.gq > 0.0 || v2.allele_counts != vec![0; v2.alleles.len()] {
+                    return v2.clone()
+                } else {
+                    return v1.clone()
+                }
+            }
+        }
+
         ///////////////////////////////////////////////////////////////////////////////////
         // PROCEDURE TO MERGE MULTIPLE VCF VARIANTS, EACH WITH MULTIPLE ALLELES
         // 1. find the earliest variant position in the variant list.

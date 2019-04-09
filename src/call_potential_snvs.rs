@@ -1,7 +1,5 @@
 //! This module contains the function used for identifying potential SNV sites.
 
-extern crate rust_htslib;
-
 use std::char;
 
 use bio::io::fasta;
@@ -9,7 +7,7 @@ use bio::stats::{LogProb, Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
 use rust_htslib::prelude::*;
-
+use rust_spoa::poa_consensus;
 use bio::alignment::pairwise::banded::*;
 use bio::alignment::Alignment;
 use bio::alignment::AlignmentOperation::*;
@@ -17,7 +15,6 @@ use errors::*;
 use genotype_probs::*;
 use hashbrown::HashSet;
 use realignment::LnAlignmentParameters;
-use spoa::poa_multiple_sequence_alignment;
 use std::str;
 use util::*;
 // {FragCall, GenotypePriors, LnAlignmentParameters, GenomicInterval, Var, VarList, parse_target_names, u8_to_string};
@@ -573,6 +570,7 @@ fn extract_variants_from_alignment(
 }
 
 pub fn call_potential_variants_poa(
+    variant_sites: Option<&VarList>,
     bam_file: &String,
     fasta_file: &String,
     interval: &Option<GenomicInterval>,
@@ -581,6 +579,20 @@ pub fn call_potential_variants_poa(
     min_mapq: u8,
     _ln_align_params: LnAlignmentParameters,
 ) -> Result<VarList> {
+
+    let sites: Option<HashSet<(u32, usize)>> = match variant_sites {
+        Some(vlst) => {
+            let mut s = HashSet::new();
+            for var in vlst.lst.iter() {
+                if var.genotype != Genotype(0,0) {
+                    s.insert((var.tid, var.pos0));
+                }
+            }
+            Some(s)
+        }
+        None => {None}
+    };
+
     //let potential_snv_qual = LogProb::from(Prob(0.5));
     let target_names = parse_target_names(&bam_file)?;
 
@@ -603,16 +615,6 @@ pub fn call_potential_variants_poa(
 
     let mut bam_ix =
         bam::IndexedReader::from_path(bam_file).chain_err(|| ErrorKind::IndexedBamOpenError)?;
-    /*
-    let alignment_type: i32 = 0;
-    let match_score: i32 = 5;
-    let mismatch_score: i32 = -4;
-    let gap_open: i32 = -3;
-    let gap_extend: i32 = -1;
-
-    let d: usize = 50;
-    let boundary: usize = 25;
-    */
 
     let alignment_type: i32 = 1;
     let match_score: i32 = 0;
@@ -620,9 +622,14 @@ pub fn call_potential_variants_poa(
     let gap_open: i32 = -3;
     let gap_extend: i32 = -1;
 
-    let d: usize = 50;
-    let boundary: usize = 25;
-    let num_seeds: i32 = 1;
+    let (d, boundary): (usize, usize) = match sites {
+        Some(_) => {
+            (50,25)
+        },
+        None => {
+            (15,5)
+        }
+    };
 
     let score = |a: u8, b: u8| if a == b { 5i32 } else { -4i32 };
     let k = 6; // kmer match length
@@ -657,9 +664,19 @@ pub fn call_potential_variants_poa(
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
-            if pileup.pos() % d as u32 != 0 {
-                prev_tid = tid;
-                continue;
+            match &sites {
+                &Some(ref s) => {
+                    if !s.contains(&(tid as u32, pileup.pos() as usize)) {
+                        prev_tid = tid;
+                        continue;
+                    }
+                }
+                &None => {
+                    if pileup.pos() % d as u32 != 0 {
+                        prev_tid = tid;
+                        continue;
+                    }
+                }
             }
 
             let pos_ref = pileup.pos() as usize;
@@ -676,6 +693,12 @@ pub fn call_potential_variants_poa(
             let mut all_read_seqs: Vec<Vec<u8>> = vec![];
             let mut h1_read_seqs: Vec<Vec<u8>> = vec![];
             let mut h2_read_seqs: Vec<Vec<u8>> = vec![];
+
+            // add the reference sequence to each set of sequences to help the POA get started
+            // on the right track
+            all_read_seqs.push(ref_window_nullterm.clone());
+            h1_read_seqs.push(ref_window_nullterm.clone());
+            h2_read_seqs.push(ref_window_nullterm.clone());
 
             let mut all_seq_count: usize = 0;
             let mut h1_seq_count: usize = 0;
@@ -773,12 +796,9 @@ pub fn call_potential_variants_poa(
             */
 
             let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
-                let mut consensus_h1: Vec<u8> = vec![0u8; consensus_max_len];
-                poa_multiple_sequence_alignment(
+                let mut consensus_h1: Vec<u8> = poa_consensus(
                     &h1_read_seqs,
-                    ref_window_nullterm.clone(),
-                    num_seeds,
-                    &mut consensus_h1,
+                    consensus_max_len,
                     alignment_type, //  (h1_seq_count/2) as i32
                     match_score,
                     mismatch_score,
@@ -809,12 +829,9 @@ pub fn call_potential_variants_poa(
             };
 
             let mut h2_vars: Option<Vec<Var>> = if h2_seq_count >= min_reads {
-                let mut consensus_h2: Vec<u8> = vec![0u8; consensus_max_len];
-                poa_multiple_sequence_alignment(
+                let mut consensus_h2: Vec<u8> = poa_consensus(
                     &h2_read_seqs,
-                    ref_window_nullterm.clone(),
-                    num_seeds,
-                    &mut consensus_h2,
+                    consensus_max_len,
                     alignment_type, // (h1_seq_count/2) as i32
                     match_score,
                     mismatch_score,
@@ -846,12 +863,9 @@ pub fn call_potential_variants_poa(
 
             let mut all_vars: Option<Vec<Var>> =
                 if h1_vars == None && h2_vars == None && all_seq_count >= min_reads {
-                    let mut consensus_all: Vec<u8> = vec![0u8; consensus_max_len];
-                    poa_multiple_sequence_alignment(
+                    let mut consensus_all: Vec<u8> = poa_consensus(
                         &all_read_seqs,
-                        ref_window_nullterm.clone(),
-                        num_seeds, // (all_seq_count/2) as i32
-                        &mut consensus_all,
+                        consensus_max_len,
                         alignment_type,
                         match_score,
                         mismatch_score,

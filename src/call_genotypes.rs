@@ -256,6 +256,8 @@ pub fn call_genotypes_with_haplotypes(
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
     genotype_priors: &GenotypePriors,
+    greedy_only: bool,
+    init_random_hap: bool,
     variant_debug_directory: &Option<String>,
     program_step: usize,
     max_cov: u32,
@@ -267,7 +269,7 @@ pub fn call_genotypes_with_haplotypes(
     let pileup_lst = generate_fragcall_pileup(&flist, varlist.lst.len());
     assert_eq!(pileup_lst.len(), varlist.lst.len());
 
-    let max_iterations: usize = 1000000;
+    let max_iterations: usize = if greedy_only {1} else {1000000};
     let ln_half = LogProb::from(Prob(0.5));
     let mut rng: StdRng = StdRng::from_seed(&[0]);
     let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -287,19 +289,21 @@ pub fn call_genotypes_with_haplotypes(
     let mut haps: Vec<Vec<u8>> = vec![vec![0u8; n_var]; 2];
     let mut prev_likelihood = LogProb::ln_zero();
 
-    // for all basic biallelic heterozygous variants
-    // randomly shuffle the phase of the variant
-    for i in 0..varlist.lst.len() {
-        let var = &mut varlist.lst[i];
-        if var.alleles.len() == 2
-            && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
-            && var.alleles[0].len() == 1
-            && var.alleles[1].len() == 1
-        {
-            if rng.next_f64() < 0.5 {
-                var.genotype = Genotype(0, 1);
-            } else {
-                var.genotype = Genotype(1, 0);
+    if init_random_hap {
+        // for all basic biallelic heterozygous variants
+        // randomly shuffle the phase of the variant
+        for i in 0..varlist.lst.len() {
+            let var = &mut varlist.lst[i];
+            if var.alleles.len() == 2
+                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+                && var.alleles[0].len() == 1
+                && var.alleles[1].len() == 1
+            {
+                if rng.next_f64() < 0.5 {
+                    var.genotype = Genotype(0, 1);
+                } else {
+                    var.genotype = Genotype(1, 0);
+                }
             }
         }
     }
@@ -309,54 +313,6 @@ pub fn call_genotypes_with_haplotypes(
     // - take variants in random order and greedily update genotypes, maximizing genotype
     //     likelihood using the haplotype information
     for hapcut2_iter in 0..max_iterations {
-        // print the haplotype assembly iteration
-        eprintln!(
-            "{}    Round {} of haplotype assembly...",
-            print_time(),
-            hapcut2_iter + 1
-        );
-
-        // count how many variants meet the criteria for "phased"
-        let mut num_phased = 0;
-        for var in varlist.lst.iter() {
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
-                && var.alleles[0].len() == 1
-                && var.alleles[1].len() == 1
-            {
-                num_phased += 1;
-            }
-        }
-
-        let mut total_likelihood: LogProb = LogProb::ln_one(); // initial read likelihood is one
-
-        // initialize likelihood as the likelihood of the haplotypes
-        // calculated as the product of the genotype prior probability at each variant site
-        for v in 0..varlist.lst.len() {
-            let g = Genotype(haps[0][v], haps[1][v]);
-            total_likelihood =
-                total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
-        }
-
-        // iterate over all the fragments and all the sites and calculate the read likelihood
-        // take the product of each allele observation given the haplotypes
-        for f in 0..flist.len() {
-            // pr[0] holds P(read | H1), pr[1] holds P(read | H2)
-            let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
-            for hap_ix in &hap_ixs {
-                for call in &flist[f].calls {
-
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
-
-                }
-            }
-            // L = L * ( 0.5*P(read | H1) + 0.5*P(read | H2) )
-            total_likelihood =
-                total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
-        }
-
-        eprintln!("{}    (Before HapCUT2) Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}", print_time(), num_phased, *PHREDProb::from(total_likelihood));
 
         // generate buffers with contents equivalent to VCF and fragment file and
         // pass these off to HapCUT2 for haplotype assembly
@@ -366,8 +322,11 @@ pub fn call_genotypes_with_haplotypes(
         // vcf_buffer is a vector of vectors
         // each inner vector represents a VCF file line
         // it contains the VCF line formatted as vec of u8
-        let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
         let mut hap1: Vec<u8> = vec!['-' as u8; varlist.lst.len()];
+        let mut var_phased: Vec<bool> = vec![false; varlist.lst.len()];
+        // count how many variants meet the criteria for "phased"
+        let mut num_phased = 0;
+        let mut total_likelihood: LogProb; // initial read likelihood is one
 
         for (i, var) in varlist.lst.iter().enumerate() {
             // if the variant meets certain criteria (heterozygous, biallelic, not an indel)
@@ -389,112 +348,158 @@ pub fn call_genotypes_with_haplotypes(
             }
         }
 
-        // similarly to the VCF buffer, generate a fragment buffer representing the fragment file
-        // this also gets passed off as input to HapCUT2
-        let frag_buffer = generate_flist_buffer(&flist, &var_phased,  false)
-            .chain_err(|| "Error generating fragment list buffer.")?;
-        // this phase_sets vector gets modified by HapCUT2 to hold the haplotype block (phase set)
-        // information
-        // phase_sets[i] will hold a specific integer that is like a haplotype block identifier
-        let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
+        if !greedy_only {
+            // print the haplotype assembly iteration
+            eprintln!(
+                "{}    Round {} of haplotype assembly...",
+                print_time(),
+                hapcut2_iter + 1
+            );
 
-        // ASSEMBLE HAPLOTYPES WITH HAPCUT2
-        // make an unsafe call to the HapCUT2 code which is linked statically via FFI
-        call_hapcut2(
-            &frag_buffer,
-            frag_buffer.len(),
-            varlist.lst.len(),
-            &mut hap1,
-            &mut phase_sets,
-        );
-
-        // we want to convert the phase set ID given by HapCUT2 into the VCF standard type
-        // it should be the variant position (on its chromosome) of the first phased variant in the block
-        // we'll iterate over the phase set IDs given by HapCUT2 and figure out what the minimum
-        // position for that phase set is, so we can use it as the PS flag value
-        let m = <usize>::max_value();
-        let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
-
-        for (i, p) in phase_sets.iter().enumerate() {
-            if p < &0 {
-                continue;
+            for var in varlist.lst.iter() {
+                if var.alleles.len() == 2
+                    && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+                    && var.alleles[0].len() == 1
+                    && var.alleles[1].len() == 1
+                {
+                    num_phased += 1;
+                }
             }
-            if varlist.lst[i].pos0 < min_pos_ps[*p as usize] {
-                min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
+
+            total_likelihood = LogProb::ln_one(); // initial read likelihood is one
+
+            // initialize likelihood as the likelihood of the haplotypes
+            // calculated as the product of the genotype prior probability at each variant site
+            for v in 0..varlist.lst.len() {
+                let g = Genotype(haps[0][v], haps[1][v]);
+                total_likelihood =
+                    total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
             }
-        }
 
-        // we passed the hap1 vector to HapCUT2 and it contains the phased haplotype results
-        // we want to convert the haplotype vectors into the phased genotype field in the VarList
-        // we copy over the genotypes and use min_pos_ps to convert the phase set/block information
-        // into PS field values.
-        for i in 0..hap1.len() {
-            match hap1[i] as char {
-                '0' => {
-                    varlist.lst[i].genotype = Genotype(0, 1);
-
-                    if phase_sets[i] >= 0 {
-                        varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
-                    } else {
-                        varlist.lst[i].phase_set = None;
+            // iterate over all the fragments and all the sites and calculate the read likelihood
+            // take the product of each allele observation given the haplotypes
+            for f in 0..flist.len() {
+                // pr[0] holds P(read | H1), pr[1] holds P(read | H2)
+                let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
+                for hap_ix in &hap_ixs {
+                    for call in &flist[f].calls {
+                        let a = haps[*hap_ix][call.var_ix as usize] as usize;
+                        pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
                     }
                 }
-                '1' => {
-                    varlist.lst[i].genotype = Genotype(1, 0);
+                // L = L * ( 0.5*P(read | H1) + 0.5*P(read | H2) )
+                total_likelihood =
+                    total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
+            }
 
-                    if phase_sets[i] >= 0 {
-                        varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
-                    } else {
-                        varlist.lst[i].phase_set = None;
+            eprintln!("{}    (Before HapCUT2) Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}", print_time(), num_phased, *PHREDProb::from(total_likelihood));
+
+            // similarly to the VCF buffer, generate a fragment buffer representing the fragment file
+            // this also gets passed off as input to HapCUT2
+            let frag_buffer = generate_flist_buffer(&flist, &var_phased, false)
+                .chain_err(|| "Error generating fragment list buffer.")?;
+            // this phase_sets vector gets modified by HapCUT2 to hold the haplotype block (phase set)
+            // information
+            // phase_sets[i] will hold a specific integer that is like a haplotype block identifier
+            let mut phase_sets: Vec<i32> = vec![-1i32; varlist.lst.len()];
+
+            // ASSEMBLE HAPLOTYPES WITH HAPCUT2
+            // make an unsafe call to the HapCUT2 code which is linked statically via FFI
+            call_hapcut2(
+                &frag_buffer,
+                frag_buffer.len(),
+                varlist.lst.len(),
+                &mut hap1,
+                &mut phase_sets,
+            );
+
+            // we want to convert the phase set ID given by HapCUT2 into the VCF standard type
+            // it should be the variant position (on its chromosome) of the first phased variant in the block
+            // we'll iterate over the phase set IDs given by HapCUT2 and figure out what the minimum
+            // position for that phase set is, so we can use it as the PS flag value
+            let m = <usize>::max_value();
+            let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
+
+            for (i, p) in phase_sets.iter().enumerate() {
+                if p < &0 {
+                    continue;
+                }
+                if varlist.lst[i].pos0 < min_pos_ps[*p as usize] {
+                    min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
+                }
+            }
+
+            // we passed the hap1 vector to HapCUT2 and it contains the phased haplotype results
+            // we want to convert the haplotype vectors into the phased genotype field in the VarList
+            // we copy over the genotypes and use min_pos_ps to convert the phase set/block information
+            // into PS field values.
+            for i in 0..hap1.len() {
+                match hap1[i] as char {
+                    '0' => {
+                        varlist.lst[i].genotype = Genotype(0, 1);
+
+                        if phase_sets[i] >= 0 {
+                            varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
+                        } else {
+                            varlist.lst[i].phase_set = None;
+                        }
+                    }
+                    '1' => {
+                        varlist.lst[i].genotype = Genotype(1, 0);
+
+                        if phase_sets[i] >= 0 {
+                            varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
+                        } else {
+                            varlist.lst[i].phase_set = None;
+                        }
+                    }
+                    _ => {
+                        var_phased[i] = false;
                     }
                 }
-                _ => {
-                    var_phased[i] = false;
+
+                haps[0][i] = varlist.lst[i].genotype.0;
+                haps[1][i] = varlist.lst[i].genotype.1;
+            }
+
+            // count how many variants meet the criteria for "phased"
+            num_phased = 0;
+            for var in varlist.lst.iter() {
+                if var.alleles.len() == 2
+                    && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+                    && var.alleles[0].len() == 1
+                    && var.alleles[1].len() == 1
+                //&& !var.unphased
+                {
+                    num_phased += 1;
                 }
             }
 
-            haps[0][i] = varlist.lst[i].genotype.0;
-            haps[1][i] = varlist.lst[i].genotype.1;
-        }
-
-        // count how many variants meet the criteria for "phased"
-        num_phased = 0;
-        for var in varlist.lst.iter() {
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
-                && var.alleles[0].len() == 1
-                && var.alleles[1].len() == 1
-            //&& !var.unphased
-            {
-                num_phased += 1;
+            // initialize likelihood as the likelihood of the haplotypes
+            // calculated as the product of the genotype prior probability at each variant site
+            total_likelihood = LogProb::ln_one();
+            for v in 0..varlist.lst.len() {
+                let g = Genotype(haps[0][v], haps[1][v]);
+                total_likelihood =
+                    total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
             }
-        }
 
-        // initialize likelihood as the likelihood of the haplotypes
-        // calculated as the product of the genotype prior probability at each variant site
-        total_likelihood = LogProb::ln_one();
-        for v in 0..varlist.lst.len() {
-            let g = Genotype(haps[0][v], haps[1][v]);
-            total_likelihood =
-                total_likelihood + genotype_priors.get_prior(&varlist.lst[v].alleles, g)?;
-        }
-
-        // iterate over all the fragments and all the sites and calculate the read likelihood
-        // take the product of each allele observation given the haplotypes
-        for f in 0..flist.len() {
-            let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
-            for hap_ix in &hap_ixs {
-                for call in &flist[f].calls {
-                    let a = haps[*hap_ix][call.var_ix as usize] as usize;
-                    pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
+            // iterate over all the fragments and all the sites and calculate the read likelihood
+            // take the product of each allele observation given the haplotypes
+            for f in 0..flist.len() {
+                let mut pr: Vec<LogProb> = vec![LogProb::ln_one(); 2];
+                for hap_ix in &hap_ixs {
+                    for call in &flist[f].calls {
+                        let a = haps[*hap_ix][call.var_ix as usize] as usize;
+                        pr[*hap_ix] = pr[*hap_ix] + call.allele_probs[a];
+                    }
                 }
+                total_likelihood =
+                    total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
             }
-            total_likelihood =
-                total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
+
+            eprintln!("{}    (After HapCUT2)  Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}", print_time(), num_phased, *PHREDProb::from(total_likelihood));
         }
-
-        eprintln!("{}    (After HapCUT2)  Total phased heterozygous SNVs: {}  Total likelihood (phred): {:.2}", print_time(), num_phased, *PHREDProb::from(total_likelihood));
-
         // p_read_hap[i][j] will contain P(R_j | H_i)
         // we will keep this saved and update it when the haplotypes change
         let mut p_read_hap: Vec<Vec<LogProb>> = vec![vec![LogProb::ln_one(); flist.len()]; 2];
