@@ -16,10 +16,10 @@ use util::*;
 
 #[derive(Clone)]
 pub struct FragCall {
-    pub frag_ix: usize,            // index into fragment list
-    pub var_ix: usize,             // index into variant list
-    pub allele: u8,                // allele call
-    pub allele_probs: Vec<LogProb> // the probability of each allele
+    pub frag_ix: usize,               // index into fragment list
+    pub var_ix: usize,                // index into variant list
+    pub allele: u8,                   // allele call
+    pub allele_probs: Vec<LogProb>    // the probability of each allele
 }
 
 #[derive(Clone)]

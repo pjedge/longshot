@@ -12,7 +12,7 @@ rand = "0.4"
 error-chain = "0.12.0"
 fishers_exact = "1.0.1"
 hashbrown = "0.1.8"
-rust-spoa = "0.2.2"
+rust-spoa = "0.2.3"
 
 [build-dependencies]
 cc = "1.0"
