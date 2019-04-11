@@ -64,6 +64,9 @@ pub fn print_vcf(
 ##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">
 ##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
 ##INFO=<ID=SC,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
+##FILTER=<ID=dn,Description="In a dense cluster of variants">
+##FILTER=<ID=dp,Description="Exceeds maximum depth">
+##FILTER=<ID=sb,Description="Allelic strand bias">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">
 ##FORMAT=<ID=GQ,Number=1,Type=Float,Description=\"Genotype Quality\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
