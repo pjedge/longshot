@@ -51,7 +51,6 @@ use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType}; //, AlignmentParameters, EmissionProbs, TransitionProbs};
-use std::collections::VecDeque;
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
 use std::fs::File;
@@ -648,8 +647,7 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         extract_fragment_parameters,
-        alignment_parameters,
-        &mut VecDeque::new()
+        alignment_parameters
     )
     .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
@@ -846,6 +844,8 @@ fn run() -> Result<()> {
         );
     }
 
+    flist.clear();
+
     let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(
         {if use_poa {None} else {Some(&varlist)}},
         &bamfile_name,
@@ -905,8 +905,7 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         extract_fragment_parameters,
-        alignment_parameters,
-        &mut flist
+        alignment_parameters
     )
         .chain_err(|| "Error extracting fragments for new POA variants.")?;
 

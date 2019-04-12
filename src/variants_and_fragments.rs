@@ -3,7 +3,6 @@
 use bio::stats::LogProb;
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
-use extract_fragments::AnchorPositions;
 use genotype_probs::*;
 use hashbrown::HashMap;
 use rust_htslib::bam;
@@ -13,33 +12,22 @@ use rust_htslib::bcf::Read as bcfread;
 use std::cmp::Ordering;
 use std::convert::From;
 use std::fmt;
-use std::collections::VecDeque;
 use util::*;
-
-#[derive(Debug, Clone)]
-pub struct ClusterInfo {
-    pub left_anchor_ref: u32,
-    pub right_anchor_ref: u32,
-    pub num_alleles: u8,
-    pub cluster_ix: u8
-}
 
 #[derive(Clone)]
 pub struct FragCall {
     pub frag_ix: usize,               // index into fragment list
     pub var_ix: usize,                // index into variant list
     pub allele: u8,                   // allele call
-    pub allele_probs: Vec<LogProb>,    // the probability of each allele
-    pub cluster_info: ClusterInfo
+    pub allele_probs: Vec<LogProb>    // the probability of each allele
 }
 
 #[derive(Clone)]
 pub struct Fragment {
     pub id: String,
-    pub calls: VecDeque<FragCall>,
+    pub calls: Vec<FragCall>,
     pub p_read_hap: [LogProb; 2],
-    pub reverse_strand: bool,
-    pub var_anchors: HashMap<usize,AnchorPositions>
+    pub reverse_strand: bool
 }
 
 #[repr(u8)]

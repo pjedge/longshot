@@ -8,10 +8,9 @@ use rust_htslib::bam::Read;
 use std::char::from_digit;
 use util::*;
 use variants_and_fragments::*;
-use std::collections::VecDeque;
 
 pub fn separate_fragments_by_haplotype(
-    flist: &VecDeque<Fragment>,
+    flist: &Vec<Fragment>,
     threshold: LogProb,
 ) -> Result<(HashSet<String>, HashSet<String>)> {
     let mut h1 = HashSet::new();
@@ -136,7 +135,7 @@ pub fn separate_bam_reads_by_haplotype(
 }
 
 pub fn generate_flist_buffer(
-    flist: &VecDeque<Fragment>,
+    flist: &Vec<Fragment>,
     phase_variant: &Vec<bool>,
     single_reads: bool,
 ) -> Result<Vec<Vec<u8>>> {
@@ -270,7 +269,7 @@ pub fn call_hapcut2(
 }
 
 pub fn calculate_mec(
-    flist: &VecDeque<Fragment>,
+    flist: &Vec<Fragment>,
     varlist: &mut VarList
 ) -> Result<()> {
     let hap_ixs = vec![0, 1];

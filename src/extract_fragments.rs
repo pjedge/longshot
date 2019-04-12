@@ -36,8 +36,6 @@ use std::u32;
 use std::usize;
 use util::*;
 use variants_and_fragments::*;
-use std::collections::VecDeque;
-use hashbrown::HashMap;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -212,7 +210,6 @@ pub fn create_augmented_cigarlist(
 }
 
 /// describes the anchor positions which define the read realignment window
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct AnchorPositions {
     /// the position of the left anchor on the reference. This should be the leftmost base of the left anchor sequence.
     pub left_anchor_ref: u32,
@@ -277,10 +274,10 @@ pub fn find_anchors(
 
     if var_interval.chrom != target_names[bam_record.tid() as usize]
         || (var_interval.start_pos as i32)
-            >= bam_record
-                .cigar()
-                .end_pos()
-                .chain_err(|| "Error while accessing CIGAR end position")?
+        >= bam_record
+        .cigar()
+        .end_pos()
+        .chain_err(|| "Error while accessing CIGAR end position")?
         || (var_interval.end_pos as i32) < bam_record.pos()
     {
         eprintln!(
@@ -672,16 +669,11 @@ fn extract_var_cluster(
     //(anchors.right_anchor_ref as usize) + 1]
     //        .to_vec();
 
-    let print_stuff: bool = false;
-    let mut cluster_num_alleles: u8 = 0;
-
-    for var in &var_cluster {
-        cluster_num_alleles += var.alleles.len() as u8;
+    let test_pos = 237496;
+    let mut print_stuff: bool = false;
+    for v in 0..var_cluster.len() {
+        if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
     }
-
-    //for v in 0..var_cluster.len() {
-        //if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
-    //}
 
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
@@ -819,11 +811,7 @@ fn extract_var_cluster(
             frag_ix: usize::MAX, // this will be assigned a correct value soon after all fragments extracted
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
-            allele_probs: allele_probs,
-            cluster_info: ClusterInfo{left_anchor_ref: anchors.left_anchor_ref,
-                                      right_anchor_ref: anchors.right_anchor_ref,
-                                       num_alleles: cluster_num_alleles,
-                                        cluster_ix: v as u8}
+            allele_probs: allele_probs
         });
     }
 
@@ -842,7 +830,6 @@ pub fn extract_fragment(
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-    old_flist: &mut VecDeque<Fragment>
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -851,30 +838,17 @@ pub fn extract_fragment(
         eprintln!("Extracting fragment for read {}...", id);
     }
 
-    let (mut old_calls, old_anchors) = {
-        let (mut old_calls,mut old_anchors) = (VecDeque::new(),HashMap::new());
-        while old_flist.len() > 0 {
-
-            let mut frag = old_flist[0].clone();
-
-            if frag.id == id {
-                old_calls = frag.calls.clone();
-                old_anchors = frag.var_anchors.clone();
-                break;
-            } else {
-                old_flist.pop_front().unwrap();
-            }
-        }
-        (old_calls,old_anchors)
-    };
+    //let fid = match extract_params.store_read_id {
+    //    true => ,
+    //    false => None
+    //};
 
     let mut fragment = Fragment {
-        id: id.clone(),
-        calls: VecDeque::new(),
+        id: id,
+        calls: vec![],
         // ln(0.5) stored as f16 for compactness
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
         reverse_strand: bam_record.is_reverse(),
-        var_anchors: HashMap::new()
     };
 
     if bam_record.is_quality_check_failed()
@@ -893,15 +867,6 @@ pub fn extract_fragment(
 
     // populate a list with tuples of each variant, and anchor sequences for its alignment
     for ref var in vars {
-
-        match old_anchors.get(&var.pos0) {
-            Some(anc) => {
-                var_anchor_lst.push((var.clone(), *anc));
-                continue;
-            }
-            None => {}
-        }
-
         let var_interval = GenomicInterval {
             tid: var.tid as u32,
             chrom: target_names[var.tid as usize].clone(),
@@ -917,14 +882,13 @@ pub fn extract_fragment(
             &target_names,
             extract_params,
         )
-        .chain_err(|| "Error while finding anchor sequences.")?
-        {
-            Some(anchors) => {
-                var_anchor_lst.push((var.clone(), anchors));
-                fragment.var_anchors.insert(var.pos0, anchors);
-            }
-            _ => {}
-        };
+            .chain_err(|| "Error while finding anchor sequences.")?
+            {
+                Some(anchors) => {
+                    var_anchor_lst.push((var.clone(), anchors));
+                }
+                _ => {}
+            };
     }
 
     // now that we have anchors for each var the read covers,
@@ -941,7 +905,7 @@ pub fn extract_fragment(
             l = var_cluster.len();
             if l == 0
                 || (anc.left_anchor_ref < var_anchors[l - 1].right_anchor_ref
-                    && l < extract_params.variant_cluster_max_size)
+                && l < extract_params.variant_cluster_max_size)
             {
                 var_cluster.push(var);
                 var_anchors.push(anc);
@@ -981,91 +945,16 @@ pub fn extract_fragment(
     // now extract alleles for the variant cluster
 
     for (anchors, var_cluster) in cluster_lst {
-
-        let mut cluster_num_alleles: u8 = 0;
-        for var in &var_cluster {
-            cluster_num_alleles += var.alleles.len() as u8;
-        }
-
-        let mut found_cluster_calls = false;
-
-        while old_calls.len() > 0 {
-
-            //dbg!((anchors.left_anchor_ref, anchors.right_anchor_ref));
-
-            let mut call = old_calls[0].clone();
-            //dbg!((call.cluster_info.left_anchor_ref,call.cluster_info.right_anchor_ref,call.cluster_info.num_alleles));
-
-            if call.cluster_info.left_anchor_ref == anchors.left_anchor_ref
-                && call.cluster_info.right_anchor_ref == anchors.right_anchor_ref
-                && call.cluster_info.num_alleles == cluster_num_alleles {
-
-                //if !(call.cluster_info.num_alleles == 2){
-                //    old_calls.pop_front().unwrap();
-                //    continue;
-                //}
-
-                // the first cluster in the old fragment exactly matches
-                // the one we want to call
-                // no need to re-call it
-
-                for _ in 0..var_cluster.len() {
-
-                    let mut call2 = match old_calls.pop_front() {
-                        Some(c) => {c}
-                        None => {continue;}
-                    };
-
-                    // sometimes the calls got removed from low quality or strand bias
-
-                    if !(call2.cluster_info.left_anchor_ref == anchors.left_anchor_ref
-                        && call2.cluster_info.right_anchor_ref == anchors.right_anchor_ref
-                        && call2.cluster_info.num_alleles == cluster_num_alleles) {
-                        continue;
-                    }
-
-                    if call2.cluster_info.cluster_ix as usize >= var_cluster.len(){
-                        continue;
-                    }
-
-                    call2.var_ix = var_cluster[call2.cluster_info.cluster_ix as usize].ix;
-
-                    if !(var_cluster[call2.cluster_info.cluster_ix as usize].alleles.len() == call2.allele_probs.len()) {
-                        continue;
-                    }
-                    //assert_eq!(var_cluster[call2.cluster_info.cluster_ix as usize].alleles.len(),
-                               //call2.allele_probs.len());
-
-                    fragment.calls.push_back(call2);
-                }
-
-                found_cluster_calls = true;
-                break;
-            } else if call.cluster_info.left_anchor_ref > anchors.right_anchor_ref {
-                // our current cluster is completely to the left of, and not overlapping,
-                // the first available cluster in the old flist.
-                // so this is a "totally new" cluster we should realign/call from scratch
-                break;
-            } else {
-                // the cluster boundaries overlap or something has changed
-                // pop off the first fragment call and move on
-                old_calls.pop_front().unwrap();
-            }
-        }
-
-
-        if !found_cluster_calls {
-            // extract the calls for the fragment
-            for call in extract_var_cluster(
-                &read_seq,
-                ref_seq,
-                var_cluster,
-                anchors,
-                extract_params,
-                align_params,
-            ) {
-                fragment.calls.push_back(call);
-            }
+        // extract the calls for the fragment
+        for call in extract_var_cluster(
+            &read_seq,
+            ref_seq,
+            var_cluster,
+            anchors,
+            extract_params,
+            align_params,
+        ) {
+            fragment.calls.push(call);
         }
     }
 
@@ -1079,9 +968,8 @@ pub fn extract_fragments(
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-    old_flist: &mut VecDeque<Fragment>
-) -> Result<VecDeque<Fragment>> {
-    
+) -> Result<Vec<Fragment>> {
+
     let t_names = parse_target_names(&bam_file)?;
 
     let mut prev_tid = 4294967295; // huge value so that tid != prev_tid on first iter
@@ -1089,7 +977,7 @@ pub fn extract_fragments(
         .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
     let mut ref_seq: Vec<char> = vec![];
 
-    let mut flist: VecDeque<Fragment> = VecDeque::new();
+    let mut flist: Vec<Fragment> = vec![];
 
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
     let mut complete = 0;
@@ -1176,13 +1064,12 @@ pub fn extract_fragments(
                 &t_names,
                 extract_params,
                 align_params,
-                old_flist
             )
-            .chain_err(|| "Error extracting fragment from read.")?;
+                .chain_err(|| "Error extracting fragment from read.")?;
 
             match frag {
                 Some(some_frag) => {
-                    flist.push_back(some_frag);
+                    flist.push(some_frag);
                 }
                 None => {}
             }
@@ -1215,23 +1102,17 @@ mod tests {
     #[test]
     fn test_extended_cigar() {
         let mut fasta = fasta::IndexedReader::from_file(&"/home/peter/git/reaper/study/data/genomes/hs37d5.fa").unwrap();
-
         let mut ref_seq_u8: Vec<u8> = vec![];
         fasta.read_all(&"20", &mut ref_seq_u8).expect("Failed to read fasta sequence record.");
         let ref_seq: Vec<char> = dna_vec(&ref_seq_u8);
-
         let mut bam = bam::IndexedReader::from_path(&"/home/peter/git/reaper/test_data/test_extended_cigar.bam").unwrap();
-
         for r in bam.records() {
             let record = r.unwrap();
-
             let read_seq: Vec<char> = dna_vec(&record.seq().as_bytes());
-
             let start_pos = record.pos();
             let bam_cig: CigarStringView = record.cigar();
             let cigarpos_list: Vec<CigarPos> =
                 create_augmented_cigarlist(start_pos as u32, &bam_cig).expect("Error creating augmented cigarlist.");
-
             for cigarpos in cigarpos_list.iter() {
                 match cigarpos.cig {
                     Cigar::Diff(l) => {
