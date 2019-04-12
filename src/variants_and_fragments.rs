@@ -12,13 +12,15 @@ use rust_htslib::bcf::Read as bcfread;
 use std::cmp::Ordering;
 use std::convert::From;
 use std::fmt;
+use std::collections::VecDeque;
 use util::*;
 
 #[derive(Debug, Clone)]
 pub struct ClusterInfo {
     pub left_anchor_ref: u32,
     pub right_anchor_ref: u32,
-    pub num_alleles: u8
+    pub num_alleles: u8,
+    pub cluster_ix: u8
 }
 
 #[derive(Clone)]
@@ -33,7 +35,7 @@ pub struct FragCall {
 #[derive(Clone)]
 pub struct Fragment {
     pub id: String,
-    pub calls: Vec<FragCall>,
+    pub calls: VecDeque<FragCall>,
     pub p_read_hap: [LogProb; 2],
     pub reverse_strand: bool,
 }

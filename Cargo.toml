@@ -2,6 +2,7 @@
 name = "longshot"
 version = "0.3.3"
 authors = ["Peter Edge <edge.peterj@gmail.com>"]
+publish = false
 
 [dependencies]
 bio = "0.25.0"

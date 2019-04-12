@@ -51,6 +51,7 @@ use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
 use print_output::{print_variant_debug, print_vcf};
 use realignment::{AlignmentType}; //, AlignmentParameters, EmissionProbs, TransitionProbs};
+use std::collections::VecDeque;
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
 use std::fs::File;
@@ -648,7 +649,7 @@ fn run() -> Result<()> {
         &interval,
         extract_fragment_parameters,
         alignment_parameters,
-        &mut vec![]
+        &mut VecDeque::new()
     )
     .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 

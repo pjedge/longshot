@@ -8,6 +8,7 @@
 use bio::stats::{LogProb, PHREDProb, Prob};
 use chrono::prelude::*;
 use rand::{Rng, SeedableRng, StdRng};
+use std::collections::VecDeque;
 
 use errors::*;
 use genotype_probs::*;
@@ -31,7 +32,7 @@ use variants_and_fragments::*;
 ///
 /// # Example
 /// see ```call_genotypes::tests::test_generate_fragcall_pileup()```
-fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
+fn generate_fragcall_pileup(flist: &VecDeque<Fragment>, n_var: usize) -> Vec<Vec<FragCall>> {
     let mut pileup_lst: Vec<Vec<FragCall>> = vec![vec![]; n_var];
     for fragment in flist {
         for call in fragment.clone().calls {
@@ -57,7 +58,7 @@ fn generate_fragcall_pileup(flist: &Vec<Fragment>, n_var: usize) -> Vec<Vec<Frag
 /// ```counts_amb``` is the number of ambiquous alleles that fell beneath the quality cutoff.
 fn count_alleles(
     pileup: &Vec<FragCall>,
-    flist: &Vec<Fragment>,
+    flist: &VecDeque<Fragment>,
     num_alleles: usize
 ) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
     let mut counts: Vec<u16> = vec![0; num_alleles]; // counts for each allele
@@ -147,7 +148,7 @@ pub fn calculate_genotype_posteriors_no_haplotypes(
 /// Can throw an error if an error occurs while calculating the genotype posteriors,
 /// and particularly if there is an attempt to query ```genotype_priors``` using an invalid genotype
 pub fn call_genotypes_no_haplotypes(
-    flist: &Vec<Fragment>,
+    flist: &VecDeque<Fragment>,
     varlist: &mut VarList,
     genotype_priors: &GenotypePriors
 ) -> Result<()> {
@@ -252,7 +253,7 @@ pub fn call_genotypes_no_haplotypes(
 /// - Can encounter an error while accessing genotype priors, in particular if there is
 ///          attempted access of an invalid genotype
 pub fn call_genotypes_with_haplotypes(
-    flist: &mut Vec<Fragment>,
+    flist: &mut VecDeque<Fragment>,
     varlist: &mut VarList,
     interval: &Option<GenomicInterval>,
     genotype_priors: &GenotypePriors,
@@ -581,6 +582,9 @@ pub fn call_genotypes_with_haplotypes(
                             }
                         } else {
 
+                            if g.0 as usize >= call.allele_probs.len() ||g.1 as usize >= call.allele_probs.len()  {
+                                eprintln!("{:?} {:?} ({},{})",var.alleles, call.allele_probs,g.0,g.1)
+                            }
                             p_read_h0 = p_read_h0 + call.allele_probs[g.0 as usize];
                             p_read_h1 = p_read_h1 + call.allele_probs[g.1 as usize];
 

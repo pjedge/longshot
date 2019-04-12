@@ -36,6 +36,7 @@ use std::u32;
 use std::usize;
 use util::*;
 use variants_and_fragments::*;
+use std::collections::VecDeque;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -819,7 +820,8 @@ fn extract_var_cluster(
             allele_probs: allele_probs,
             cluster_info: ClusterInfo{left_anchor_ref: anchors.left_anchor_ref,
                                       right_anchor_ref: anchors.right_anchor_ref,
-                                       num_alleles: cluster_num_alleles}
+                                       num_alleles: cluster_num_alleles,
+                                        cluster_ix: v as u8}
         });
     }
 
@@ -838,7 +840,7 @@ pub fn extract_fragment(
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-    old_flist: &mut Vec<Fragment>
+    old_flist: &mut VecDeque<Fragment>
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -854,7 +856,7 @@ pub fn extract_fragment(
 
     let mut fragment = Fragment {
         id: id.clone(),
-        calls: vec![],
+        calls: VecDeque::new(),
         // ln(0.5) stored as f16 for compactness
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
         reverse_strand: bam_record.is_reverse(),
@@ -961,14 +963,29 @@ pub fn extract_fragment(
         }
 
         let mut found_cluster_calls = false;
+
+       // eprintln!("Looping over old_flist...");
+
         while old_flist.len() > 0 {
+
+
             let mut frag = old_flist[0].clone();
 
             if frag.id == id {
+
+                //eprintln!("Found matching fragment in old_flist...");
+
                 // we found the fragment corresponding to the read we're looking at
                 // pop fragcalls from the front of the vector and see if they match what we see
+
+                //eprintln!("Looping over frag.calls...");
+
                 while frag.calls.len() > 0 {
+
+                    //dbg!((anchors.left_anchor_ref, anchors.right_anchor_ref));
+
                     let mut call = frag.calls[0].clone();
+                    //dbg!((call.cluster_info.left_anchor_ref,call.cluster_info.right_anchor_ref,call.cluster_info.num_alleles));
 
                     if call.cluster_info.left_anchor_ref == anchors.left_anchor_ref
                         && call.cluster_info.right_anchor_ref == anchors.right_anchor_ref
@@ -978,13 +995,30 @@ pub fn extract_fragment(
                         // no need to re-call it
 
                         for _ in 0..var_cluster.len() {
-                            let call2 = frag.calls.remove(0);
 
-                            assert_eq!(call2.cluster_info.left_anchor_ref, anchors.left_anchor_ref);
-                            assert_eq!(call2.cluster_info.right_anchor_ref, anchors.right_anchor_ref);
-                            assert_eq!(call2.cluster_info.num_alleles, cluster_num_alleles);
+                            if frag.calls.len() == 0 {
+                                continue;
+                            }
 
-                            fragment.calls.push(call2);
+                            let mut call2 = match frag.calls.pop_front() {
+                                Some(c) => {c}
+                                None => {continue;}
+                            };
+
+                            // sometimes the calls got removed from low quality or strand bias
+
+                            if !(call2.cluster_info.left_anchor_ref == anchors.left_anchor_ref
+                                && call2.cluster_info.right_anchor_ref == anchors.right_anchor_ref
+                                && call2.cluster_info.num_alleles == cluster_num_alleles) {
+                                break;
+                            }
+
+                            call2.var_ix = var_cluster[call2.cluster_info.cluster_ix as usize].ix;
+
+                            assert_eq!(var_cluster[call2.cluster_info.cluster_ix as usize].alleles.len(),
+                                       call2.allele_probs.len());
+
+                            fragment.calls.push_back(call2);
                         }
 
                         found_cluster_calls = true;
@@ -997,12 +1031,12 @@ pub fn extract_fragment(
                     } else {
                         // the cluster boundaries overlap or something has changed
                         // pop off the first fragment call and move on
-                        frag.calls.remove(0);
+                        frag.calls.pop_front().unwrap();
                     }
                 }
                 break;
             } else {
-                old_flist.remove(0);
+                old_flist.pop_front().unwrap();
             }
         }
 
@@ -1016,7 +1050,7 @@ pub fn extract_fragment(
                 extract_params,
                 align_params,
             ) {
-                fragment.calls.push(call);
+                fragment.calls.push_back(call);
             }
         }
     }
@@ -1031,8 +1065,8 @@ pub fn extract_fragments(
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
-    old_flist: &mut Vec<Fragment>
-) -> Result<Vec<Fragment>> {
+    old_flist: &mut VecDeque<Fragment>
+) -> Result<VecDeque<Fragment>> {
     
     let t_names = parse_target_names(&bam_file)?;
 
@@ -1041,7 +1075,7 @@ pub fn extract_fragments(
         .chain_err(|| ErrorKind::IndexedFastaOpenError)?;
     let mut ref_seq: Vec<char> = vec![];
 
-    let mut flist: Vec<Fragment> = vec![];
+    let mut flist: VecDeque<Fragment> = VecDeque::new();
 
     // TODO: this uses a lot of duplicate code, need to figure out a better solution.
     let mut complete = 0;
@@ -1134,7 +1168,7 @@ pub fn extract_fragments(
 
             match frag {
                 Some(some_frag) => {
-                    flist.push(some_frag);
+                    flist.push_back(some_frag);
                 }
                 None => {}
             }
