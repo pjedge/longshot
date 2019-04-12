@@ -777,7 +777,7 @@ mod tests {
         let f0v2 = fcall(0, 2, 1);
         let f0v3 = fcall(0, 3, 1);
         let f0 = Fragment {
-            id: Some("f0".to_string()),
+            id: "f0".to_string(),
             calls: vec![f0v0, f0v1, f0v2, f0v3],
             p_read_hap: [p50, p50],
             reverse_strand: false,
@@ -787,7 +787,7 @@ mod tests {
         let f1v1 = fcall(1, 1, 0);
         let f1v2 = fcall(1, 2, 0);
         let f1 = Fragment {
-            id: Some("f1".to_string()),
+            id: "f1".to_string(),
             calls: vec![f1v0, f1v1, f1v2],
             p_read_hap: [p50, p50],
             reverse_strand: false,
@@ -797,7 +797,7 @@ mod tests {
         let f2v2 = fcall(2, 2, 1);
         let f2v3 = fcall(2, 3, 1);
         let f2 = Fragment {
-            id: Some("f2".to_string()),
+            id: "f2".to_string(),
             calls: vec![f2v1, f2v2, f2v3],
             p_read_hap: [p50, p50],
             reverse_strand: false,

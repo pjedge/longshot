@@ -669,11 +669,16 @@ fn extract_var_cluster(
     //(anchors.right_anchor_ref as usize) + 1]
     //        .to_vec();
 
-    let test_pos = 237496;
-    let mut print_stuff: bool = false;
-    for v in 0..var_cluster.len() {
-        if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
+    let print_stuff: bool = false;
+    let mut cluster_num_alleles: u8 = 0;
+
+    for var in &var_cluster {
+        cluster_num_alleles += var.alleles.len() as u8;
     }
+
+    //for v in 0..var_cluster.len() {
+        //if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
+    //}
 
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 
@@ -811,7 +816,10 @@ fn extract_var_cluster(
             frag_ix: usize::MAX, // this will be assigned a correct value soon after all fragments extracted
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
-            allele_probs: allele_probs
+            allele_probs: allele_probs,
+            cluster_info: ClusterInfo{left_anchor_ref: anchors.left_anchor_ref,
+                                      right_anchor_ref: anchors.right_anchor_ref,
+                                       num_alleles: cluster_num_alleles}
         });
     }
 
@@ -830,6 +838,7 @@ pub fn extract_fragment(
     target_names: &Vec<String>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
+    old_flist: &mut Vec<Fragment>
 ) -> Result<Option<Fragment>> {
     // TODO assert that every single variant in vars is on the same chromosome
     let id: String = u8_to_string(bam_record.qname())?;
@@ -844,7 +853,7 @@ pub fn extract_fragment(
     //};
 
     let mut fragment = Fragment {
-        id: Some(id),
+        id: id.clone(),
         calls: vec![],
         // ln(0.5) stored as f16 for compactness
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
@@ -945,16 +954,70 @@ pub fn extract_fragment(
     // now extract alleles for the variant cluster
 
     for (anchors, var_cluster) in cluster_lst {
-        // extract the calls for the fragment
-        for call in extract_var_cluster(
-            &read_seq,
-            ref_seq,
-            var_cluster,
-            anchors,
-            extract_params,
-            align_params,
-        ) {
-            fragment.calls.push(call);
+
+        let mut cluster_num_alleles: u8 = 0;
+        for var in &var_cluster {
+            cluster_num_alleles += var.alleles.len() as u8;
+        }
+
+        let mut found_cluster_calls = false;
+        while old_flist.len() > 0 {
+            let mut frag = old_flist[0].clone();
+
+            if frag.id == id {
+                // we found the fragment corresponding to the read we're looking at
+                // pop fragcalls from the front of the vector and see if they match what we see
+                while frag.calls.len() > 0 {
+                    let mut call = frag.calls[0].clone();
+
+                    if call.cluster_info.left_anchor_ref == anchors.left_anchor_ref
+                        && call.cluster_info.right_anchor_ref == anchors.right_anchor_ref
+                        && call.cluster_info.num_alleles == cluster_num_alleles {
+                        // the first cluster in the old fragment exactly matches
+                        // the one we want to call
+                        // no need to re-call it
+
+                        for _ in 0..var_cluster.len() {
+                            let call2 = frag.calls.remove(0);
+
+                            assert_eq!(call2.cluster_info.left_anchor_ref, anchors.left_anchor_ref);
+                            assert_eq!(call2.cluster_info.right_anchor_ref, anchors.right_anchor_ref);
+                            assert_eq!(call2.cluster_info.num_alleles, cluster_num_alleles);
+
+                            fragment.calls.push(call2);
+                        }
+
+                        found_cluster_calls = true;
+                        break;
+                    } else if call.cluster_info.left_anchor_ref > anchors.right_anchor_ref {
+                        // our current cluster is completely to the left of, and not overlapping,
+                        // the first available cluster in the old flist.
+                        // so this is a "totally new" cluster we should realign/call from scratch
+                        break;
+                    } else {
+                        // the cluster boundaries overlap or something has changed
+                        // pop off the first fragment call and move on
+                        frag.calls.remove(0);
+                    }
+                }
+                break;
+            } else {
+                old_flist.remove(0);
+            }
+        }
+
+        if !found_cluster_calls {
+            // extract the calls for the fragment
+            for call in extract_var_cluster(
+                &read_seq,
+                ref_seq,
+                var_cluster,
+                anchors,
+                extract_params,
+                align_params,
+            ) {
+                fragment.calls.push(call);
+            }
         }
     }
 
@@ -968,6 +1031,7 @@ pub fn extract_fragments(
     interval: &Option<GenomicInterval>,
     extract_params: ExtractFragmentParameters,
     align_params: AlignmentParameters,
+    old_flist: &mut Vec<Fragment>
 ) -> Result<Vec<Fragment>> {
     
     let t_names = parse_target_names(&bam_file)?;
@@ -1064,6 +1128,7 @@ pub fn extract_fragments(
                 &t_names,
                 extract_params,
                 align_params,
+                old_flist
             )
             .chain_err(|| "Error extracting fragment from read.")?;
 

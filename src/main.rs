@@ -648,6 +648,7 @@ fn run() -> Result<()> {
         &interval,
         extract_fragment_parameters,
         alignment_parameters,
+        &mut vec![]
     )
     .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
 
@@ -904,6 +905,7 @@ fn run() -> Result<()> {
         &interval,
         extract_fragment_parameters,
         alignment_parameters,
+        &mut flist
     )
         .chain_err(|| "Error extracting fragments for new POA variants.")?;
 

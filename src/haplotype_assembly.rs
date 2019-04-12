@@ -29,22 +29,16 @@ pub fn separate_fragments_by_haplotype(
         let p_read_hap0: LogProb = p_read_hap0 - total;
         let p_read_hap1: LogProb = p_read_hap1 - total;
 
-        match &f.id {
-            &Some(ref fid) => {
-                if p_read_hap0 > threshold {
-                    h1_count += 1;
-                    h1.insert(fid.clone());
-                } else if p_read_hap1 > threshold {
-                    h2_count += 1;
-                    h2.insert(fid.clone());
-                } else {
-                    unassigned_count += 1;
-                }
-            }
-            &None => {
-                bail!("Fragment without read ID found while separating reads by haplotype.");
-            }
+        if p_read_hap0 > threshold {
+            h1_count += 1;
+            h1.insert(f.id.clone());
+        } else if p_read_hap1 > threshold {
+            h2_count += 1;
+            h2.insert(f.id.clone());
+        } else {
+            unassigned_count += 1;
         }
+
     }
 
     // count the number assigned to either haplotype
@@ -146,7 +140,7 @@ pub fn generate_flist_buffer(
     single_reads: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
-    let mut frag_num = 0;
+
     for frag in flist {
         let mut prev_call = phase_variant.len() + 1;
         let mut quals: Vec<u8> = vec![];
@@ -175,12 +169,7 @@ pub fn generate_flist_buffer(
         }
         line.push(' ' as u8);
 
-        let fid = match &frag.id {
-            Some(ref fid) => fid.clone(),
-            None => frag_num.to_string(),
-        };
-
-        for u in fid.clone().into_bytes() {
+        for u in frag.id.clone().into_bytes() {
             line.push(u as u8);
         }
         //line.push(' ' as u8);
@@ -240,7 +229,7 @@ pub fn generate_flist_buffer(
         //println!("{}", charline.iter().collect::<String>());
 
         buffer.push(line);
-        frag_num += 1;
+
     }
     Ok(buffer)
 }
