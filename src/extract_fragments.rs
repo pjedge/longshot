@@ -37,6 +37,7 @@ use std::usize;
 use util::*;
 use variants_and_fragments::*;
 use std::collections::VecDeque;
+use hashbrown::HashMap;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -211,6 +212,7 @@ pub fn create_augmented_cigarlist(
 }
 
 /// describes the anchor positions which define the read realignment window
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct AnchorPositions {
     /// the position of the left anchor on the reference. This should be the leftmost base of the left anchor sequence.
     pub left_anchor_ref: u32,
@@ -849,10 +851,22 @@ pub fn extract_fragment(
         eprintln!("Extracting fragment for read {}...", id);
     }
 
-    //let fid = match extract_params.store_read_id {
-    //    true => ,
-    //    false => None
-    //};
+    let (mut old_calls, old_anchors) = {
+        let (mut old_calls,mut old_anchors) = (VecDeque::new(),HashMap::new());
+        while old_flist.len() > 0 {
+
+            let mut frag = old_flist[0].clone();
+
+            if frag.id == id {
+                old_calls = frag.calls.clone();
+                old_anchors = frag.var_anchors.clone();
+                break;
+            } else {
+                old_flist.pop_front().unwrap();
+            }
+        }
+        (old_calls,old_anchors)
+    };
 
     let mut fragment = Fragment {
         id: id.clone(),
@@ -860,6 +874,7 @@ pub fn extract_fragment(
         // ln(0.5) stored as f16 for compactness
         p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
         reverse_strand: bam_record.is_reverse(),
+        var_anchors: HashMap::new()
     };
 
     if bam_record.is_quality_check_failed()
@@ -878,6 +893,15 @@ pub fn extract_fragment(
 
     // populate a list with tuples of each variant, and anchor sequences for its alignment
     for ref var in vars {
+
+        match old_anchors.get(&var.pos0) {
+            Some(anc) => {
+                var_anchor_lst.push((var.clone(), *anc));
+                continue;
+            }
+            None => {}
+        }
+
         let var_interval = GenomicInterval {
             tid: var.tid as u32,
             chrom: target_names[var.tid as usize].clone(),
@@ -897,6 +921,7 @@ pub fn extract_fragment(
         {
             Some(anchors) => {
                 var_anchor_lst.push((var.clone(), anchors));
+                fragment.var_anchors.insert(var.pos0, anchors);
             }
             _ => {}
         };
@@ -964,81 +989,70 @@ pub fn extract_fragment(
 
         let mut found_cluster_calls = false;
 
-       // eprintln!("Looping over old_flist...");
+        while old_calls.len() > 0 {
 
-        while old_flist.len() > 0 {
+            //dbg!((anchors.left_anchor_ref, anchors.right_anchor_ref));
 
+            let mut call = old_calls[0].clone();
+            //dbg!((call.cluster_info.left_anchor_ref,call.cluster_info.right_anchor_ref,call.cluster_info.num_alleles));
 
-            let mut frag = old_flist[0].clone();
+            if call.cluster_info.left_anchor_ref == anchors.left_anchor_ref
+                && call.cluster_info.right_anchor_ref == anchors.right_anchor_ref
+                && call.cluster_info.num_alleles == cluster_num_alleles {
 
-            if frag.id == id {
+                //if !(call.cluster_info.num_alleles == 2){
+                //    old_calls.pop_front().unwrap();
+                //    continue;
+                //}
 
-                //eprintln!("Found matching fragment in old_flist...");
+                // the first cluster in the old fragment exactly matches
+                // the one we want to call
+                // no need to re-call it
 
-                // we found the fragment corresponding to the read we're looking at
-                // pop fragcalls from the front of the vector and see if they match what we see
+                for _ in 0..var_cluster.len() {
 
-                //eprintln!("Looping over frag.calls...");
+                    let mut call2 = match old_calls.pop_front() {
+                        Some(c) => {c}
+                        None => {continue;}
+                    };
 
-                while frag.calls.len() > 0 {
+                    // sometimes the calls got removed from low quality or strand bias
 
-                    //dbg!((anchors.left_anchor_ref, anchors.right_anchor_ref));
-
-                    let mut call = frag.calls[0].clone();
-                    //dbg!((call.cluster_info.left_anchor_ref,call.cluster_info.right_anchor_ref,call.cluster_info.num_alleles));
-
-                    if call.cluster_info.left_anchor_ref == anchors.left_anchor_ref
-                        && call.cluster_info.right_anchor_ref == anchors.right_anchor_ref
-                        && call.cluster_info.num_alleles == cluster_num_alleles {
-                        // the first cluster in the old fragment exactly matches
-                        // the one we want to call
-                        // no need to re-call it
-
-                        for _ in 0..var_cluster.len() {
-
-                            if frag.calls.len() == 0 {
-                                continue;
-                            }
-
-                            let mut call2 = match frag.calls.pop_front() {
-                                Some(c) => {c}
-                                None => {continue;}
-                            };
-
-                            // sometimes the calls got removed from low quality or strand bias
-
-                            if !(call2.cluster_info.left_anchor_ref == anchors.left_anchor_ref
-                                && call2.cluster_info.right_anchor_ref == anchors.right_anchor_ref
-                                && call2.cluster_info.num_alleles == cluster_num_alleles) {
-                                break;
-                            }
-
-                            call2.var_ix = var_cluster[call2.cluster_info.cluster_ix as usize].ix;
-
-                            assert_eq!(var_cluster[call2.cluster_info.cluster_ix as usize].alleles.len(),
-                                       call2.allele_probs.len());
-
-                            fragment.calls.push_back(call2);
-                        }
-
-                        found_cluster_calls = true;
-                        break;
-                    } else if call.cluster_info.left_anchor_ref > anchors.right_anchor_ref {
-                        // our current cluster is completely to the left of, and not overlapping,
-                        // the first available cluster in the old flist.
-                        // so this is a "totally new" cluster we should realign/call from scratch
-                        break;
-                    } else {
-                        // the cluster boundaries overlap or something has changed
-                        // pop off the first fragment call and move on
-                        frag.calls.pop_front().unwrap();
+                    if !(call2.cluster_info.left_anchor_ref == anchors.left_anchor_ref
+                        && call2.cluster_info.right_anchor_ref == anchors.right_anchor_ref
+                        && call2.cluster_info.num_alleles == cluster_num_alleles) {
+                        continue;
                     }
+
+                    if call2.cluster_info.cluster_ix as usize >= var_cluster.len(){
+                        continue;
+                    }
+
+                    call2.var_ix = var_cluster[call2.cluster_info.cluster_ix as usize].ix;
+
+                    if !(var_cluster[call2.cluster_info.cluster_ix as usize].alleles.len() == call2.allele_probs.len()) {
+                        continue;
+                    }
+                    //assert_eq!(var_cluster[call2.cluster_info.cluster_ix as usize].alleles.len(),
+                               //call2.allele_probs.len());
+
+                    fragment.calls.push_back(call2);
                 }
+
+                found_cluster_calls = true;
+                break;
+            } else if call.cluster_info.left_anchor_ref > anchors.right_anchor_ref {
+                // our current cluster is completely to the left of, and not overlapping,
+                // the first available cluster in the old flist.
+                // so this is a "totally new" cluster we should realign/call from scratch
                 break;
             } else {
-                old_flist.pop_front().unwrap();
+                // the cluster boundaries overlap or something has changed
+                // pop off the first fragment call and move on
+                old_calls.pop_front().unwrap();
             }
         }
+
 
         if !found_cluster_calls {
             // extract the calls for the fragment

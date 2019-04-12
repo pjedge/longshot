@@ -3,6 +3,7 @@
 use bio::stats::LogProb;
 use call_potential_snvs::VARLIST_CAPACITY;
 use errors::*;
+use extract_fragments::AnchorPositions;
 use genotype_probs::*;
 use hashbrown::HashMap;
 use rust_htslib::bam;
@@ -38,6 +39,7 @@ pub struct Fragment {
     pub calls: VecDeque<FragCall>,
     pub p_read_hap: [LogProb; 2],
     pub reverse_strand: bool,
+    pub var_anchors: HashMap<usize,AnchorPositions>
 }
 
 #[repr(u8)]
