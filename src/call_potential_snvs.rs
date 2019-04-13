@@ -400,6 +400,11 @@ fn extract_variants_from_alignment(
     depth: usize,
     boundary: usize,
 ) -> Result<Vec<Var>> {
+
+    if VERBOSE {
+        eprintln!("{:?}",alignment);
+    }
+
     let mut ref_pos = alignment.ystart;
     let mut read_pos = alignment.xstart;
 
@@ -622,12 +627,12 @@ pub fn call_potential_variants_poa(
     let gap_open: i32 = -3;
     let gap_extend: i32 = -1;
 
-    let (d, boundary): (usize, usize) = match sites {
+    let (d, boundary, consensus_max_len): (usize, usize, usize) = match sites {
         Some(_) => {
-            (50,25)
+            (15,5,60)
         },
         None => {
-            (15,5)
+            (50,25,200)
         }
     };
 
@@ -635,9 +640,7 @@ pub fn call_potential_variants_poa(
     let k = 6; // kmer match length
     let w = 20; // Window size for creating the band
     let mut aligner = Aligner::new(-8, -2, score, k, w);
-
-    let consensus_max_len = 200;
-    let min_reads = 10;
+    let min_reads = 6;
 
     for iv in interval_lst {
         bam_ix
@@ -756,7 +759,7 @@ pub fn call_potential_variants_poa(
                     h2_seq_count += 1;
                 }
             }
-            /*
+
             if VERBOSE {
                 println!("{}:{}-{}", target_names[tid].clone(), l_ref, r_ref);
                 println!("-------");
@@ -793,7 +796,6 @@ pub fn call_potential_variants_poa(
                 }
                 println!("-------");
             }
-            */
 
             let mut h1_vars: Option<Vec<Var>> = if h1_seq_count >= min_reads {
                 let mut consensus_h1: Vec<u8> = poa_consensus(
@@ -894,64 +896,53 @@ pub fn call_potential_variants_poa(
                     None
                 };
 
+            /*
             if VERBOSE {
-                /*
-                match &all_vars {
-                    &Some(ref vars) => {
-                        println!("ALL READS VARS:");
-                        for var in vars {
-                            println!("{}\t{}\t{}\t{}", var.chrom, var.pos0+1, var.ref_allele, var.var_allele);
-                        }
-                    },
-                    &None => {}
-                }*/
+
                 if h1_vars != None || h2_vars != None || (all_vars != None && all_vars.clone().unwrap().len() > 0) {
 
-                    if VERBOSE {
-                        println!("{}:{}-{}", target_names[tid].clone(), l_ref, r_ref);
+                println!("{}:{}-{}", target_names[tid].clone(), l_ref, r_ref);
 
-                        println!("REF: {}", str::from_utf8(&ref_window.clone()).unwrap());
-                        println!("-------");
+                println!("REF: {}", str::from_utf8(&ref_window.clone()).unwrap());
+                println!("-------");
 
-                        println!("All read seqs:",);
-                        for (i, seq) in all_read_seqs.iter().enumerate() {
-                            println!(">seq{}", i);
-                            let mut s = seq.clone();
-                            s.pop();
-                            println!(
-                                "{}",
-                                str::from_utf8(&s)
-                                    .chain_err(|| "Error converting read sequences to valid UTF8")?
-                            );
-                        }
-                        println!("-------");
-                        println!("H1 read seqs:",);
-                        for (i, seq) in h1_read_seqs.iter().enumerate() {
-                            println!(">seq{}", i);
-                            let mut s = seq.clone();
-                            s.pop();
-                            println!(
-                                "{}",
-                                str::from_utf8(&s)
-                                    .chain_err(|| "Error converting read sequences to valid UTF8")?
-                            );
-                        }
+                println!("All read seqs:",);
+                for (i, seq) in all_read_seqs.iter().enumerate() {
+                    println!(">seq{}", i);
+                    let mut s = seq.clone();
+                    s.pop();
+                    println!(
+                        "{}",
+                        str::from_utf8(&s)
+                            .chain_err(|| "Error converting read sequences to valid UTF8")?
+                    );
+                }
+                println!("-------");
+                println!("H1 read seqs:",);
+                for (i, seq) in h1_read_seqs.iter().enumerate() {
+                    println!(">seq{}", i);
+                    let mut s = seq.clone();
+                    s.pop();
+                    println!(
+                        "{}",
+                        str::from_utf8(&s)
+                            .chain_err(|| "Error converting read sequences to valid UTF8")?
+                    );
+                }
 
-                        println!("-------");
-                        println!("H2 read seqs:",);
-                        for (i, seq) in h2_read_seqs.iter().enumerate() {
-                            println!(">seq{}", i);
-                            let mut s = seq.clone();
-                            s.pop();
-                            println!(
-                                "{}",
-                                str::from_utf8(&s)
-                                    .chain_err(|| "Error converting read sequences to valid UTF8")?
-                            );
-                        }
-                        println!("-------");
-                    }
-
+                println!("-------");
+                println!("H2 read seqs:",);
+                for (i, seq) in h2_read_seqs.iter().enumerate() {
+                    println!(">seq{}", i);
+                    let mut s = seq.clone();
+                    s.pop();
+                    println!(
+                        "{}",
+                        str::from_utf8(&s)
+                            .chain_err(|| "Error converting read sequences to valid UTF8")?
+                    );
+                }
+                println!("-------");
 
                 }
 
@@ -1007,6 +998,7 @@ pub fn call_potential_variants_poa(
                     "----------------------------------------------------------------------------"
                 );
             }
+            */
 
             match all_vars {
                 Some(mut vars) => {

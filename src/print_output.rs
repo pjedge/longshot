@@ -20,7 +20,8 @@ pub fn print_vcf(
     density_params: &DensityParameters,
     sample_name: &String,
     print_outside_region: bool,
-    min_gq: f64
+    min_gq: f64,
+    call_indels: bool
 ) -> Result<()> {
     // first, add filter flags for variant density
     var_filter(
@@ -103,6 +104,11 @@ pub fn print_vcf(
         }
 
         if var.gq < min_gq {
+            continue;
+        }
+
+        if !call_indels && (var.alleles[var.genotype.0 as usize].len() != var.alleles[0].len()
+                            || var.alleles[var.genotype.1 as usize].len() != var.alleles[0].len()) {
             continue;
         }
 
@@ -247,7 +253,8 @@ pub fn print_variant_debug(
                 density_params,
                 sample_name,
                 true,
-                0.0
+                0.0,
+                true
             )
             .chain_err(|| "Error printing debug VCF file.")?;
         }

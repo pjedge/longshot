@@ -146,13 +146,18 @@ fn run() -> Result<()> {
                 .display_order(40)
                 //.required(true)
                 .takes_value(true))
-        /*.arg(Arg::with_name("Potential Variants VCF")
+        .arg(Arg::with_name("Potential Variants VCF")
             .short("v")
             .long("potential_variants")
             .value_name("VCF")
             .help("Use the variants in this VCF as the potential variants instead of using pileup method. NOTE: every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
             .display_order(45)
-            .takes_value(true))*/
+            .takes_value(true))
+        .arg(Arg::with_name("Call indels")
+            .short("I")
+            .long("indels")
+            .help("Call indel variants de novo. This is VERY SLOW and has low precision and recall for error-prone reads.")
+            .display_order(46))
         .arg(Arg::with_name("Haplotype Bam Prefix")
             .short("p")
             .long("hap_bam_prefix")
@@ -241,11 +246,6 @@ fn run() -> Result<()> {
                 .help("Cut off variant clusters after this many variants. 2^m haplotypes must be aligned against per read for a variant cluster of size m.")
                 .display_order(130)
                 .default_value("3"))
-        .arg(Arg::with_name("Use POA")
-            .short("M")
-            .long("poa")
-            .help("EXPERIMENTAL: Run the algorithm twice, using Partial-Order-Alignment on phased reads to find new candidate SNVs and Indels the second time.")
-            .display_order(130))
         .arg(Arg::with_name("Max window padding")
                 .short("W")
                 .long("max_window")
@@ -254,7 +254,7 @@ fn run() -> Result<()> {
                 .display_order(150)
                 .default_value("50"))
         .arg(Arg::with_name("Max CIGAR indel")
-                .short("I")
+                .short("M")
                 .long("max_cigar_indel")
                 .value_name("int")
                 .default_value("20")
@@ -373,7 +373,7 @@ fn run() -> Result<()> {
         parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
     let force = parse_flag(&input_args, "Force overwrite")?;
-    let use_poa = parse_flag(&input_args, "Use POA")?;
+    let call_indels = parse_flag(&input_args, "Call indels")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
     let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
@@ -496,7 +496,6 @@ fn run() -> Result<()> {
     };
 
     let band_width: usize = parse_usize(&input_args, "Band width")?;
-    //let use_poa = parse_flag(&input_args, "Use POA");
     let min_cov: u32 = parse_u32(&input_args, "Min coverage")?;
 
     let max_cov: u32 = match parse_flag(&input_args, "Auto max coverage")? {
@@ -764,7 +763,8 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
-            min_gq
+            min_gq,
+            call_indels
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -832,7 +832,7 @@ fn run() -> Result<()> {
         LogProb::from(Prob(0.51)),
     )?;
 
-    if use_poa {
+    if call_indels {
         eprintln!(
             "{} Using Partial Order Alignment (POA) to find indels and other new variants...",
             print_time()
@@ -847,7 +847,7 @@ fn run() -> Result<()> {
     flist.clear();
 
     let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(
-        {if use_poa {None} else {Some(&varlist)}},
+        {if call_indels {None} else {Some(&varlist)}},
         &bamfile_name,
         &fasta_file,
         &interval,
@@ -896,7 +896,7 @@ fn run() -> Result<()> {
     // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
     /***********************************************************************************************/
     eprintln!(
-        "{} Producing condensed read data for POA variants...",
+        "{} Generating new haplotype fragments from reads after merging variants...",
         print_time()
     );
     let mut flist2 = extract_fragments::extract_fragments(
@@ -973,7 +973,8 @@ fn run() -> Result<()> {
         &density_params,
         &sample_name,
         false,
-        min_gq
+        min_gq,
+        call_indels
     )
     .chain_err(|| "Error printing VCF output.")?;
 
