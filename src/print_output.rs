@@ -65,7 +65,7 @@ pub fn print_vcf(
 ##INFO=<ID=MQ40,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=40.\">
 ##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">
 ##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
-##INFO=<ID=SC,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
+##INFO=<ID=REF_BASES,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
 ##FILTER=<ID=dn,Description=\"In a dense cluster of variants\">
 ##FILTER=<ID=dp,Description=\"Exceeds maximum depth\">
 ##FILTER=<ID=sb,Description=\"Allelic strand bias\">
@@ -197,7 +197,7 @@ pub fn print_vcf(
         };
 
         writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};REF_BASES={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
                        varlist.target_names[var.tid as usize],
                        var.pos0 + 1,
                        var.alleles[0],
