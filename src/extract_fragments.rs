@@ -38,7 +38,6 @@ use util::*;
 use variants_and_fragments::*;
 
 static VERBOSE: bool = false;
-static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
 
 /// Stores a set of parameters necessary for extracting haplotype fragments, to make it easier
 /// to pass all of the parameters between functions in this module
@@ -669,11 +668,11 @@ fn extract_var_cluster(
     //(anchors.right_anchor_ref as usize) + 1]
     //        .to_vec();
 
-    let test_pos = 237496;
-    let mut print_stuff: bool = false;
-    for v in 0..var_cluster.len() {
-        if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
-    }
+    //let test_pos = 237496;
+    let print_stuff: bool = false;
+    //for v in 0..var_cluster.len() {
+    //    if var_cluster[v].pos0+1 == test_pos {print_stuff = true;}
+    //}
 
     let window_capacity = (anchors.right_anchor_ref - anchors.left_anchor_ref + 10) as usize;
 

@@ -138,6 +138,7 @@ pub fn generate_flist_buffer(
     flist: &Vec<Fragment>,
     phase_variant: &Vec<bool>,
     single_reads: bool,
+    varlist: &VarList
 ) -> Result<Vec<Vec<u8>>> {
     let mut buffer: Vec<Vec<u8>> = vec![];
 
@@ -179,6 +180,10 @@ pub fn generate_flist_buffer(
         for c in frag.clone().calls {
             if phase_variant[c.var_ix as usize] {
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
+                    if !(c.allele == 0 as u8 || c.allele == 1 as u8) {
+
+                        eprintln!("{:?} {:?} {:?}",varlist.lst[c.var_ix].tid, varlist.lst[c.var_ix].pos0, varlist.lst[c.var_ix].alleles);
+                    }
                     ensure!(
                         c.allele == 0 as u8 || c.allele == 1 as u8,
                         "Allele is not valid for incorporation into fragment file."

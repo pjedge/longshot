@@ -691,7 +691,6 @@ pub fn call_potential_variants_poa(
             }
 
             let mut ref_window_nullterm = ref_window.clone();
-            ref_window_nullterm.push('\0' as u8);
 
             let mut all_read_seqs: Vec<Vec<u8>> = vec![];
             let mut h1_read_seqs: Vec<Vec<u8>> = vec![];
@@ -742,7 +741,6 @@ pub fn call_potential_variants_poa(
                     let c = alignment.record().seq()[i].to_ascii_uppercase();
                     read_seq.push(c)
                 }
-                read_seq.push('\0' as u8);
 
                 all_read_seqs.push(read_seq.clone());
                 all_seq_count += 1;
