@@ -22,6 +22,7 @@ extern crate rust_htslib;
 extern crate error_chain;
 extern crate fishers_exact;
 extern crate hashbrown;
+extern crate disjoint_sets;
 
 // import modules
 mod call_genotypes;
@@ -57,6 +58,8 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use util::*;
+use variants_and_fragments::parse_vcf_potential_variants;
+
 use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
@@ -150,7 +153,7 @@ fn run() -> Result<()> {
             .short("v")
             .long("potential_variants")
             .value_name("VCF")
-            .help("Use the variants in this VCF as the potential variants instead of using pileup method. NOTE: every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
+            .help("Use the variants in this VCF (must be gzipped and tabix indexed) as the potential variants instead of using pileup method. NOTE: Every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
             .display_order(45)
             .takes_value(true))
         .arg(Arg::with_name("Call indels")
@@ -401,7 +404,7 @@ fn run() -> Result<()> {
         .value_of(&"Sample ID")
         .chain_err(|| "Sample ID not defined.")?
         .to_string();
-    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
+    let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
 
     // sanity checks on values that aren't covered by parsing functions
     ensure!(
@@ -584,33 +587,29 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
 
     //let bam_file: String = "test_data/test.bam".to_string();
-    eprintln!("{} Calling potential SNVs using pileup...", print_time());
-    /*let mut varlist = match potential_variants_file {
-        Some(file) => { parse_VCF_potential_variants(&file.to_string(), &bamfile_name) }
-        None => { call_potential_snvs::call_potential_snvs(&bamfile_name,
-                                                 &fasta_file,
-                                                 &interval,
-                                                 &genotype_priors,
-                                                 min_cov,
-                                                 max_cov,
-                                                 min_mapq,
-                                                 max_p_miscall,
-                                                 alignment_parameters.ln()) }
-    };*/
-    let mut varlist = call_potential_snvs::call_potential_snvs(
-        &bamfile_name,
-        &fasta_file,
-        &interval,
-        &genotype_priors,
-        min_cov,
-        max_cov,
-        potential_snv_min_alt_count,
-        potential_snv_min_alt_frac,
-        min_mapq,
-        alignment_parameters.ln(),
-        potential_snv_cutoff,
-    )
-    .chain_err(|| "Error calling potential SNVs.")?;
+    let mut varlist = match potential_variants_file {
+        Some(file) => {
+            eprintln!("{} Reading potential variants from VCF...", print_time());
+            parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
+                             .chain_err(|| "Error reading potential variant VCF.")?
+        }
+        None => {
+            eprintln!("{} Calling potential SNVs using pileup...", print_time());
+
+            call_potential_snvs::call_potential_snvs(
+            &bamfile_name,
+            &fasta_file,
+            &interval,
+            &genotype_priors,
+            min_cov,
+            max_cov,
+            potential_snv_min_alt_count,
+            potential_snv_min_alt_frac,
+            min_mapq,
+            alignment_parameters.ln(),
+            potential_snv_cutoff).chain_err(|| "Error calling potential SNVs.")?
+        }
+    };
 
     print_variant_debug(
         &mut varlist,
@@ -666,7 +665,7 @@ fn run() -> Result<()> {
             // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
             // together the lines represent the contents of a fragment file in HapCUT-like format
             let mut fragment_buffer =
-                generate_flist_buffer(&flist, &phase_variant,  true)
+                generate_flist_buffer(&flist, &phase_variant,  true, &varlist)
                     .chain_err(|| "Error generating fragment list buffer.")?;
 
             // convert the buffer of u8s into strings and print them to the fragment file
@@ -824,6 +823,44 @@ fn run() -> Result<()> {
         None => {}
     }
 
+    match potential_variants_file {
+        Some(_) => {
+            // calculate MEC-based statistics for variants and blocks
+            calculate_mec(&flist, &mut varlist)
+                .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
+
+            let debug_filename = "4.0.final_genotypes.vcf";
+
+            // Print the final VCF output
+            eprintln!("{} Printing VCF file...", print_time());
+            print_variant_debug(
+                &mut varlist,
+                &interval,
+                &variant_debug_directory,
+                debug_filename,
+                max_cov,
+                &density_params,
+                &sample_name,
+            )?;
+            print_vcf(
+                &mut varlist,
+                &interval,
+                &Some(fasta_file),
+                &output_vcf_file,
+                false,
+                max_cov,
+                &density_params,
+                &sample_name,
+                false,
+                min_gq,
+                call_indels
+            ).chain_err(|| "Error printing VCF output.")?;
+
+            return Ok(());
+        }
+        None => {}
+    }
+
     /***********************************************************************************************/
     // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
     /***********************************************************************************************/
@@ -927,12 +964,16 @@ fn run() -> Result<()> {
         print_time()
     );
 
+    // if we're not calling indels, it should be sufficient to just polish the haplotypes
+    // using the greedy algorithm. If we are calling indels, we will run HapCUT2 again.
+    let greedy_only = !call_indels;
+
     call_genotypes_with_haplotypes(
         &mut flist2,
         &mut varlist,
         &interval,
         &genotype_priors,
-        true,
+        greedy_only,
         false,
         &variant_debug_directory,
         7,

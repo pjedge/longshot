@@ -49,7 +49,7 @@ pub fn print_vcf(
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
     let headerstr = format!("##fileformat=VCFv4.2
-##source=Longshot v0.3.3
+##source=Longshot v0.4.0
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">

@@ -15,6 +15,7 @@ use haplotype_assembly::{call_hapcut2, generate_flist_buffer};
 use print_output::*;
 use util::{DensityParameters, GenomicInterval, MAX_VCF_QUAL};
 use variants_and_fragments::*;
+use disjoint_sets::UnionFind;
 
 /// Takes a vector of fragments and returns a vector of "allele pileups"
 ///
@@ -76,6 +77,8 @@ fn count_alleles(
 
     (counts, counts_forward, counts_reverse) // return counts
 }
+
+
 
 /// Calculates the posterior probabilities for a pileup-based genotyping calculation (without using
 /// haplotype information)
@@ -209,6 +212,137 @@ pub fn call_genotypes_no_haplotypes(
         var.phase_set = None; // set phase set to none since phase information was not used
     }
     Ok(())
+}
+
+fn label_phase_sets(flist: &Vec<Fragment>,
+                   varlist: &mut VarList,
+                   interval: &Option<GenomicInterval>) {
+
+    // will use union-find data strucure to find SNV connected components
+    let mut uf = UnionFind::new(varlist.lst.len());
+
+    // clear the existing phase sets
+    for var in &mut varlist.lst {
+        var.phase_set = None;
+    }
+
+    // traverse the fragment list and connect heterozygous SNVs covered by the same fragment into
+    // the same connected component
+    for frag in flist {
+
+        let mut first_var_ix = None;
+
+        for call in &frag.calls {
+
+            let var = &varlist.lst[call.var_ix];
+
+            match interval {
+                &Some(ref iv) => {
+                    if var.tid != iv.tid
+                        || var.pos0 < iv.start_pos as usize
+                        || var.pos0 > iv.end_pos as usize {
+                        continue;
+                    }
+                }
+                &None => {}
+            }
+
+            let is_indel = var.alleles[var.genotype.0 as usize].len() != var.alleles[0].len()
+                || var.alleles[var.genotype.1 as usize].len() != var.alleles[0].len();
+
+            let is_het = var.genotype.0 as usize != var.genotype.1 as usize;
+
+            // if it's a heterozygous SNV (non-indel), link it to the first such SNV seen on this fragment
+            // or set the first-seen SNV if it hasn't been set
+            if is_het && !is_indel {
+                match first_var_ix {
+                    Some(ix) => {
+                        uf.union(ix, call.var_ix);
+                    }
+                    None => {
+                        first_var_ix = Some(call.var_ix);
+                    }
+                }
+            }
+        }
+    }
+
+    // we want to convert the phase set ID into the VCF standard type
+    // it should be the variant position (on its chromosome) of the first phased variant in the block
+    // we'll iterate over the phase set found by connected components and figure out what the minimum
+    // position for that phase set is, so we can use it as the PS flag value
+    let m = <usize>::max_value();
+    let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
+    let mut num_pos_ps: Vec<usize> = vec![0; varlist.lst.len()];
+    let uf_vec = uf.to_vec();
+
+    for (i, p) in uf_vec.iter().enumerate() {
+        num_pos_ps[*p] += 1;
+        if varlist.lst[i].pos0 + 1 < min_pos_ps[*p as usize] {
+            min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
+        }
+    }
+
+    for (i, var) in varlist.lst.iter_mut().enumerate() {
+        if num_pos_ps[uf_vec[i]] > 1 {
+            var.phase_set = Some(min_pos_ps[uf_vec[i]]);
+        }
+    }
+
+    // we don't want to use indel variants to link distinct phase-sets together since they're probably not very
+    // accurate, but it would still be nice to have a phase-set for the heterozygous indels
+    // so what we do is we go over the fragments, keep track of the first-seen phased SNV covered by
+    // it, and then if we see any heterozygous indels after that we link them to that phase set.
+
+    for frag in flist {
+
+        let mut phase_set = None;
+
+        for call in &frag.calls {
+
+            let var = &mut varlist.lst[call.var_ix];
+
+            match interval {
+                &Some(ref iv) => {
+                    if var.tid != iv.tid
+                        || var.pos0 < iv.start_pos as usize
+                        || var.pos0 > iv.end_pos as usize {
+                        continue;
+                    }
+                }
+                &None => {}
+            }
+
+            let is_indel = var.alleles[var.genotype.0 as usize].len() != var.alleles[0].len()
+                || var.alleles[var.genotype.1 as usize].len() != var.alleles[0].len();
+
+            let is_het = var.genotype.0 as usize != var.genotype.1 as usize;
+
+            // if this is the first phased SNV covered by this fragment, save it
+            if is_het && !is_indel {
+                match phase_set {
+                    Some(_) => {}
+                    None => {
+                        if var.phase_set != None {
+                            phase_set = var.phase_set;
+                        }
+                    }
+                }
+            }
+
+            // if this is a het indel, link it to whatever phased SNV this fragment has covered
+            if is_het && is_indel {
+                match phase_set {
+                    Some(ps) => {
+                        if var.phase_set == None && var.pos0+1 >= ps {
+                            var.phase_set = Some(ps);
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
 }
 
 /// Refines diploid genotypes for each variant in the ```VarList``` using a haplotype assembly approach.
@@ -396,7 +530,7 @@ pub fn call_genotypes_with_haplotypes(
 
             // similarly to the VCF buffer, generate a fragment buffer representing the fragment file
             // this also gets passed off as input to HapCUT2
-            let frag_buffer = generate_flist_buffer(&flist, &var_phased, false)
+            let frag_buffer = generate_flist_buffer(&flist, &var_phased, false, varlist)
                 .chain_err(|| "Error generating fragment list buffer.")?;
             // this phase_sets vector gets modified by HapCUT2 to hold the haplotype block (phase set)
             // information
@@ -413,22 +547,6 @@ pub fn call_genotypes_with_haplotypes(
                 &mut phase_sets,
             );
 
-            // we want to convert the phase set ID given by HapCUT2 into the VCF standard type
-            // it should be the variant position (on its chromosome) of the first phased variant in the block
-            // we'll iterate over the phase set IDs given by HapCUT2 and figure out what the minimum
-            // position for that phase set is, so we can use it as the PS flag value
-            let m = <usize>::max_value();
-            let mut min_pos_ps: Vec<usize> = vec![m; varlist.lst.len()];
-
-            for (i, p) in phase_sets.iter().enumerate() {
-                if p < &0 {
-                    continue;
-                }
-                if varlist.lst[i].pos0 < min_pos_ps[*p as usize] {
-                    min_pos_ps[*p as usize] = varlist.lst[i].pos0 + 1;
-                }
-            }
-
             // we passed the hap1 vector to HapCUT2 and it contains the phased haplotype results
             // we want to convert the haplotype vectors into the phased genotype field in the VarList
             // we copy over the genotypes and use min_pos_ps to convert the phase set/block information
@@ -437,21 +555,9 @@ pub fn call_genotypes_with_haplotypes(
                 match hap1[i] as char {
                     '0' => {
                         varlist.lst[i].genotype = Genotype(0, 1);
-
-                        if phase_sets[i] >= 0 {
-                            varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
-                        } else {
-                            varlist.lst[i].phase_set = None;
-                        }
                     }
                     '1' => {
                         varlist.lst[i].genotype = Genotype(1, 0);
-
-                        if phase_sets[i] >= 0 {
-                            varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
-                        } else {
-                            varlist.lst[i].phase_set = None;
-                        }
                     }
                     _ => {
                         var_phased[i] = false;
@@ -751,6 +857,9 @@ pub fn call_genotypes_with_haplotypes(
 
         prev_likelihood = total_likelihood; // save the current likelihood as the previous likelihood
     }
+
+    label_phase_sets(flist, varlist, interval);
+
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "longshot"
-version = "0.3.3"
+version = "0.4.0"
 authors = ["Peter Edge <edge.peterj@gmail.com>"]
 publish = false
 
@@ -14,6 +14,7 @@ error-chain = "0.12.0"
 fishers_exact = "1.0.1"
 hashbrown = "0.1.8"
 rust-spoa = "0.2.3"
+disjoint-sets = "0.4.2"
 
 [build-dependencies]
 cc = "1.0"
