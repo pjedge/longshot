@@ -575,7 +575,6 @@ fn extract_variants_from_alignment(
 }
 
 pub fn call_potential_variants_poa(
-    variant_sites: Option<&VarList>,
     bam_file: &String,
     fasta_file: &String,
     interval: &Option<GenomicInterval>,
@@ -585,20 +584,6 @@ pub fn call_potential_variants_poa(
     _ln_align_params: LnAlignmentParameters,
 ) -> Result<VarList> {
 
-    let sites: Option<HashSet<(u32, usize)>> = match variant_sites {
-        Some(vlst) => {
-            let mut s = HashSet::new();
-            for var in vlst.lst.iter() {
-                if var.genotype != Genotype(0,0) {
-                    s.insert((var.tid, var.pos0));
-                }
-            }
-            Some(s)
-        }
-        None => {None}
-    };
-
-    //let potential_snv_qual = LogProb::from(Prob(0.5));
     let target_names = parse_target_names(&bam_file)?;
 
     //let genotype_priors = estimate_genotype_priors();
@@ -627,20 +612,15 @@ pub fn call_potential_variants_poa(
     let gap_open: i32 = -3;
     let gap_extend: i32 = -1;
 
-    let (d, boundary, consensus_max_len): (usize, usize, usize) = match sites {
-        Some(_) => {
-            (15,5,60)
-        },
-        None => {
-            (50,25,200)
-        }
-    };
+    let d = 50;
+    let boundary = 25;
+    let consensus_max_len = 200;
 
     let score = |a: u8, b: u8| if a == b { 5i32 } else { -4i32 };
     let k = 6; // kmer match length
     let w = 20; // Window size for creating the band
     let mut aligner = Aligner::new(-8, -2, score, k, w);
-    let min_reads = 6;
+    let min_reads = 10;
 
     for iv in interval_lst {
         bam_ix
@@ -667,19 +647,9 @@ pub fn call_potential_variants_poa(
                 ref_seq = dna_vec(&ref_seq_u8);
             }
 
-            match &sites {
-                &Some(ref s) => {
-                    if !s.contains(&(tid as u32, pileup.pos() as usize)) {
-                        prev_tid = tid;
-                        continue;
-                    }
-                }
-                &None => {
-                    if pileup.pos() % d as u32 != 0 {
-                        prev_tid = tid;
-                        continue;
-                    }
-                }
+            if pileup.pos() % d as u32 != 0 {
+                prev_tid = tid;
+                continue;
             }
 
             let pos_ref = pileup.pos() as usize;

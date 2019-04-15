@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 use std::convert::From;
 use std::fmt;
 use util::*;
+use std::ops::BitXor;
 
 #[derive(Clone)]
 pub struct FragCall {
@@ -80,6 +81,11 @@ impl VarFilter {
     // rhs is filter to add
     pub fn add_filter(&mut self, filter: VarFilter) {
         *self = VarFilter::from(*self as usize | filter as usize)
+    }
+    // rhs is filter to add
+    pub fn remove_filter(&mut self, filter: VarFilter) {
+        self.add_filter(filter);
+        *self = VarFilter::from((*self as usize).bitxor(filter as usize))
     }
     pub fn has_filter(&self, filter: VarFilter) -> bool {
         (*self as usize & filter as usize) != 0
@@ -714,6 +720,42 @@ mod tests {
         assert!(f1.has_filter(dp));
         assert!(f1.has_filter(dn));
         assert!(f1.has_filter(sb));
+    }
+
+
+    #[test]
+    fn test_varfilter_remove() {
+        let pass = VarFilter::Pass;
+        let dp = VarFilter::Depth;
+        let dn = VarFilter::Density;
+        let sb = VarFilter::StrandBias;
+
+        let mut f1 = VarFilter::Pass;
+        assert!(!f1.has_filter(dp));
+        f1.add_filter(dp);
+        f1.add_filter(sb);
+        f1.add_filter(dn);
+        assert!(f1.has_filter(dp));
+        assert!(f1.has_filter(dn));
+        assert!(f1.has_filter(sb));
+        assert_eq!(f1, VarFilter::DensityAndDepthAndStrandBias);
+        f1.remove_filter(dp);
+        assert!(!f1.has_filter(dp));
+        assert!(f1.has_filter(dn));
+        assert!(f1.has_filter(sb));
+        f1.remove_filter(dn);
+        assert!(!f1.has_filter(dp));
+        assert!(!f1.has_filter(dn));
+        assert!(f1.has_filter(sb));
+        f1.remove_filter(dn);
+        assert!(!f1.has_filter(dp));
+        assert!(!f1.has_filter(dn));
+        assert!(f1.has_filter(sb));
+        f1.remove_filter(sb);
+        assert!(!f1.has_filter(dp));
+        assert!(!f1.has_filter(dn));
+        assert!(!f1.has_filter(sb));
+        assert_eq!(f1, pass);
     }
 
     /**********************************************************************************************/

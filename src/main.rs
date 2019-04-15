@@ -781,7 +781,6 @@ fn run() -> Result<()> {
         &mut varlist,
         &interval,
         &genotype_priors,
-        false,
         true,
         &variant_debug_directory,
         3,
@@ -864,134 +863,123 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
     // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
     /***********************************************************************************************/
-    let (h1, h2) = separate_fragments_by_haplotype(
-        &flist,
-        LogProb::from(Prob(0.51)),
-    )?;
 
     if call_indels {
+
+        let (h1, h2) = separate_fragments_by_haplotype(
+            &flist,
+            LogProb::from(Prob(0.51)),
+        )?;
+
         eprintln!(
             "{} Using Partial Order Alignment (POA) to find indels and other new variants...",
             print_time()
         );
-    } else {
+
+        flist.clear();
+
+        let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(
+            &bamfile_name,
+            &fasta_file,
+            &interval,
+            &h1,
+            &h2,
+            min_mapq,
+            alignment_parameters.ln(),
+        ).chain_err(|| "Error calling new potential variants using POA.")?;
+
+        // want to remove duplicates from POA variant list
+        let mut varlist_empty: VarList = VarList::new(vec![], varlist.target_names.clone())?;
+        varlist_poa.combine(&mut varlist_empty)?;
+
+        print_variant_debug(
+            &mut varlist_poa,
+            &interval,
+            &variant_debug_directory,
+            &"4.0.potential_SNVs_identified_with_POA.vcf",
+            max_cov,
+            &density_params,
+            &sample_name,
+        )?;
+
+        eprintln!("{} Merging POA variants with pileup SNVs...", print_time());
+
+        varlist.combine(&mut varlist_poa)?;
+
+        print_variant_debug(
+            &mut varlist,
+            &interval,
+            &variant_debug_directory,
+            &"5.0.merged_potential_SNVs_pileup_and_POA.vcf",
+            max_cov,
+            &density_params,
+            &sample_name,
+        )?;
+
         eprintln!(
-            "{} Using Partial Order Alignment (POA) to refine SNV alleles...",
+            "{} {} potential variants after POA.",
+            print_time(),
+            varlist.lst.len()
+        );
+
+        /***********************************************************************************************/
+        // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
+        /***********************************************************************************************/
+        eprintln!(
+            "{} Generating new haplotype fragments from reads after merging variants...",
             print_time()
         );
+        let mut flist2 = extract_fragments::extract_fragments(
+            &bamfile_name,
+            &fasta_file,
+            &mut varlist,
+            &interval,
+            extract_fragment_parameters,
+            alignment_parameters
+        )
+            .chain_err(|| "Error extracting fragments for new POA variants.")?;
+
+        call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors)
+           .chain_err(|| "Error calling initial genotypes for new POA variants.")?;
+
+        print_variant_debug(
+            &mut varlist,
+            &interval,
+            &variant_debug_directory,
+            &"6.0.realigned_genotypes_after_POA.vcf",
+            max_cov,
+            &density_params,
+            &sample_name,
+        )?;
+
+        eprintln!(
+            "{} Refining haplotypes and genotypes after alleles have changed...",
+            print_time()
+        );
+
+        call_genotypes_with_haplotypes(
+            &mut flist2,
+            &mut varlist,
+            &interval,
+            &genotype_priors,
+            false,
+            &variant_debug_directory,
+            7,
+            max_cov,
+            &density_params,
+            &sample_name,
+            ll_delta,
+        )
+            .chain_err(|| {
+                "Error during haplotype/genotype iteration procedure with new POA variants."
+            })?;
     }
-
-    flist.clear();
-
-    let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(
-        {if call_indels {None} else {Some(&varlist)}},
-        &bamfile_name,
-        &fasta_file,
-        &interval,
-        &h1,
-        &h2,
-        min_mapq,
-        alignment_parameters.ln(),
-    )
-        .chain_err(|| "Error calling new potential variants using POA.")?;
-
-    // want to remove duplicates from POA variant list
-    let mut varlist_empty: VarList = VarList::new(vec![], varlist.target_names.clone())?;
-    varlist_poa.combine(&mut varlist_empty)?;
-
-    print_variant_debug(
-        &mut varlist_poa,
-        &interval,
-        &variant_debug_directory,
-        &"4.0.potential_SNVs_identified_with_POA.vcf",
-        max_cov,
-        &density_params,
-        &sample_name,
-    )?;
-
-    eprintln!("{} Merging POA variants with pileup SNVs...", print_time());
-
-    varlist.combine(&mut varlist_poa)?;
-
-    print_variant_debug(
-        &mut varlist,
-        &interval,
-        &variant_debug_directory,
-        &"5.0.merged_potential_SNVs_pileup_and_POA.vcf",
-        max_cov,
-        &density_params,
-        &sample_name,
-    )?;
-
-    eprintln!(
-        "{} {} potential variants after POA.",
-        print_time(),
-        varlist.lst.len()
-    );
-
-    /***********************************************************************************************/
-    // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
-    /***********************************************************************************************/
-    eprintln!(
-        "{} Generating new haplotype fragments from reads after merging variants...",
-        print_time()
-    );
-    let mut flist2 = extract_fragments::extract_fragments(
-        &bamfile_name,
-        &fasta_file,
-        &mut varlist,
-        &interval,
-        extract_fragment_parameters,
-        alignment_parameters
-    )
-        .chain_err(|| "Error extracting fragments for new POA variants.")?;
-
-    //call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors)
-    //   .chain_err(|| "Error calling initial genotypes for new POA variants.")?;
-
-    print_variant_debug(
-        &mut varlist,
-        &interval,
-        &variant_debug_directory,
-        &"6.0.realigned_genotypes_after_POA.vcf",
-        max_cov,
-        &density_params,
-        &sample_name,
-    )?;
-
-    eprintln!(
-        "{} Refining haplotypes and genotypes after alleles have changed...",
-        print_time()
-    );
-
-    // if we're not calling indels, it should be sufficient to just polish the haplotypes
-    // using the greedy algorithm. If we are calling indels, we will run HapCUT2 again.
-    let greedy_only = !call_indels;
-
-    call_genotypes_with_haplotypes(
-        &mut flist2,
-        &mut varlist,
-        &interval,
-        &genotype_priors,
-        greedy_only,
-        false,
-        &variant_debug_directory,
-        7,
-        max_cov,
-        &density_params,
-        &sample_name,
-        ll_delta,
-    )
-        .chain_err(|| {
-            "Error during haplotype/genotype iteration procedure with new POA variants."
-        })?;
-    ;
 
     // calculate MEC-based statistics for variants and blocks
     calculate_mec(&flist, &mut varlist)
         .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
 
-    let debug_filename = "8.0.final_genotypes.vcf";
+    let debug_filename = if call_indels {"8.0.final_genotypes.vcf"} else {"4.0.final_genotypes.vcf"};
 
     // Print the final VCF output
     eprintln!("{} Printing VCF file...", print_time());
