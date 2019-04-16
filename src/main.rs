@@ -156,7 +156,7 @@ fn run() -> Result<()> {
             .help("Use the variants in this VCF (must be gzipped and tabix indexed) as the potential variants instead of using pileup method. NOTE: Every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
             .display_order(45)
             .takes_value(true))
-        .arg(Arg::with_name("Call indels")
+        .arg(Arg::with_name("Call indels (Experimental)")
             .short("I")
             .long("indels")
             .help("Call indel variants de novo. This is VERY SLOW and has low precision and recall for error-prone reads.")
@@ -376,7 +376,7 @@ fn run() -> Result<()> {
         parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
     let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
     let force = parse_flag(&input_args, "Force overwrite")?;
-    let call_indels = parse_flag(&input_args, "Call indels")?;
+    let call_indels = parse_flag(&input_args, "Call indels (Experimental)")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
     let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;

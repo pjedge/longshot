@@ -784,6 +784,8 @@ pub fn call_genotypes_with_haplotypes(
                 total_likelihood + LogProb::ln_add_exp(ln_half + pr[0], ln_half + pr[1]);
         }
 
+        label_phase_sets(flist, varlist, interval);
+
         // update the various fields for the variant.
         for i in 0..varlist.lst.len() {
             //let pileup = &pileup_lst[i];
@@ -860,8 +862,6 @@ pub fn call_genotypes_with_haplotypes(
 
         prev_likelihood = total_likelihood; // save the current likelihood as the previous likelihood
     }
-
-    label_phase_sets(flist, varlist, interval);
 
     Ok(())
 }

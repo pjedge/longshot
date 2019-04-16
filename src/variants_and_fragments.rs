@@ -653,6 +653,11 @@ pub fn var_filter(
     density_count: usize,
     max_depth: u32,
 ) {
+    for var in &mut varlist.lst {
+        var.filter.remove_filter(VarFilter::Depth);
+        var.filter.remove_filter(VarFilter::Density);
+    }
+
     for i in 0..varlist.lst.len() {
         if varlist.lst[i].qual < density_qual {
             continue;
