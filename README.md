@@ -78,7 +78,7 @@ Execution should take around 5 to 10 seconds on a typical desktop machine. The o
 ```
 $ longshot --help
 
-Longshot 0.3.3
+Longshot 0.3.4
 Peter Edge <edge.peterj@gmail.com>
 SNV caller for Third-Generation Sequencing reads
 
