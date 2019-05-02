@@ -257,7 +257,7 @@ pub fn call_potential_snvs(
                                 'C' | 'c' => 1,
                                 'G' | 'g' => 2,
                                 'T' | 't' => 3,
-                                _ => 4
+                                _ => 4,
                             };
 
                             counts[b] += 1;

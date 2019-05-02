@@ -374,7 +374,8 @@ fn run() -> Result<()> {
     let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
     let strand_bias_pvalue_cutoff: f64 =
         parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
-    let hap_assignment_qual: f64 = parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
+    let hap_assignment_qual: f64 =
+        parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
     let potential_snv_cutoff_phred = parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
     let potential_snv_min_alt_count: usize =
@@ -528,7 +529,7 @@ fn run() -> Result<()> {
         variant_cluster_max_size: variant_cluster_max_size,
         max_window_padding,
         max_cigar_indel,
-        store_read_id
+        store_read_id,
     };
 
     eprintln!("{} Estimating alignment parameters...", print_time());
@@ -819,14 +820,15 @@ fn run() -> Result<()> {
     // write BAM files for h1,h2, and unassigned
     match hap_bam_prefix {
         Some(p) => {
-
             eprintln!(
                 "{} Calculating fraction of reads assigned to either haplotype...",
                 print_time()
             );
             // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
-            let (h1, h2) =
-                separate_fragments_by_haplotype(&flist, LogProb::from(Prob(1.0 - hap_max_p_misassign)))?;
+            let (h1, h2) = separate_fragments_by_haplotype(
+                &flist,
+                LogProb::from(Prob(1.0 - hap_max_p_misassign)),
+            )?;
 
             eprintln!(
                 "{} Writing haplotype-assigned reads to bam files...",
