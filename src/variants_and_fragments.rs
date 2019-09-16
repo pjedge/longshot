@@ -373,6 +373,13 @@ impl VarList {
         let mut vlst: Vec<Var> = vec![];
         // get the varlist index of a nearby position on the left
 
+        if !self
+                .ix
+                .contains_key(&interval.tid)
+                && self.target_names.contains(&interval.chrom) {
+
+                return Ok(vlst)
+                }
         let index_pos = (interval.start_pos as usize) / INDEX_FREQ;
 
         if index_pos
