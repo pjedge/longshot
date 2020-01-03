@@ -207,7 +207,7 @@ pub fn u8_to_string(u: &[u8]) -> Result<String> {
 }
 
 //
-pub fn dna_vec(u: &[u8]) -> (Vec<char>) {
+pub fn dna_vec(u: &[u8]) -> Vec<char> {
     let mut v: Vec<char> = Vec::with_capacity(u.len());
     for cu in u.to_ascii_uppercase() {
         let c = cu as char;

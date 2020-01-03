@@ -59,9 +59,8 @@ use util::*;
 use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
-use variants_and_fragments::VarFilter;
+use variants_and_fragments::{VarFilter,parse_vcf_potential_variants};
 
-//use variants_and_fragments::parse_VCF_potential_variants;
 //use haplotype_assembly::separate_reads_by_haplotype;
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
 
@@ -145,13 +144,13 @@ fn run() -> Result<()> {
                 .display_order(40)
                 //.required(true)
                 .takes_value(true))
-        /*.arg(Arg::with_name("Potential Variants VCF")
+        .arg(Arg::with_name("Potential Variants VCF")
             .short("v")
             .long("potential_variants")
             .value_name("VCF")
             .help("Use the variants in this VCF as the potential variants instead of using pileup method. NOTE: every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
             .display_order(45)
-            .takes_value(true))*/
+            .takes_value(true))
         .arg(Arg::with_name("Haplotype Bam Prefix")
             .short("p")
             .long("hap_bam_prefix")
@@ -389,7 +388,7 @@ fn run() -> Result<()> {
         .value_of(&"Sample ID")
         .chain_err(|| "Sample ID not defined.")?
         .to_string();
-    //let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
+    let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
 
     // sanity checks on values that aren't covered by parsing functions
     ensure!(
@@ -560,19 +559,26 @@ fn run() -> Result<()> {
 
     //let bam_file: String = "test_data/test.bam".to_string();
     eprintln!("{} Calling potential SNVs using pileup...", print_time());
-    /*let mut varlist = match potential_variants_file {
-        Some(file) => { parse_VCF_potential_variants(&file.to_string(), &bamfile_name) }
-        None => { call_potential_snvs::call_potential_snvs(&bamfile_name,
-                                                 &fasta_file,
-                                                 &interval,
-                                                 &genotype_priors,
-                                                 min_cov,
-                                                 max_cov,
-                                                 min_mapq,
-                                                 max_p_miscall,
-                                                 alignment_parameters.ln()) }
-    };*/
-    let mut varlist = call_potential_snvs::call_potential_snvs(
+    let mut varlist = match potential_variants_file {
+        Some(file) => { parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
+                        .chain_err(|| "Error reading potential variants VCF file.")? }
+        None => {
+                call_potential_snvs::call_potential_snvs(
+                &bamfile_name,
+                &fasta_file,
+                &interval,
+                &genotype_priors,
+                min_cov,
+                max_cov,
+                potential_snv_min_alt_count,
+                potential_snv_min_alt_frac,
+                min_mapq,
+                alignment_parameters.ln(),
+                potential_snv_cutoff,
+                )
+                .chain_err(|| "Error calling potential SNVs.")? }
+    };
+    /*let mut varlist = call_potential_snvs::call_potential_snvs(
         &bamfile_name,
         &fasta_file,
         &interval,
@@ -585,7 +591,7 @@ fn run() -> Result<()> {
         alignment_parameters.ln(),
         potential_snv_cutoff,
     )
-    .chain_err(|| "Error calling potential SNVs.")?;
+    .chain_err(|| "Error calling potential SNVs.")?;*/
 
     print_variant_debug(
         &mut varlist,
@@ -640,7 +646,7 @@ fn run() -> Result<()> {
             let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
             // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
             // together the lines represent the contents of a fragment file in HapCUT-like format
-            let mut fragment_buffer =
+            let fragment_buffer =
                 generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true)
                     .chain_err(|| "Error generating fragment list buffer.")?;
 
@@ -680,7 +686,7 @@ fn run() -> Result<()> {
             var.allele_counts_reverse[1] as u32,
         ];
         let fishers_exact_pvalues = fishers_exact(&counts)
-            .chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;;
+            .chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;
 
         //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
         var.strand_bias_pvalue = if fishers_exact_pvalues.two_tail_pvalue <= 500.0 {
@@ -726,6 +732,7 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
+            potential_variants_file != None
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -866,6 +873,7 @@ fn run() -> Result<()> {
         &density_params,
         &sample_name,
         false,
+        potential_variants_file != None
     )
     .chain_err(|| "Error printing VCF output.")?;
 

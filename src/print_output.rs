@@ -20,6 +20,7 @@ pub fn print_vcf(
     density_params: &DensityParameters,
     sample_name: &String,
     print_outside_region: bool,
+    used_potential_variants_vcf: bool
 ) -> Result<()> {
     // first, add filter flags for variant density
     var_filter(
@@ -46,7 +47,8 @@ pub fn print_vcf(
     let mut file = File::create(&vcf_path)
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
-    let headerstr = format!("##fileformat=VCFv4.2
+    // first part of the header
+    let headerstr1 = "##fileformat=VCFv4.2
 ##source=Longshot v0.3.5
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
@@ -55,14 +57,25 @@ pub fn print_vcf(
 ##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
 ##INFO=<ID=MB,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant's haplotype block.\">
 ##INFO=<ID=AQ,Number=1,Type=Float,Description=\"Mean Allele Quality value (PHRED-scaled).\">
-##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">
-##INFO=<ID=DA,Number=1,Type=Integer,Description=\"Total Depth of reads at any MAPQ (but passing samtools filter 0xF00).\">
+##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">".to_string();
+
+    writeln!(file, "{}", headerstr1)
+        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+
+    // these header lines are not printed if a potential variants input VCF is used
+    if !used_potential_variants_vcf {
+        let headerstr2 = "##INFO=<ID=DA,Number=1,Type=Integer,Description=\"Total Depth of reads at any MAPQ (but passing samtools filter 0xF00).\">
 ##INFO=<ID=MQ10,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=10.\">
 ##INFO=<ID=MQ20,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=20.\">
 ##INFO=<ID=MQ30,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=30.\">
 ##INFO=<ID=MQ40,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=40.\">
-##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">
-##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
+##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">".to_string();
+
+        writeln!(file, "{}", headerstr2)
+            .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+    }
+    // last part of the header
+    let headerstr3 = format!("##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
 ##INFO=<ID=SC,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
 ##FILTER=<ID=dn,Description=\"In a dense cluster of variants\">
 ##FILTER=<ID=dp,Description=\"Exceeds maximum depth\">
@@ -74,10 +87,8 @@ pub fn print_vcf(
 ##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
 
-    //"##INFO=<ID=MEC,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Score for Variant\">
-    //##INFO=<ID=MF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Variant\">
-    //##INFO=<ID=PSMF,Number=1,Type=Integer,Description=\"Minimum Error Criterion (MEC) Fraction for Phase Set\">"
-    writeln!(file, "{}", headerstr)
+
+    writeln!(file, "{}", headerstr3)
         .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
 
     for var in &varlist.lst {
@@ -135,7 +146,11 @@ pub fn print_vcf(
             .join(",");
         let mut post_vec: Vec<String> = vec![];
         for g in var.possible_genotypes() {
-            post_vec.push(format!("{:.2}", *PHREDProb::from(var.genotype_post.get(g))));
+            let mut p = *PHREDProb::from(var.genotype_post.get(g));
+            if p > 500.0 {
+                p = 500.0;
+            }
+            post_vec.push(format!("{:.2}", p));
         }
 
         let post_str = post_vec.join(",");
@@ -185,8 +200,8 @@ pub fn print_vcf(
             None => "None".to_string(),
         };
 
-        writeln!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
+        write!(file,
+                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};",
                        varlist.target_names[var.tid as usize],
                        var.pos0 + 1,
                        var.alleles[0],
@@ -200,20 +215,28 @@ pub fn print_vcf(
                        var.mec_frac_variant,
                        var.mec_frac_block,
                        var.mean_allele_qual,
-                       genotypes_match,
-                       var.dp_any_mq,
-                       var.mq10_frac,
-                       var.mq20_frac,
-                       var.mq30_frac,
-                       var.mq40_frac,
-                       var.mq50_frac,
-                       post_str,
-                       sequence_context,
-                       genotype_str,
-                       var.gq,
-                       ps,
-                       unphased_genotype_str,
-                       var.unphased_gq).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+                       genotypes_match).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+
+        if !used_potential_variants_vcf {
+            write!(file,
+                     "DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};",
+                     var.dp_any_mq,
+                     var.mq10_frac,
+                     var.mq20_frac,
+                     var.mq30_frac,
+                     var.mq40_frac,
+                     var.mq50_frac).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+        }
+        writeln!(file,
+                 "PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
+                 post_str,
+                 sequence_context,
+                 genotype_str,
+                 var.gq,
+                 ps,
+                 unphased_genotype_str,
+                 var.unphased_gq).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+
     }
     Ok(())
 }
@@ -245,6 +268,7 @@ pub fn print_variant_debug(
                 density_params,
                 sample_name,
                 true,
+                false
             )
             .chain_err(|| "Error printing debug VCF file.")?;
         }

@@ -330,7 +330,7 @@ pub fn calculate_mec(
     let mut block_mec: HashMap<usize, usize> = HashMap::new();
     let mut block_total: HashMap<usize, usize> = HashMap::new();
 
-    for mut var in &mut varlist.lst {
+    for var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
                 *block_mec.entry(ps).or_insert(0) += var.mec;

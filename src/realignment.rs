@@ -107,7 +107,7 @@ pub fn forward_algorithm_non_numerically_stable(
     w: &Vec<char>,
     params: AlignmentParameters,
     min_band_width: usize,
-) -> (LogProb) {
+) -> LogProb {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
 
@@ -207,7 +207,7 @@ pub fn forward_algorithm_numerically_stable(
     w: &Vec<char>,
     params: LnAlignmentParameters,
     min_band_width: usize,
-) -> (LogProb) {
+) -> LogProb {
     let len_diff = ((v.len() as i32) - (w.len() as i32)).abs() as usize;
     let band_width = min_band_width + len_diff;
 

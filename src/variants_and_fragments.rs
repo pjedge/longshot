@@ -207,9 +207,31 @@ pub fn parse_vcf_potential_variants(
         }
 
         let mut alleles: Vec<String> = vec![];
+        let mut non_acgt = false;
         for a in record.alleles().iter() {
             let s = u8_to_string(a)?;
+
+            // remove non-ACGT (e.g. structural) variants
+            if has_non_acgt(&s) {
+                eprintln!(
+                    "WARNING: Variant at {}:{} in input VCF will be ignored due to non-ACGT variant allele.",
+                    &chrom,
+                    record.pos()+1);
+                non_acgt = true;
+                break;
+            }
+
             alleles.push(s);
+        }
+
+        if non_acgt {continue;}
+
+        if alleles.len() > 2 {
+            eprintln!(
+                "WARNING: Triallelic site at {}:{} in input VCF will be ignored (not currently supported).",
+                &chrom,
+                record.pos()+1);
+            continue;
         }
 
         let new_var = Var {
@@ -526,7 +548,7 @@ impl VarList {
                     .collect();
                 //let mut new_alleles = vec![];
 
-                for mut allele in v.alleles.iter_mut() {
+                for allele in v.alleles.iter_mut() {
                     allele.push_str(&suffix_seq.clone());
                     //new_alleles.push(allele);
                 }

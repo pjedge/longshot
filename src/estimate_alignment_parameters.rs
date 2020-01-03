@@ -261,7 +261,7 @@ pub fn count_alignment_events(
                     continue; // skip this operation if the insertion is too long
                 }
 
-                let mut ref_pos = cigarpos.ref_pos as usize;
+                let ref_pos = cigarpos.ref_pos as usize;
                 let mut read_pos = cigarpos.read_pos as usize;
 
                 // traverse over the length of the insertion operation
@@ -301,7 +301,7 @@ pub fn count_alignment_events(
                 }
 
                 let mut ref_pos = cigarpos.ref_pos as usize;
-                let mut read_pos = cigarpos.read_pos as usize;
+                let read_pos = cigarpos.read_pos as usize;
 
                 // traverse over the length of the deletion operation
                 for _ in 0..l {
