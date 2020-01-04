@@ -49,7 +49,7 @@ pub fn print_vcf(
 
     // first part of the header
     let headerstr1 = "##fileformat=VCFv4.2
-##source=Longshot v0.3.5
+##source=Longshot v0.4.0
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
@@ -268,7 +268,7 @@ pub fn print_variant_debug(
                 density_params,
                 sample_name,
                 true,
-                false
+                true // don't print MQ statistics in VCF because they may or may not be present
             )
             .chain_err(|| "Error printing debug VCF file.")?;
         }

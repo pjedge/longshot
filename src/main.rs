@@ -109,7 +109,7 @@ fn run() -> Result<()> {
     eprintln!("");
 
     let input_args = App::new("Longshot")
-        .version("0.3.5")
+        .version("0.4.0")
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
         .arg(Arg::with_name("Input BAM")
@@ -148,7 +148,7 @@ fn run() -> Result<()> {
             .short("v")
             .long("potential_variants")
             .value_name("VCF")
-            .help("Use the variants in this VCF as the potential variants instead of using pileup method. NOTE: every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored!")
+            .help("Genotype and phase the variants in this VCF instead of using pileup method to find variants. NOTES: use with caution because excessive false potential variants can lead to inaccurate results! Also, every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored! Indel variants will be genotyped but not phased. Triallelic variants and structural variants are currently not supported.")
             .display_order(45)
             .takes_value(true))
         .arg(Arg::with_name("Haplotype Bam Prefix")
@@ -313,14 +313,14 @@ fn run() -> Result<()> {
             .help("Specify the homozygous Indel Rate for genotype prior estimation")
             .display_order(180)
             .hidden(true)
-            .default_value(&"0.0"))
+            .default_value(&"0.00005"))
         .arg(Arg::with_name("Heterozygous Indel Rate")
             .long("het_indel_rate")
             .value_name("float")
             .help("Specify the heterozygous Indel Rate for genotype prior estimation")
             .display_order(182)
             .hidden(true)
-            .default_value(&"0.0"))
+            .default_value(&"0.00001"))
         .arg(Arg::with_name("ts/tv Ratio")
             .long("ts_tv_ratio")
             .value_name("float")
@@ -558,12 +558,16 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
 
     //let bam_file: String = "test_data/test.bam".to_string();
-    eprintln!("{} Calling potential SNVs using pileup...", print_time());
     let mut varlist = match potential_variants_file {
-        Some(file) => { parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
+        Some(file) => {
+            eprintln!("{} Reading potential variants from input VCF...", print_time());
+
+            parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
                         .chain_err(|| "Error reading potential variants VCF file.")? }
         None => {
-                call_potential_snvs::call_potential_snvs(
+            eprintln!("{} Calling potential SNVs using pileup...", print_time());
+
+            call_potential_snvs::call_potential_snvs(
                 &bamfile_name,
                 &fasta_file,
                 &interval,
@@ -604,7 +608,7 @@ fn run() -> Result<()> {
     )?;
 
     eprintln!(
-        "{} {} potential SNVs identified.",
+        "{} {} potential variants identified.",
         print_time(),
         varlist.lst.len()
     );

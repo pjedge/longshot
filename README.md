@@ -13,7 +13,7 @@ It should work on any linux-based system that has Rust and Cargo installed.
 
 ## dependencies
 
-* rust >= 1.30.0
+* rust >= 1.40.0
 * zlib >= 1.2.11
 * xz >= 5.2.3
 * clangdev >= 7.0.1
@@ -78,7 +78,7 @@ Execution should take around 5 to 10 seconds on a typical desktop machine. The o
 ```
 $ longshot --help
 
-Longshot 0.3.5
+Longshot 0.4.0
 Peter Edge <edge.peterj@gmail.com>
 SNV caller for Third-Generation Sequencing reads
 
@@ -103,6 +103,13 @@ OPTIONS:
     -o, --out <VCF>                            output VCF file with called variants.
     -r, --region <string>                      Region in format <chrom> or <chrom:start-stop> in which to call variants
                                                (1-based, inclusive).
+    -v, --potential_variants <VCF>             Genotype and phase the variants in this VCF instead of using pileup
+                                               method to find variants. NOTES: use with caution because excessive false
+                                               potential variants can lead to inaccurate results! Also, every variant is
+                                               used and only the allele fields are considered! Genotypes, filters,
+                                               qualities etc are ignored! Indel variants will be genotyped but not
+                                               phased. Triallelic variants and structural variants are currently not
+                                               supported.
     -p, --hap_bam_prefix <BAM>                 Write haplotype-separated reads to 3 bam files using this prefix:
                                                <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam
     -c, --min_cov <int>                        Minimum coverage (of reads passing filters) to consider position as a

@@ -208,6 +208,8 @@ pub fn parse_vcf_potential_variants(
 
         let mut alleles: Vec<String> = vec![];
         let mut non_acgt = false;
+        let mut too_big_indel = false;
+
         for a in record.alleles().iter() {
             let s = u8_to_string(a)?;
 
@@ -221,14 +223,23 @@ pub fn parse_vcf_potential_variants(
                 break;
             }
 
+            if s.len() > 50 {
+                eprintln!(
+                    "WARNING: Variant at {}:{} in input VCF will be ignored due to excessively large indel (>50 bp), which may cause unexpected behaviour.",
+                    &chrom,
+                    record.pos()+1);
+                too_big_indel = true;
+                break;
+            }
+
             alleles.push(s);
         }
 
-        if non_acgt {continue;}
+        if non_acgt || too_big_indel {continue;}
 
         if alleles.len() > 2 {
             eprintln!(
-                "WARNING: Triallelic site at {}:{} in input VCF will be ignored (not currently supported).",
+                "WARNING: Triallelic variant at {}:{} in input VCF will be ignored (not currently supported).",
                 &chrom,
                 record.pos()+1);
             continue;
