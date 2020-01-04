@@ -148,7 +148,7 @@ fn run() -> Result<()> {
             .short("v")
             .long("potential_variants")
             .value_name("VCF")
-            .help("Genotype and phase the variants in this VCF instead of using pileup method to find variants. NOTES: use with caution because excessive false potential variants can lead to inaccurate results! Also, every variant is used and only the allele fields are considered! Genotypes, filters, qualities etc are ignored! Indel variants will be genotyped but not phased. Triallelic variants and structural variants are currently not supported.")
+            .help("Genotype and phase the variants in this VCF instead of using pileup method to find variants. NOTES: VCF must be gzipped and tabix indexed or contain contig information. Use with caution because excessive false potential variants can lead to inaccurate results. Every variant is used and only the allele fields are considered -- Genotypes, filters, qualities etc are ignored. Indel variants will be genotyped but not phased. Triallelic variants and structural variants are currently not supported.")
             .display_order(45)
             .takes_value(true))
         .arg(Arg::with_name("Haplotype Bam Prefix")

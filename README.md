@@ -104,10 +104,11 @@ OPTIONS:
     -r, --region <string>                      Region in format <chrom> or <chrom:start-stop> in which to call variants
                                                (1-based, inclusive).
     -v, --potential_variants <VCF>             Genotype and phase the variants in this VCF instead of using pileup
-                                               method to find variants. NOTES: use with caution because excessive false
-                                               potential variants can lead to inaccurate results! Also, every variant is
-                                               used and only the allele fields are considered! Genotypes, filters,
-                                               qualities etc are ignored! Indel variants will be genotyped but not
+                                               method to find variants. NOTES: VCF must be gzipped and tabix indexed or
+                                               contain contig information. Use with caution because excessive false
+                                               potential variants can lead to inaccurate results. Every variant is used
+                                               and only the allele fields are considered -- Genotypes, filters,
+                                               qualities etc are ignored. Indel variants will be genotyped but not
                                                phased. Triallelic variants and structural variants are currently not
                                                supported.
     -p, --hap_bam_prefix <BAM>                 Write haplotype-separated reads to 3 bam files using this prefix:
