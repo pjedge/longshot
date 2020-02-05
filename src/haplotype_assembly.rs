@@ -101,8 +101,9 @@ pub fn separate_bam_reads_by_haplotype(
         for r in bam_ix.records() {
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 	    record.remove_aux(b"HP"); // remove HP tag before setting it
-	    record.remove_aux(b"PS"); // remove these tags 
+	    record.remove_aux(b"PS"); // remove PS tag as well
 
+            let qname = u8_to_string(record.qname())?;
             if record.is_quality_check_failed()
                 || record.is_duplicate()
                 || record.is_secondary()
@@ -110,10 +111,11 @@ pub fn separate_bam_reads_by_haplotype(
                 || record.mapq() < min_mapq
                 || record.is_supplementary()
             {
+            out_bam.write(&record)
+                .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
                 continue;
             }
 
-            let qname = u8_to_string(record.qname())?;
             if h1.contains(&qname) {
                 record.push_aux(b"HP", &bam::record::Aux::Integer(1))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
