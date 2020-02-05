@@ -88,17 +88,10 @@ pub fn separate_bam_reads_by_haplotype(
     let mut bam_ix =
         bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
-    let h1_bam_file = format!("{}.hap1.bam", &hap_bam_prefix);
-    let h2_bam_file = format!("{}.hap2.bam", &hap_bam_prefix);
-    let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
-
+    let out_bam_file = format!("{}.bam", &hap_bam_prefix);
     let header = bam::Header::from_template(&bam_ix.header());
-    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header)
-        .chain_err(|| ErrorKind::BamWriterOpenError(h1_bam_file))?;
-    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header)
-        .chain_err(|| ErrorKind::BamWriterOpenError(h2_bam_file))?;
-    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header)
-        .chain_err(|| ErrorKind::BamWriterOpenError(unassigned_bam_file))?;
+    let mut out_bam = bam::Writer::from_path(&out_bam_file, &header)
+        .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file))?;
 
     for iv in interval_lst {
         bam_ix
@@ -106,7 +99,9 @@ pub fn separate_bam_reads_by_haplotype(
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() {
-            let record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
+            let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
+	    record.remove_aux(b"HP"); // remove HP tag before setting it
+	    record.remove_aux(b"PS"); // remove these tags 
 
             if record.is_quality_check_failed()
                 || record.is_duplicate()
@@ -119,20 +114,15 @@ pub fn separate_bam_reads_by_haplotype(
             }
 
             let qname = u8_to_string(record.qname())?;
-
             if h1.contains(&qname) {
-                h1_bam
-                    .write(&record)
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
+                record.push_aux(b"HP", &bam::record::Aux::Integer(1))
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
             } else if h2.contains(&qname) {
-                h2_bam
-                    .write(&record)
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
-            } else {
-                unassigned_bam
-                    .write(&record)
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
+                record.push_aux(b"HP", &bam::record::Aux::Integer(2))
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
             }
+            out_bam.write(&record)
+                .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
         }
     }
 

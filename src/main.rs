@@ -155,7 +155,7 @@ fn run() -> Result<()> {
             .short("p")
             .long("hap_bam_prefix")
             .value_name("BAM")
-            .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
+            .help("Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads assigned to each haplotype, any existing HP and PS tags are removed")
             .display_order(50))
         .arg(Arg::with_name("Auto max coverage")
             .short("A")
