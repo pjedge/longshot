@@ -197,7 +197,9 @@ pub fn parse_vcf_potential_variants(
         // get the alleles from the vcf record as well
 
         let rid = record.rid().chain_err(|| "Error accessing vcf RID")?;
-        let chrom: String = u8_to_string(vcfh.header().rid2name(rid))?;
+
+        let chrom_result = vcfh.header().rid2name(rid);
+        let chrom: String = u8_to_string(chrom_result.unwrap())?;
 
         if !chrom2tid.contains_key(&chrom) {
             eprintln!(
