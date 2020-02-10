@@ -93,11 +93,11 @@ pub fn separate_bam_reads_by_haplotype(
     let unassigned_bam_file = format!("{}.unassigned.bam", &hap_bam_prefix);
 
     let header = bam::Header::from_template(&bam_ix.header());
-    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header)
+    let mut h1_bam = bam::Writer::from_path(&h1_bam_file, &header,bam::Format::BAM)
         .chain_err(|| ErrorKind::BamWriterOpenError(h1_bam_file))?;
-    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header)
+    let mut h2_bam = bam::Writer::from_path(&h2_bam_file, &header,bam::Format::BAM)
         .chain_err(|| ErrorKind::BamWriterOpenError(h2_bam_file))?;
-    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header)
+    let mut unassigned_bam = bam::Writer::from_path(&unassigned_bam_file, &header,bam::Format::BAM)
         .chain_err(|| ErrorKind::BamWriterOpenError(unassigned_bam_file))?;
 
     for iv in interval_lst {
