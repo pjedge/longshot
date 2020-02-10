@@ -9,7 +9,7 @@ extern crate rust_htslib;
 // use declarations
 use errors::*;
 use rust_htslib::bam;
-use rust_htslib::prelude::*;
+use rust_htslib::bam::Read;
 use util::{get_interval_lst, print_time, GenomicInterval};
 
 /// Calculates the mean coverage of the input BAM file over the input region
