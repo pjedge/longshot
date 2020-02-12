@@ -613,7 +613,21 @@ fn run() -> Result<()> {
         varlist.lst.len()
     );
 
-    if varlist.lst.len() == 0 {
+    if varlist.lst.len() == 0 {  /* no variants identified, but still print empty VCF file with header, 02/12/20 */
+        eprintln!("No candidate variants identified, printing empty VCF file...");
+    print_vcf(
+        &mut varlist,
+        &interval,
+        &Some(fasta_file),
+        &output_vcf_file,
+        false,
+        max_cov,
+        &density_params,
+        &sample_name,
+        false,
+        potential_variants_file != None
+    )
+    .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
     }
 
