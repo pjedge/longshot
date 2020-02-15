@@ -111,8 +111,8 @@ OPTIONS:
                                                qualities etc are ignored. Indel variants will be genotyped but not
                                                phased. Triallelic variants and structural variants are currently not
                                                supported.
-    -p, --hap_bam_prefix <BAM>                 Write haplotype-separated reads to 3 bam files using this prefix:
-                                               <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam
+    -p, --hap_bam_prefix <BAM>                 Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads assigned to each haplotype,
+					       any existing HP and PS tags are removed
     -c, --min_cov <int>                        Minimum coverage (of reads passing filters) to consider position as a
                                                potential SNV. [default: 6]
     -C, --max_cov <int>                        Maximum coverage (of reads passing filters) to consider position as a

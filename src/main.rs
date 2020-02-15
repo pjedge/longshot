@@ -155,7 +155,7 @@ fn run() -> Result<()> {
             .short("p")
             .long("hap_bam_prefix")
             .value_name("BAM")
-            .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
+            .help("Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads assigned to each haplotype, any existing HP and PS tags are removed")
             .display_order(50))
         .arg(Arg::with_name("Auto max coverage")
             .short("A")
@@ -610,7 +610,21 @@ fn run() -> Result<()> {
         varlist.lst.len()
     );
 
-    if varlist.lst.len() == 0 {
+    if varlist.lst.len() == 0 {  /* no variants identified, but still print empty VCF file with header, 02/12/20 */
+        eprintln!("No candidate variants identified, printing empty VCF file...");
+    print_vcf(
+        &mut varlist,
+        &interval,
+        &Some(fasta_file),
+        &output_vcf_file,
+        false,
+        max_cov,
+        &density_params,
+        &sample_name,
+        false,
+        potential_variants_file != None
+    )
+    .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
     }
 
