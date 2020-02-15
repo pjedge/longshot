@@ -10,6 +10,7 @@
 #include "fragmatrix.h"
 #include "pointerheap.h"
 #include "readinputbuffers.h"
+#include "logsum10.h"
 
 // Printing related
 int VERBOSE = 0;
@@ -28,6 +29,7 @@ int LONG_READS = 1;
 
 int hapcut2(char** fragmentbuffer, int fragments, int snps, char* HAP1, int* PS) {
     // IMP NOTE: all SNPs start from 1 instead of 0 and all offsets are 1+
+    esl_flogsum10_init();
 
     srand(1);
     if (VERBOSE) fprintf_time(stderr, "Calling Max-Likelihood-Cut based haplotype assembly algorithm\n");
