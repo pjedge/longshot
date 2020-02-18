@@ -2,7 +2,7 @@
 //! MEC criteria, haplotype read separation, etc.
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use std::char::from_digit;
@@ -11,10 +11,11 @@ use variants_and_fragments::*;
 
 pub fn separate_fragments_by_haplotype(
     flist: &Vec<Fragment>,
+    varlist: &VarList,
     threshold: LogProb,
-) -> Result<(HashSet<String>, HashSet<String>)> {
-    let mut h1 = HashSet::new();
-    let mut h2 = HashSet::new();
+) -> Result<(HashMap<String, usize>, HashMap<String, usize>)> {
+    let mut h1 = HashMap::new();
+    let mut h2 = HashMap::new();
 
     let mut h1_count = 0;
     let mut h2_count = 0;
@@ -30,19 +31,43 @@ pub fn separate_fragments_by_haplotype(
         let p_read_hap0: LogProb = p_read_hap0 - total;
         let p_read_hap1: LogProb = p_read_hap1 - total;
 
-        match &f.id {
-            &Some(ref fid) => {
+        let mut fragment_phase_set: Option<usize> = None;
+
+        for call in &f.calls  {
+            match varlist.lst[call.var_ix].phase_set {
+                Some(ps) => {
+                    match fragment_phase_set {
+                        Some(fps) => {
+                            if ps != fps {
+                                bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
+                            }
+                        }
+                        None => {fragment_phase_set = Some(ps);}
+                    }
+            }
+                None => {}
+            }
+
+        }
+
+        match (&f.id, &fragment_phase_set) {
+            // Fragment has an ID as well as a phase set
+            (&Some(ref fid),&Some(ps)) => {
                 if p_read_hap0 > threshold {
                     h1_count += 1;
-                    h1.insert(fid.clone());
+                    h1.insert(fid.clone(), ps);
                 } else if p_read_hap1 > threshold {
                     h2_count += 1;
-                    h2.insert(fid.clone());
+                    h2.insert(fid.clone(), ps);
                 } else {
                     unassigned_count += 1;
                 }
             }
-            &None => {bail!("Fragment without read ID found while separating reads by haplotype.");}
+            // Fragment has an id but not a phase set so it is unassigned
+            (&Some(_), &None) => {unassigned_count += 1;}
+            // Fragment has no ID, this should not happen
+            (&None, &Some(_)) => {bail!("Fragment without read ID found while separating reads by haplotype.");}
+            (&None, &None) => {bail!("Fragment without read ID found while separating reads by haplotype.");}
         }
     }
 
@@ -78,8 +103,8 @@ pub fn separate_bam_reads_by_haplotype(
     bamfile_name: &String,
     interval: &Option<GenomicInterval>,
     hap_bam_prefix: String,
-    h1: &HashSet<String>,
-    h2: &HashSet<String>,
+    h1: &HashMap<String, usize>,
+    h2: &HashMap<String, usize>,
     min_mapq: u8,
 ) -> Result<()> {
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval)
@@ -116,12 +141,20 @@ pub fn separate_bam_reads_by_haplotype(
                 continue;
             }
 
-            if h1.contains(&qname) {
+            if h1.contains_key(&qname) {
+                let ps = h1.get(&qname).unwrap();
                 record.push_aux(b"HP", &bam::record::Aux::Integer(1))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-            } else if h2.contains(&qname) {
+                record.push_aux(b"PS", &bam::record::Aux::Integer(*ps as i64))
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
+
+            } else if h2.contains_key(&qname) {
+                let ps = h2.get(&qname).unwrap();
                 record.push_aux(b"HP", &bam::record::Aux::Integer(2))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
+                record.push_aux(b"PS", &bam::record::Aux::Integer(*ps as i64))
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
+
             }
             out_bam.write(&record)
                 .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;

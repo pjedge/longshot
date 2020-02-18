@@ -849,9 +849,10 @@ fn run() -> Result<()> {
                 "{} Calculating fraction of reads assigned to either haplotype...",
                 print_time()
             );
-            // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
+            // h1 and h2 are hash-maps keyed on qnames of the reads assigned to haplotype 1 and 2 respectively.
+            // the values are the phase set that it belongs to
             let (h1, h2) =
-                separate_fragments_by_haplotype(&flist, LogProb::from(Prob(1.0 - hap_max_p_misassign)))?;
+                separate_fragments_by_haplotype(&flist, &varlist, LogProb::from(Prob(1.0 - hap_max_p_misassign)))?;
 
             eprintln!(
                 "{} Writing haplotype-assigned reads to bam files...",
