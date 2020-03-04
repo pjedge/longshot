@@ -21,7 +21,6 @@ pub fn separate_fragments_by_haplotype(
     let mut unassigned_count = 0;
 
     for ref f in flist {
-
         // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
         let p_read_hap0 = LogProb(f64::from(f.p_read_hap[0]));
         let p_read_hap1 = LogProb(f64::from(f.p_read_hap[1]));
@@ -42,7 +41,9 @@ pub fn separate_fragments_by_haplotype(
                     unassigned_count += 1;
                 }
             }
-            &None => {bail!("Fragment without read ID found while separating reads by haplotype.");}
+            &None => {
+                bail!("Fragment without read ID found while separating reads by haplotype.");
+            }
         }
     }
 
@@ -176,8 +177,8 @@ pub fn generate_flist_buffer(
         line.push(' ' as u8);
 
         let fid = match &frag.id {
-            Some(ref fid) => {fid.clone()}
-            None => {frag_num.to_string()}
+            Some(ref fid) => fid.clone(),
+            None => frag_num.to_string(),
         };
 
         for u in fid.clone().into_bytes() {
@@ -250,7 +251,6 @@ extern "C" {
         phase_sets: *mut i32,
     );
 }
-
 
 pub fn call_hapcut2(
     frag_buffer: &Vec<Vec<u8>>,
@@ -334,7 +334,8 @@ pub fn calculate_mec(
         match var.phase_set {
             Some(ps) => {
                 *block_mec.entry(ps).or_insert(0) += var.mec;
-                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<u16>() as usize;
+                *block_total.entry(ps).or_insert(0) +=
+                    var.allele_counts.iter().sum::<u16>() as usize;
             }
             None => {}
         }
@@ -344,13 +345,13 @@ pub fn calculate_mec(
         match var.phase_set {
             Some(ps) => {
                 var.mec_frac_block = *block_mec
+                    .get(&ps)
+                    .chain_err(|| "Error retrieving MEC for phase set.")?
+                    as f64
+                    / *block_total
                         .get(&ps)
                         .chain_err(|| "Error retrieving MEC for phase set.")?
-                        as f64
-                        / *block_total
-                            .get(&ps)
-                            .chain_err(|| "Error retrieving MEC for phase set.")?
-                            as f64;
+                        as f64;
                 var.mec_frac_variant =
                     var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64;
             }

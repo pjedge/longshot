@@ -32,10 +32,10 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
-use util::*;
-use variants_and_fragments::*;
 use std::u32;
 use std::usize;
+use util::*;
+use variants_and_fragments::*;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -66,7 +66,7 @@ pub struct ExtractFragmentParameters {
     pub max_cigar_indel: usize,
     /// whether or not to store the read id.
     /// we store the read ID if we'll be separating reads by haplotype and otherwise we don't
-    pub store_read_id: bool
+    pub store_read_id: bool,
 }
 
 /// an extension of the rust-htslib cigar representation that has the cigar operation and length as
@@ -795,7 +795,7 @@ fn extract_var_cluster(
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
             qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual),
         });
     }
 
@@ -831,9 +831,8 @@ pub fn extract_fragment(
         id: Some(id),
         calls: vec![],
         // ln(0.5) stored as f16 for compactness
-        p_read_hap: [LogProb::from(Prob(0.5)),
-                     LogProb::from(Prob(0.5))],
-        reverse_strand: bam_record.is_reverse()
+        p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
+        reverse_strand: bam_record.is_reverse(),
     };
 
     if bam_record.is_quality_check_failed()
