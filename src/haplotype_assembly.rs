@@ -13,7 +13,8 @@ pub fn separate_fragments_by_haplotype(
     flist: &Vec<Fragment>,
     varlist: &VarList,
     threshold: LogProb,
-) -> Result<(HashMap<String, usize>, HashMap<String, usize>)> {
+) -> Result<(HashMap<String, Vec<usize>>, HashMap<String, Vec<usize>>)> {
+    println!("Separate fragments");
     let mut h1 = HashMap::new();
     let mut h2 = HashMap::new();
 
@@ -31,43 +32,23 @@ pub fn separate_fragments_by_haplotype(
         let p_read_hap0: LogProb = p_read_hap0 - total;
         let p_read_hap1: LogProb = p_read_hap1 - total;
 
-        let mut fragment_phase_set: Option<usize> = None;
+        let mut fragment_phase_set: Vec<usize> = f.calls.iter()
+            .filter_map(|call| varlist.lst[call.var_ix].phase_set).collect();
+        fragment_phase_set.sort();
+        fragment_phase_set.dedup();
 
-        for call in &f.calls  {
-            match varlist.lst[call.var_ix].phase_set {
-                Some(ps) => {
-                    match fragment_phase_set {
-                        Some(fps) => {
-                            if ps != fps {
-                                bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
-                            }
-                        }
-                        None => {fragment_phase_set = Some(ps);}
-                    }
+        if let Some(fid) = &f.id {
+            if fragment_phase_set.len() > 0 && p_read_hap0 > threshold {
+                h1_count += 1;
+                h1.insert(fid.clone(), fragment_phase_set);
+            } else if fragment_phase_set.len() > 0 && p_read_hap1 > threshold {
+                h2_count += 1;
+                h2.insert(fid.clone(), fragment_phase_set);
+            } else {
+                unassigned_count += 1;
             }
-                None => {}
-            }
-
-        }
-
-        match (&f.id, &fragment_phase_set) {
-            // Fragment has an ID as well as a phase set
-            (&Some(ref fid),&Some(ps)) => {
-                if p_read_hap0 > threshold {
-                    h1_count += 1;
-                    h1.insert(fid.clone(), ps);
-                } else if p_read_hap1 > threshold {
-                    h2_count += 1;
-                    h2.insert(fid.clone(), ps);
-                } else {
-                    unassigned_count += 1;
-                }
-            }
-            // Fragment has an id but not a phase set so it is unassigned
-            (&Some(_), &None) => {unassigned_count += 1;}
-            // Fragment has no ID, this should not happen
-            (&None, &Some(_)) => {bail!("Fragment without read ID found while separating reads by haplotype.");}
-            (&None, &None) => {bail!("Fragment without read ID found while separating reads by haplotype.");}
+        } else {
+            bail!("Fragment without read ID found while separating reads by haplotype.");
         }
     }
 
@@ -103,8 +84,8 @@ pub fn separate_bam_reads_by_haplotype(
     bamfile_name: &String,
     interval: &Option<GenomicInterval>,
     hap_bam_prefix: String,
-    h1: &HashMap<String, usize>,
-    h2: &HashMap<String, usize>,
+    h1: &HashMap<String, Vec<usize>>,
+    h2: &HashMap<String, Vec<usize>>,
     min_mapq: u8,
 ) -> Result<()> {
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval)
@@ -142,19 +123,17 @@ pub fn separate_bam_reads_by_haplotype(
             }
 
             if h1.contains_key(&qname) {
-                let ps = h1.get(&qname).unwrap();
                 record.push_aux(b"HP", &bam::record::Aux::Integer(1))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record.push_aux(b"PS", &bam::record::Aux::Integer(*ps as i64))
+                let ps_string = h1.get(&qname).unwrap().iter().map(|ps| ps.to_string()).collect::<Vec<_>>().join(",");
+                record.push_aux(b"PS", &bam::record::Aux::String(ps_string.as_bytes()))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-
             } else if h2.contains_key(&qname) {
-                let ps = h2.get(&qname).unwrap();
                 record.push_aux(b"HP", &bam::record::Aux::Integer(2))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record.push_aux(b"PS", &bam::record::Aux::Integer(*ps as i64))
+                let ps_string = h2.get(&qname).unwrap().iter().map(|ps| ps.to_string()).collect::<Vec<_>>().join(",");
+                record.push_aux(b"PS", &bam::record::Aux::String(ps_string.as_bytes()))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-
             }
             out_bam.write(&record)
                 .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
