@@ -151,9 +151,9 @@ fn run() -> Result<()> {
             .help("Genotype and phase the variants in this VCF instead of using pileup method to find variants. NOTES: VCF must be gzipped and tabix indexed or contain contig information. Use with caution because excessive false potential variants can lead to inaccurate results. Every variant is used and only the allele fields are considered -- Genotypes, filters, qualities etc are ignored. Indel variants will be genotyped but not phased. Triallelic variants and structural variants are currently not supported.")
             .display_order(45)
             .takes_value(true))
-        .arg(Arg::with_name("Haplotype Bam Prefix")
-            .short("p")
-            .long("hap_bam_prefix")
+        .arg(Arg::with_name("Bam Output")
+            .short("O")
+            .long("out_bam")
             .value_name("BAM")
             .help("Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads assigned to each haplotype, any existing HP and PS tags are removed")
             .display_order(50))
@@ -362,7 +362,7 @@ fn run() -> Result<()> {
         .to_string();
     let interval: Option<GenomicInterval> =
         parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
-    let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
+    let out_bam: Option<&str> = input_args.value_of("Bam Output");
     let force = parse_flag(&input_args, "Force overwrite")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
@@ -517,7 +517,7 @@ fn run() -> Result<()> {
     // we store the read IDs if we will be separating the reads by haplotype
     // we will compute sets holding the separated read IDs and then refer back to the original BAM
     // and write to separate files based on set membership
-    let store_read_id = hap_bam_prefix != None;
+    let store_read_id = out_bam != None;
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq,
@@ -842,9 +842,8 @@ fn run() -> Result<()> {
 
     // if haplotype-based read separation is turned on,
     // write BAM files for h1,h2, and unassigned
-    match hap_bam_prefix {
-        Some(p) => {
-
+    match out_bam {
+        Some(filename) => {
             eprintln!(
                 "{} Calculating fraction of reads assigned to either haplotype...",
                 print_time()
@@ -861,7 +860,7 @@ fn run() -> Result<()> {
             separate_bam_reads_by_haplotype(
                 &bamfile_name,
                 &interval,
-                p.to_string(),
+                filename.to_string(),
                 &h1,
                 &h2,
                 min_mapq,

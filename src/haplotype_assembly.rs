@@ -83,7 +83,7 @@ pub fn separate_fragments_by_haplotype(
 pub fn separate_bam_reads_by_haplotype(
     bamfile_name: &String,
     interval: &Option<GenomicInterval>,
-    hap_bam_prefix: String,
+    out_bam_file: String,
     h1: &HashMap<String, Vec<usize>>,
     h2: &HashMap<String, Vec<usize>>,
     min_mapq: u8,
@@ -94,7 +94,6 @@ pub fn separate_bam_reads_by_haplotype(
     let mut bam_ix =
         bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
-    let out_bam_file = format!("{}.bam", &hap_bam_prefix);
     let header = bam::Header::from_template(&bam_ix.header());
     let mut out_bam = bam::Writer::from_path(&out_bam_file, &header)
         .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file))?;
