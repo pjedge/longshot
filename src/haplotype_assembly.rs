@@ -24,6 +24,7 @@ pub fn separate_fragments_by_haplotype(
     let mut unassigned_count = 0;
 
     for ref f in flist {
+        // println!("Read {:?}", f.id);
         // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
         let p_read_hap0 = LogProb(f64::from(f.p_read_hap[0]));
         let p_read_hap1 = LogProb(f64::from(f.p_read_hap[1]));
@@ -38,9 +39,20 @@ pub fn separate_fragments_by_haplotype(
             if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
                 continue;
             }
+            // println!("    Call {}, genotype {:?}, quality {:.1}, phase set {:?}", var.pos0, var.genotype,
+                // var.qual, var.phase_set);
             if let Some(fps) = fragment_phase_set {
                 if fps != var.phase_set.unwrap() {
-                    bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
+                    println!("Read {} intersects:", f.id.as_ref().unwrap());
+                    for call in f.calls.iter() {
+                        let var = &varlist.lst[call.var_ix];
+                        if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
+                            continue;
+                        }
+                        println!("    Call {}, {:?}, quality {:.1}, phase set {:?}", var.pos0, var.genotype,
+                            var.qual, var.phase_set.unwrap());
+                    }
+                    // bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
                 }
             } else {
                 fragment_phase_set = var.phase_set;
