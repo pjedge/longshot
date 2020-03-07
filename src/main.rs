@@ -407,6 +407,10 @@ fn run() -> Result<()> {
         !vcf.is_file() || force,
         "Variant output file already exists. Rerun with -F option to force overwrite."
     );
+    if let Some(filename) = out_bam {
+        ensure!(!Path::new(filename).is_file() || force,
+            "Output bam file already exists. Rerun with -F option to force overwrite.");
+    }
 
     // ensure that BAM file is indexed
     let bai_str = bamfile_name.clone() + ".bai";
@@ -860,7 +864,7 @@ fn run() -> Result<()> {
             separate_bam_reads_by_haplotype(
                 &bamfile_name,
                 &interval,
-                filename.to_string(),
+                filename,
                 &h1,
                 &h2,
                 min_mapq,

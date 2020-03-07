@@ -8,12 +8,13 @@ use rust_htslib::bam::Read;
 use std::char::from_digit;
 use util::*;
 use variants_and_fragments::*;
+use genotype_probs::Genotype;
 
 pub fn separate_fragments_by_haplotype(
     flist: &Vec<Fragment>,
     varlist: &VarList,
     threshold: LogProb,
-) -> Result<(HashMap<String, Vec<usize>>, HashMap<String, Vec<usize>>)> {
+) -> Result<(HashMap<String, usize>, HashMap<String, usize>)> {
     println!("Separate fragments");
     let mut h1 = HashMap::new();
     let mut h2 = HashMap::new();
@@ -23,7 +24,6 @@ pub fn separate_fragments_by_haplotype(
     let mut unassigned_count = 0;
 
     for ref f in flist {
-
         // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
         let p_read_hap0 = LogProb(f64::from(f.p_read_hap[0]));
         let p_read_hap1 = LogProb(f64::from(f.p_read_hap[1]));
@@ -32,23 +32,38 @@ pub fn separate_fragments_by_haplotype(
         let p_read_hap0: LogProb = p_read_hap0 - total;
         let p_read_hap1: LogProb = p_read_hap1 - total;
 
-        let mut fragment_phase_set: Vec<usize> = f.calls.iter()
-            .filter_map(|call| varlist.lst[call.var_ix].phase_set).collect();
-        fragment_phase_set.sort();
-        fragment_phase_set.dedup();
-
-        if let Some(fid) = &f.id {
-            if fragment_phase_set.len() > 0 && p_read_hap0 > threshold {
-                h1_count += 1;
-                h1.insert(fid.clone(), fragment_phase_set);
-            } else if fragment_phase_set.len() > 0 && p_read_hap1 > threshold {
-                h2_count += 1;
-                h2.insert(fid.clone(), fragment_phase_set);
-            } else {
-                unassigned_count += 1;
+        let mut fragment_phase_set = None;
+        for call in f.calls.iter() {
+            let var = &varlist.lst[call.var_ix];
+            if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
+                continue;
             }
-        } else {
-            bail!("Fragment without read ID found while separating reads by haplotype.");
+            if let Some(fps) = fragment_phase_set {
+                if fps != var.phase_set.unwrap() {
+                    bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
+                }
+            } else {
+                fragment_phase_set = var.phase_set;
+            }
+        }
+
+        match (f.id.as_ref(), fragment_phase_set) {
+            // Fragment has an ID as well as a phase set
+            (Some(fid), Some(ps)) => {
+                if p_read_hap0 > threshold {
+                    h1_count += 1;
+                    h1.insert(fid.clone(), ps);
+                } else if p_read_hap1 > threshold {
+                    h2_count += 1;
+                    h2.insert(fid.clone(), ps);
+                } else {
+                    unassigned_count += 1;
+                }
+            }
+            // Fragment has an id but not a phase set so it is unassigned
+            (Some(_), None) => unassigned_count += 1,
+            // Fragment has no ID, this should not happen
+            (None, _) => bail!("Fragment without read ID found while separating reads by haplotype."),
         }
     }
 
@@ -80,12 +95,12 @@ pub fn separate_fragments_by_haplotype(
     Ok((h1, h2))
 }
 
-pub fn separate_bam_reads_by_haplotype(
+pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
     bamfile_name: &String,
     interval: &Option<GenomicInterval>,
-    out_bam_file: String,
-    h1: &HashMap<String, Vec<usize>>,
-    h2: &HashMap<String, Vec<usize>>,
+    out_bam_file: P,
+    h1: &HashMap<String, usize>,
+    h2: &HashMap<String, usize>,
     min_mapq: u8,
 ) -> Result<()> {
     let interval_lst: Vec<GenomicInterval> = get_interval_lst(bamfile_name, interval)
@@ -96,7 +111,7 @@ pub fn separate_bam_reads_by_haplotype(
 
     let header = bam::Header::from_template(&bam_ix.header());
     let mut out_bam = bam::Writer::from_path(&out_bam_file, &header)
-        .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file))?;
+        .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file.as_ref().display().to_string()))?;
 
     for iv in interval_lst {
         bam_ix
@@ -124,14 +139,12 @@ pub fn separate_bam_reads_by_haplotype(
             if h1.contains_key(&qname) {
                 record.push_aux(b"HP", &bam::record::Aux::Integer(1))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                let ps_string = h1.get(&qname).unwrap().iter().map(|ps| ps.to_string()).collect::<Vec<_>>().join(",");
-                record.push_aux(b"PS", &bam::record::Aux::String(ps_string.as_bytes()))
+                record.push_aux(b"PS", &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
             } else if h2.contains_key(&qname) {
                 record.push_aux(b"HP", &bam::record::Aux::Integer(2))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                let ps_string = h2.get(&qname).unwrap().iter().map(|ps| ps.to_string()).collect::<Vec<_>>().join(",");
-                record.push_aux(b"PS", &bam::record::Aux::String(ps_string.as_bytes()))
+                record.push_aux(b"PS", &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
             }
             out_bam.write(&record)
