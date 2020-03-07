@@ -49,8 +49,8 @@ pub fn separate_fragments_by_haplotype(
                         if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
                             continue;
                         }
-                        println!("    Call {}, {:?}, quality {:.1}, phase set {:?}", var.pos0, var.genotype,
-                            var.qual, var.phase_set.unwrap());
+                        println!("    Call at position {}, {:?}, quality {:.1}, phase set {:?}",
+                            var.pos0 + 1, var.genotype, var.qual, var.phase_set.unwrap());
                     }
                     // bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
                 }
