@@ -2,18 +2,19 @@
 //! MEC criteria, haplotype read separation, etc.
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
+use genotype_probs::Genotype;
 use hashbrown::HashMap;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
 use std::char::from_digit;
 use util::*;
 use variants_and_fragments::*;
-use genotype_probs::Genotype;
 
 pub fn separate_fragments_by_haplotype(
     flist: &Vec<Fragment>,
     varlist: &VarList,
     threshold: LogProb,
+    max_p_miscall: f64,
 ) -> Result<(HashMap<String, usize>, HashMap<String, usize>)> {
     println!("Separate fragments");
     let mut h1 = HashMap::new();
@@ -22,7 +23,7 @@ pub fn separate_fragments_by_haplotype(
     let mut h1_count = 0;
     let mut h2_count = 0;
     let mut unassigned_count = 0;
-
+    let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
     for ref f in flist {
         // println!("Read {:?}", f.id);
         // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
@@ -36,11 +37,15 @@ pub fn separate_fragments_by_haplotype(
         let mut fragment_phase_set = None;
         for call in f.calls.iter() {
             let var = &varlist.lst[call.var_ix];
-            if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
+
+            if var.genotype == Genotype(0, 0)
+                || var.phase_set.is_none()
+                || (call.qual >= ln_max_p_miscall)
+            {
                 continue;
             }
             // println!("    Call {}, genotype {:?}, quality {:.1}, phase set {:?}", var.pos0, var.genotype,
-                // var.qual, var.phase_set);
+            // var.qual, var.phase_set);
             if let Some(fps) = fragment_phase_set {
                 if fps != var.phase_set.unwrap() {
                     println!("Read {} intersects:", f.id.as_ref().unwrap());
@@ -49,8 +54,13 @@ pub fn separate_fragments_by_haplotype(
                         if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
                             continue;
                         }
-                        println!("    Call at position {}, {:?}, quality {:.1}, phase set {:?}",
-                            var.pos0 + 1, var.genotype, var.qual, var.phase_set.unwrap());
+                        println!(
+                            "    Call at position {}, {:?}, quality {:.1}, phase set {:?}",
+                            var.pos0 + 1,
+                            var.genotype,
+                            var.qual,
+                            var.phase_set.unwrap()
+                        );
                     }
                     // bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
                 }
@@ -75,7 +85,9 @@ pub fn separate_fragments_by_haplotype(
             // Fragment has an id but not a phase set so it is unassigned
             (Some(_), None) => unassigned_count += 1,
             // Fragment has no ID, this should not happen
-            (None, _) => bail!("Fragment without read ID found while separating reads by haplotype."),
+            (None, _) => {
+                bail!("Fragment without read ID found while separating reads by haplotype.")
+            }
         }
     }
 
@@ -132,8 +144,8 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
 
         for r in bam_ix.records() {
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
-	    record.remove_aux(b"HP"); // remove HP tag before setting it
-	    record.remove_aux(b"PS"); // remove PS tag as well
+            record.remove_aux(b"HP"); // remove HP tag before setting it
+            record.remove_aux(b"PS"); // remove PS tag as well
 
             let qname = u8_to_string(record.qname())?;
             if record.is_quality_check_failed()
@@ -143,23 +155,35 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                 || record.mapq() < min_mapq
                 || record.is_supplementary()
             {
-            out_bam.write(&record)
-                .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
+                out_bam
+                    .write(&record)
+                    .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
                 continue;
             }
 
             if h1.contains_key(&qname) {
-                record.push_aux(b"HP", &bam::record::Aux::Integer(1))
+                record
+                    .push_aux(b"HP", &bam::record::Aux::Integer(1))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record.push_aux(b"PS", &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64))
+                record
+                    .push_aux(
+                        b"PS",
+                        &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64),
+                    )
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
             } else if h2.contains_key(&qname) {
-                record.push_aux(b"HP", &bam::record::Aux::Integer(2))
+                record
+                    .push_aux(b"HP", &bam::record::Aux::Integer(2))
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record.push_aux(b"PS", &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64))
+                record
+                    .push_aux(
+                        b"PS",
+                        &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64),
+                    )
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
             }
-            out_bam.write(&record)
+            out_bam
+                .write(&record)
                 .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
         }
     }
@@ -204,8 +228,8 @@ pub fn generate_flist_buffer(
         line.push(' ' as u8);
 
         let fid = match &frag.id {
-            Some(ref fid) => {fid.clone()}
-            None => {frag_num.to_string()}
+            Some(ref fid) => fid.clone(),
+            None => frag_num.to_string(),
         };
 
         for u in fid.clone().into_bytes() {
@@ -278,7 +302,6 @@ extern "C" {
         phase_sets: *mut i32,
     );
 }
-
 
 pub fn call_hapcut2(
     frag_buffer: &Vec<Vec<u8>>,
@@ -362,7 +385,8 @@ pub fn calculate_mec(
         match var.phase_set {
             Some(ps) => {
                 *block_mec.entry(ps).or_insert(0) += var.mec;
-                *block_total.entry(ps).or_insert(0) += var.allele_counts.iter().sum::<u16>() as usize;
+                *block_total.entry(ps).or_insert(0) +=
+                    var.allele_counts.iter().sum::<u16>() as usize;
             }
             None => {}
         }
@@ -372,13 +396,13 @@ pub fn calculate_mec(
         match var.phase_set {
             Some(ps) => {
                 var.mec_frac_block = *block_mec
+                    .get(&ps)
+                    .chain_err(|| "Error retrieving MEC for phase set.")?
+                    as f64
+                    / *block_total
                         .get(&ps)
                         .chain_err(|| "Error retrieving MEC for phase set.")?
-                        as f64
-                        / *block_total
-                            .get(&ps)
-                            .chain_err(|| "Error retrieving MEC for phase set.")?
-                            as f64;
+                        as f64;
                 var.mec_frac_variant =
                     var.mec as f64 / var.allele_counts.iter().sum::<u16>() as f64;
             }
