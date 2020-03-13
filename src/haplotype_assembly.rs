@@ -2,7 +2,6 @@
 //! MEC criteria, haplotype read separation, etc.
 use bio::stats::{LogProb, PHREDProb, Prob};
 use errors::*;
-use genotype_probs::Genotype;
 use hashbrown::HashMap;
 use rust_htslib::bam;
 use rust_htslib::bam::Read;
@@ -25,7 +24,6 @@ pub fn separate_fragments_by_haplotype(
     let mut unassigned_count = 0;
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
     for ref f in flist {
-        // println!("Read {:?}", f.id);
         // we store p_read_hap as ln-scaled f16s to save space. need to convert back.
         let p_read_hap0 = LogProb(f64::from(f.p_read_hap[0]));
         let p_read_hap1 = LogProb(f64::from(f.p_read_hap[1]));
@@ -34,63 +32,45 @@ pub fn separate_fragments_by_haplotype(
         let p_read_hap0: LogProb = p_read_hap0 - total;
         let p_read_hap1: LogProb = p_read_hap1 - total;
 
-        let mut fragment_phase_set = None;
+        if p_read_hap0 <= threshold && p_read_hap1 <= threshold {
+            unassigned_count += 1;
+            continue;
+        }
+        if f.id.is_none() {
+            bail!("Fragment without read ID found while separating reads by haplotype.");
+        }
+
+        let mut fragment_phase_sets = HashMap::new();
         for call in f.calls.iter() {
             let var = &varlist.lst[call.var_ix];
 
-            if var.genotype.0 == var.genotype.1
-                || var.phase_set.is_none()
-                || (call.qual >= ln_max_p_miscall)
+            if var.genotype.0 != var.genotype.1
+                && var.phase_set.is_some()
+                && call.qual < ln_max_p_miscall
             {
-                continue;
+                *fragment_phase_sets.entry(var.phase_set.unwrap()).or_insert(0) += 1;
             }
-            // println!("    Call {}, genotype {:?}, quality {:.1}, phase set {:?}", var.pos0, var.genotype,
-            // var.qual, var.phase_set);
-            if let Some(fps) = fragment_phase_set {
-                if fps != var.phase_set.unwrap() {
-                    println!("Read {} intersects:", f.id.as_ref().unwrap());
-                    for call in f.calls.iter() {
-                        let var = &varlist.lst[call.var_ix];
-                        if var.genotype == Genotype(0, 0) || var.phase_set.is_none() {
-                            continue;
-                        }
-                        println!(
-                            "    Call at position {}, {:?}, quality {:.1}, phase set {:?}, \
-                                frag call qual {:.3} < miscall threshold {:.3}",
-                            var.pos0 + 1,
-                            var.genotype,
-                            var.qual,
-                            var.phase_set.unwrap(),
-                            call.qual.exp(),
-                            ln_max_p_miscall.exp()
-                        );
-                    }
-                    // bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
-                }
-            } else {
-                fragment_phase_set = var.phase_set;
+        }
+        if fragment_phase_sets.is_empty() {
+            continue;
+        }
+
+        let mut fps = 0;
+        let mut max_count = 0;
+        for (&ps, &count) in fragment_phase_sets.iter() {
+            if count > max_count {
+                max_count = count;
+                fps = ps;
             }
         }
 
-        match (f.id.as_ref(), fragment_phase_set) {
-            // Fragment has an ID as well as a phase set
-            (Some(fid), Some(ps)) => {
-                if p_read_hap0 > threshold {
-                    h1_count += 1;
-                    h1.insert(fid.clone(), ps);
-                } else if p_read_hap1 > threshold {
-                    h2_count += 1;
-                    h2.insert(fid.clone(), ps);
-                } else {
-                    unassigned_count += 1;
-                }
-            }
-            // Fragment has an id but not a phase set so it is unassigned
-            (Some(_), None) => unassigned_count += 1,
-            // Fragment has no ID, this should not happen
-            (None, _) => {
-                bail!("Fragment without read ID found while separating reads by haplotype.")
-            }
+        if p_read_hap0 > threshold {
+            h1_count += 1;
+            h1.insert(f.id.clone().unwrap(), fps);
+        } else {
+            assert!(p_read_hap1 > threshold);
+            h2_count += 1;
+            h2.insert(f.id.clone().unwrap(), fps);
         }
     }
 
