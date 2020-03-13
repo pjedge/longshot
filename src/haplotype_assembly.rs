@@ -38,7 +38,7 @@ pub fn separate_fragments_by_haplotype(
         for call in f.calls.iter() {
             let var = &varlist.lst[call.var_ix];
 
-            if var.genotype == Genotype(0, 0)
+            if var.genotype.0 == var.genotype.1
                 || var.phase_set.is_none()
                 || (call.qual >= ln_max_p_miscall)
             {
@@ -55,11 +55,14 @@ pub fn separate_fragments_by_haplotype(
                             continue;
                         }
                         println!(
-                            "    Call at position {}, {:?}, quality {:.1}, phase set {:?}",
+                            "    Call at position {}, {:?}, quality {:.1}, phase set {:?}, \
+                                frag call qual {:.3} < miscall threshold {:.3}",
                             var.pos0 + 1,
                             var.genotype,
                             var.qual,
-                            var.phase_set.unwrap()
+                            var.phase_set.unwrap(),
+                            call.qual.exp(),
+                            ln_max_p_miscall.exp()
                         );
                     }
                     // bail!("A variant phase set was not equal to overlapping, previously assigned fragment phase set.");
