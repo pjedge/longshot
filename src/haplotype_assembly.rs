@@ -117,7 +117,7 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
         bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     let header = bam::Header::from_template(&bam_ix.header());
-    let mut out_bam = bam::Writer::from_path(&out_bam_file, &header)
+    let mut out_bam = bam::Writer::from_path(&out_bam_file, &header, bam::Format::BAM)
         .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file.as_ref().display().to_string()))?;
 
     for iv in interval_lst {
@@ -145,25 +145,13 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
             }
 
             if h1.contains_key(&qname) {
-                record
-                    .push_aux(b"HP", &bam::record::Aux::Integer(1))
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record
-                    .push_aux(
-                        b"PS",
-                        &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64),
-                    )
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
+                record.push_aux(b"HP", &bam::record::Aux::Integer(1));
+                record.push_aux(b"PS",
+                    &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64));
             } else if h2.contains_key(&qname) {
-                record
-                    .push_aux(b"HP", &bam::record::Aux::Integer(2))
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record
-                    .push_aux(
-                        b"PS",
-                        &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64),
-                    )
-                    .chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
+                record.push_aux(b"HP", &bam::record::Aux::Integer(2));
+                record.push_aux(b"PS",
+                    &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64));
             }
             out_bam
                 .write(&record)
