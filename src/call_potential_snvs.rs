@@ -8,7 +8,7 @@ use bio::io::fasta;
 use bio::stats::{LogProb, Prob};
 use rust_htslib::bam;
 use rust_htslib::bam::pileup::Indel;
-use rust_htslib::prelude::*;
+use rust_htslib::bam::Read;
 
 use errors::*;
 //use std::str;

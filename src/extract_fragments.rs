@@ -277,7 +277,6 @@ pub fn find_anchors(
             >= bam_record
                 .cigar()
                 .end_pos()
-                .chain_err(|| "Error while accessing CIGAR end position")?
         || (var_interval.end_pos as i32) < bam_record.pos()
     {
         eprintln!(
@@ -291,7 +290,6 @@ pub fn find_anchors(
             bam_record
                 .cigar()
                 .end_pos()
-                .chain_err(|| "Error while accessing CIGAR end position")?
         );
 
         bail!(ErrorKind::AnchorRangeOutsideRead);
@@ -410,7 +408,10 @@ pub fn find_anchors(
                             found_anchor_left = true;
                             break;
                         }
-
+                        
+                        if (left_anchor_ref ==  0 ) || ( left_anchor_read == 0 ) {
+                            break;
+                        }
                         left_anchor_ref -= 1;
                         left_anchor_read -= 1;
                     }
@@ -1005,7 +1006,6 @@ pub fn extract_fragments(
             let end_pos = record
                 .cigar()
                 .end_pos()
-                .chain_err(|| "Error while accessing CIGAR end position")?
                 - 1;
 
             let bam_cig: CigarStringView = record.cigar();

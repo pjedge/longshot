@@ -416,9 +416,6 @@ fn run() -> Result<()> {
         );
     }
 
-    // ensure that BAM file is indexed
-    let bai_str = bamfile_name.clone() + ".bai";
-    ensure!(Path::new(&bai_str).is_file(), "BAM file must be indexed with samtools index. Index file should have same name as BAM file with .bai appended.");
 
     // ensure that FASTA file is indexed
     let fai_str = fasta_file.clone() + ".fai";

@@ -12,6 +12,7 @@ fn main() {
         .file("src/hapcut2/readinputbuffers.c")
         .file("src/hapcut2/pointerheap.c")
         .file("src/hapcut2/hapcut2.c")
+        .file("src/hapcut2/logsum10.c")
         .compile("hapcut2");
 
     /*cc::Build::new()

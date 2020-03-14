@@ -5,7 +5,7 @@ authors = ["Peter Edge <edge.peterj@gmail.com>"]
 
 [dependencies]
 bio = "0.25.0"
-rust-htslib = "0.22.0"
+rust-htslib = "0.26.0"
 clap = "2.26.2"
 chrono = "0.4"
 rand = "0.4"
