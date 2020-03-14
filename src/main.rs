@@ -13,6 +13,7 @@
 // external crates
 extern crate bio;
 extern crate chrono;
+#[macro_use]
 extern crate clap;
 extern crate core;
 extern crate rand;
@@ -59,7 +60,7 @@ use util::*;
 use util::{
     parse_flag, parse_positive_f64, parse_prob_into_logprob, parse_u32, parse_u8, parse_usize,
 };
-use variants_and_fragments::{VarFilter,parse_vcf_potential_variants};
+use variants_and_fragments::{parse_vcf_potential_variants, VarFilter};
 
 //use haplotype_assembly::separate_reads_by_haplotype;
 //use realignment::{AlignmentParameters, TransitionProbs, EmissionProbs};
@@ -109,7 +110,7 @@ fn run() -> Result<()> {
     eprintln!("");
 
     let input_args = App::new("Longshot")
-        .version("0.4.0")
+        .version(crate_version!())
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
         .arg(Arg::with_name("Input BAM")
@@ -151,11 +152,11 @@ fn run() -> Result<()> {
             .help("Genotype and phase the variants in this VCF instead of using pileup method to find variants. NOTES: VCF must be gzipped and tabix indexed or contain contig information. Use with caution because excessive false potential variants can lead to inaccurate results. Every variant is used and only the allele fields are considered -- Genotypes, filters, qualities etc are ignored. Indel variants will be genotyped but not phased. Triallelic variants and structural variants are currently not supported.")
             .display_order(45)
             .takes_value(true))
-        .arg(Arg::with_name("Haplotype Bam Prefix")
-            .short("p")
-            .long("hap_bam_prefix")
+        .arg(Arg::with_name("Bam Output")
+            .short("O")
+            .long("out_bam")
             .value_name("BAM")
-            .help("Write haplotype-separated reads to 3 bam files using this prefix: <prefix>.hap1.bam, <prefix>.hap2.bam, <prefix>.unassigned.bam")
+            .help("Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads assigned to each haplotype, any existing HP and PS tags are removed")
             .display_order(50))
         .arg(Arg::with_name("Auto max coverage")
             .short("A")
@@ -362,7 +363,7 @@ fn run() -> Result<()> {
         .to_string();
     let interval: Option<GenomicInterval> =
         parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
-    let hap_bam_prefix: Option<&str> = input_args.value_of("Haplotype Bam Prefix");
+    let out_bam: Option<&str> = input_args.value_of("Bam Output");
     let force = parse_flag(&input_args, "Force overwrite")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
@@ -373,7 +374,8 @@ fn run() -> Result<()> {
     let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
     let strand_bias_pvalue_cutoff: f64 =
         parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
-    let hap_assignment_qual: f64 = parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
+    let hap_assignment_qual: f64 =
+        parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
     let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
     let potential_snv_cutoff_phred = parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
     let potential_snv_min_alt_count: usize =
@@ -407,6 +409,12 @@ fn run() -> Result<()> {
         !vcf.is_file() || force,
         "Variant output file already exists. Rerun with -F option to force overwrite."
     );
+    if let Some(filename) = out_bam {
+        ensure!(
+            !Path::new(filename).is_file() || force,
+            "Output bam file already exists. Rerun with -F option to force overwrite."
+        );
+    }
 
 
     // ensure that FASTA file is indexed
@@ -514,7 +522,7 @@ fn run() -> Result<()> {
     // we store the read IDs if we will be separating the reads by haplotype
     // we will compute sets holding the separated read IDs and then refer back to the original BAM
     // and write to separate files based on set membership
-    let store_read_id = hap_bam_prefix != None;
+    let store_read_id = out_bam != None;
 
     let extract_fragment_parameters = ExtractFragmentParameters {
         min_mapq,
@@ -524,7 +532,7 @@ fn run() -> Result<()> {
         variant_cluster_max_size: variant_cluster_max_size,
         max_window_padding,
         max_cigar_indel,
-        store_read_id
+        store_read_id,
     };
 
     eprintln!("{} Estimating alignment parameters...", print_time());
@@ -557,10 +565,14 @@ fn run() -> Result<()> {
     //let bam_file: String = "test_data/test.bam".to_string();
     let mut varlist = match potential_variants_file {
         Some(file) => {
-            eprintln!("{} Reading potential variants from input VCF...", print_time());
+            eprintln!(
+                "{} Reading potential variants from input VCF...",
+                print_time()
+            );
 
             parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
-                        .chain_err(|| "Error reading potential variants VCF file.")? }
+                .chain_err(|| "Error reading potential variants VCF file.")?
+        }
         None => {
             eprintln!("{} Calling potential SNVs using pileup...", print_time());
 
@@ -576,8 +588,9 @@ fn run() -> Result<()> {
                 min_mapq,
                 alignment_parameters.ln(),
                 potential_snv_cutoff,
-                )
-                .chain_err(|| "Error calling potential SNVs.")? }
+            )
+            .chain_err(|| "Error calling potential SNVs.")?
+        }
     };
     /*let mut varlist = call_potential_snvs::call_potential_snvs(
         &bamfile_name,
@@ -611,6 +624,21 @@ fn run() -> Result<()> {
     );
 
     if varlist.lst.len() == 0 {
+        /* no variants identified, but still print empty VCF file with header, 02/12/20 */
+        eprintln!("No candidate variants identified, printing empty VCF file...");
+        print_vcf(
+            &mut varlist,
+            &interval,
+            &Some(fasta_file),
+            &output_vcf_file,
+            false,
+            max_cov,
+            &density_params,
+            &sample_name,
+            false,
+            potential_variants_file != None,
+        )
+        .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
     }
 
@@ -733,7 +761,7 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
-            potential_variants_file != None
+            potential_variants_file != None,
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -825,30 +853,27 @@ fn run() -> Result<()> {
 
     // if haplotype-based read separation is turned on,
     // write BAM files for h1,h2, and unassigned
-    match hap_bam_prefix {
-        Some(p) => {
-
+    match out_bam {
+        Some(filename) => {
             eprintln!(
                 "{} Calculating fraction of reads assigned to either haplotype...",
                 print_time()
             );
-            // h1 and h2 are hash-sets containing the qnames of the reads assigned to haplotype 1 and 2 respectively.
-            let (h1, h2) =
-                separate_fragments_by_haplotype(&flist, LogProb::from(Prob(1.0 - hap_max_p_misassign)))?;
+            // h1 and h2 are hash-maps keyed on qnames of the reads assigned to haplotype 1 and 2 respectively.
+            // the values are the phase set that it belongs to
+            let (h1, h2) = separate_fragments_by_haplotype(
+                &flist,
+                &varlist,
+                LogProb::from(Prob(1.0 - hap_max_p_misassign)),
+                max_p_miscall,
+            )?;
 
             eprintln!(
                 "{} Writing haplotype-assigned reads to bam files...",
                 print_time()
             );
-            separate_bam_reads_by_haplotype(
-                &bamfile_name,
-                &interval,
-                p.to_string(),
-                &h1,
-                &h2,
-                min_mapq,
-            )
-            .chain_err(|| "Error separating BAM reads by haplotype.")?;
+            separate_bam_reads_by_haplotype(&bamfile_name, &interval, filename, &h1, &h2, min_mapq)
+                .chain_err(|| "Error separating BAM reads by haplotype.")?;
         }
         None => {}
     }
@@ -874,7 +899,7 @@ fn run() -> Result<()> {
         &density_params,
         &sample_name,
         false,
-        potential_variants_file != None
+        potential_variants_file != None,
     )
     .chain_err(|| "Error printing VCF output.")?;
 
