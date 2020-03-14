@@ -13,6 +13,7 @@
 // external crates
 extern crate bio;
 extern crate chrono;
+#[macro_use]
 extern crate clap;
 extern crate core;
 extern crate rand;
@@ -109,7 +110,7 @@ fn run() -> Result<()> {
     eprintln!("");
 
     let input_args = App::new("Longshot")
-        .version("0.4.0")
+        .version(crate_version!())
         .author("Peter Edge <edge.peterj@gmail.com>")
         .about("SNV caller for Third-Generation Sequencing reads")
         .arg(Arg::with_name("Input BAM")
