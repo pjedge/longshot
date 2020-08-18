@@ -212,14 +212,13 @@ pub fn call_genotypes_no_haplotypes(
 
         // UPDATE THE VARIANT FIELDS
         if var.dp < allele_total as usize {
-            var.dp = allele_total as usize; // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
+            var.dp = allele_total as usize;
+            // in certain extreme cases the DP returned by samtools can be underestimated due to pileup max depth
         }
 
         var.qual = *PHREDProb::from(posts.get(Genotype(0, 0)));
-
-        if var.qual > MAX_VCF_QUAL {
-            var.qual = MAX_VCF_QUAL; // don't let the variant quality exceed upper bound
-        }
+        // don't let the variant quality exceed upper bound
+        var.qual = var.qual.min(MAX_VCF_QUAL);
 
         var.genotype = max_g;
         var.allele_counts = allele_counts;
@@ -229,13 +228,9 @@ pub fn call_genotypes_no_haplotypes(
         var.unphased_genotype = max_g;
         var.gq = genotype_qual;
         var.unphased_gq = genotype_qual;
-        if var.gq > MAX_VCF_QUAL {
-            var.gq = MAX_VCF_QUAL; // don't let the genotype quality exceed upper bound
-        }
-
-        if var.unphased_gq > MAX_VCF_QUAL {
-            var.unphased_gq = MAX_VCF_QUAL; // don't let the unphased quality exceed upper bound
-        }
+        // don't let the genotype quality exceed upper bound
+        var.gq = var.gq.min(MAX_VCF_QUAL);
+        var.unphased_gq = var.unphased_gq.min(MAX_VCF_QUAL);
 
         var.phase_set = None; // set phase set to none since phase information was not used
     }

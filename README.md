@@ -78,7 +78,7 @@ Execution should take around 5 to 10 seconds on a typical desktop machine. The o
 ```
 $ longshot --help
 
-Longshot 0.4.0
+Longshot 0.4.1
 Peter Edge <edge.peterj@gmail.com>
 SNV caller for Third-Generation Sequencing reads
 
@@ -111,8 +111,8 @@ OPTIONS:
                                                qualities etc are ignored. Indel variants will be genotyped but not
                                                phased. Triallelic variants and structural variants are currently not
                                                supported.
-    -p, --hap_bam_prefix <BAM>                 Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads assigned to each haplotype,
-					       any existing HP and PS tags are removed
+    -O, --out_bam <BAM>                        Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads
+                                               assigned to each haplotype, any existing HP and PS tags are removed
     -c, --min_cov <int>                        Minimum coverage (of reads passing filters) to consider position as a
                                                potential SNV. [default: 6]
     -C, --max_cov <int>                        Maximum coverage (of reads passing filters) to consider position as a
@@ -170,10 +170,11 @@ Call variants for chromosome 1 only using the automatic max coverage cutoff:
 ```
 longshot -A -r chr1 --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
-Call variants in a 500 kb region and then separate the reads into ```reads.hap1.bam```,```reads.hap2.bam```, ```reads.unassigned.bam``` using a haplotype assignment threshold of 30:
+Call variants in a 500 kb region and then output the reads into ```reads.bam``` using a haplotype assignment threshold of 30:
 ```
-longshot -r chr1:1000000-1500000 -y 30 -p reads --bam pacbio.bam --ref ref.fa --out output.vcf
+longshot -r chr1:1000000-1500000 -y 30 -O reads.bam --bam pacbio.bam --ref ref.fa --out output.vcf
 ```
+If a read has an assigned haplotype, it will get a tag `HP:i:1` or `HP:i:2` and tag `PS:i:x` where `x` is a phase set number of the variants it covers.
 
 ## important considerations
 - It is highly recommended to use reads with at least 30x coverage.
