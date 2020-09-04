@@ -228,11 +228,12 @@ pub fn print_vcf(
                      var.mq50_frac).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
         }
         writeln!(file,
-                 "PH={};SC={};\tGT:GQ:PS:UG:UQ\t{}:{:.2}:{}:{}:{:.2}",
+                 "PH={};SC={};\tGT:GQ:DP:PS:UG:UQ\t{}:{:.2}:{}:{}:{}:{:.2}",
                  post_str,
                  sequence_context,
                  genotype_str,
                  var.gq,
+		 var.dp,
                  ps,
                  unphased_genotype_str,
                  var.unphased_gq).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
