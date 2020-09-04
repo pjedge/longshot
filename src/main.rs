@@ -183,7 +183,7 @@ fn run() -> Result<()> {
                 .value_name("int")
                 .help("Minimum mapping quality to use a read.")
                 .display_order(90)
-                .default_value("30"))
+                .default_value("20"))
         .arg(Arg::with_name("Min allele quality")
             .short("a")
             .long("min_allele_qual")
