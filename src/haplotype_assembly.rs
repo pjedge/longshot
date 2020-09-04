@@ -117,13 +117,8 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
         bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     let header = bam::Header::from_template(&bam_ix.header());
-<<<<<<< HEAD
-    let mut out_bam = bam::Writer::from_path(&out_bam_file, &header,bam::Format::BAM)
-        .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file))?;
-=======
     let mut out_bam = bam::Writer::from_path(&out_bam_file, &header, bam::Format::BAM)
         .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file.as_ref().display().to_string()))?;
->>>>>>> 310ffab63df3d85ba7c0cc876fff75edb8e7674c
 
     for iv in interval_lst {
         bam_ix
@@ -150,20 +145,6 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
             }
 
             if h1.contains_key(&qname) {
-<<<<<<< HEAD
-                let ps = h1.get(&qname).unwrap();
-                record.push_aux(b"HP", &bam::record::Aux::Integer(1));
-                    //.chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record.push_aux(b"PS", &bam::record::Aux::Integer(*ps as i64));
-                    //.chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-
-            } else if h2.contains_key(&qname) {
-                let ps = h2.get(&qname).unwrap();
-                record.push_aux(b"HP", &bam::record::Aux::Integer(2));
-                    //.chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-                record.push_aux(b"PS", &bam::record::Aux::Integer(*ps as i64));
-                    //.chain_err(|| ErrorKind::BamRecordWriteError(qname.clone()))?;
-=======
                 record.push_aux(b"HP", &bam::record::Aux::Integer(1));
                 record.push_aux(b"PS",
                     &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64));
@@ -171,7 +152,6 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                 record.push_aux(b"HP", &bam::record::Aux::Integer(2));
                 record.push_aux(b"PS",
                     &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64));
->>>>>>> 310ffab63df3d85ba7c0cc876fff75edb8e7674c
             }
             out_bam
                 .write(&record)

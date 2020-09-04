@@ -81,7 +81,7 @@ pub fn print_vcf(
 ##FILTER=<ID=dp,Description=\"Exceeds maximum depth\">
 ##FILTER=<ID=sb,Description=\"Allelic strand bias\">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">
-##FORMAT=<ID=GQ,Number=1,Type=Float,Description=\"Genotype Quality\">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=UG,Number=1,Type=String,Description=\"Unphased Genotype (pre-haplotype-assembly)\">
 ##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
@@ -201,12 +201,12 @@ pub fn print_vcf(
         };
 
         write!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.2}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};",
+                       "{}\t{}\t.\t{}\t{}\t{:.0}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};",
                        varlist.target_names[var.tid as usize],
                        var.pos0 + 1,
                        var.alleles[0],
                        var_alleles.join(","),
-                       var.qual,
+                       var.qual+0.5, // round off to integer, 09/04/2020
                        var.filter,
                        var.dp,
                        allele_counts_str,
