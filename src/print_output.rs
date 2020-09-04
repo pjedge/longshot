@@ -206,7 +206,7 @@ pub fn print_vcf(
                        var.pos0 + 1,
                        var.alleles[0],
                        var_alleles.join(","),
-                       var.qual+0.5, // round off to integer, 09/04/2020
+                       var.qual+0.4999, // round off to integer, 09/04/2020
                        var.filter,
                        var.dp,
                        allele_counts_str,

@@ -340,12 +340,17 @@ fn run() -> Result<()> {
                 .long("no_haps")
                 .help("Don't call HapCUT2 to phase variants.")
                 .display_order(190))
+        .arg(Arg::with_name("print reference_genotypes")
+                //.short("G")
+                .long("output-ref")
+                .help("print reference genotypes (non-variant), use this option only in combination with -v option.")
+                .display_order(210))
         .arg(Arg::with_name("Variant debug directory")
             .short("d")
             .long("variant_debug_dir")
             .value_name("path")
             .help("write out current information about variants at each step of algorithm to files in this directory")
-            .display_order(210))
+            .display_order(230))
         .get_matches();
 
     // parse the input arguments and throw errors if inputs are invalid
@@ -366,6 +371,12 @@ fn run() -> Result<()> {
     let out_bam: Option<&str> = input_args.value_of("Bam Output");
     let force = parse_flag(&input_args, "Force overwrite")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
+    let output_refgenotypes = parse_flag(&input_args, "print reference_genotypes")?; // added 09/04/2020
+    let mut output_rg: bool = false; 
+    if output_refgenotypes 
+    {
+       output_rg = true;
+    } 
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
     let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
     let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
@@ -516,6 +527,7 @@ fn run() -> Result<()> {
         eprintln!("{} Min read coverage set to {}.", print_time(), min_cov);
         eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
     } else {
+        // should print empty VCF file here before bailing 09/04/2020
         bail!("{} ERROR: Max read coverage set to 0.");
     }
 
@@ -756,7 +768,7 @@ fn run() -> Result<()> {
             &interval,
             &None,
             &output_vcf_file,
-            false,
+            output_rg, // change to command line parameter output_ref
             max_cov,
             &density_params,
             &sample_name,
@@ -894,7 +906,7 @@ fn run() -> Result<()> {
         &interval,
         &Some(fasta_file),
         &output_vcf_file,
-        false,
+        output_rg, // change to command line parameter output_ref
         max_cov,
         &density_params,
         &sample_name,
