@@ -49,7 +49,7 @@ use extract_fragments::ExtractFragmentParameters;
 use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
-use print_output::{print_variant_debug, print_vcf};
+use print_output::{print_variant_debug, print_vcf,print_vcf_header};
 use realignment::AlignmentType;
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
@@ -528,7 +528,13 @@ fn run() -> Result<()> {
         eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
     } else {
         // should print empty VCF file here before bailing 09/04/2020
-        bail!("{} ERROR: Max read coverage set to 0.");
+        print_vcf_header(
+            &output_vcf_file,
+            &sample_name,
+            potential_variants_file != None,
+        )
+        .chain_err(|| "Error printing VCF output.")?;
+        bail!("{} ERROR: Max read coverage set to 0. printing empty VCF file");
     }
 
     // we store the read IDs if we will be separating the reads by haplotype
