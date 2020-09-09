@@ -15,7 +15,7 @@ pub fn separate_fragments_by_haplotype(
     threshold: LogProb,
     max_p_miscall: f64,
 ) -> Result<(HashMap<String, usize>, HashMap<String, usize>)> {
-    println!("Separate fragments");
+    //println!("Statistics for haplotype-separated reads (filtered reads only)");
     let mut h1 = HashMap::new();
     let mut h2 = HashMap::new();
 
@@ -102,6 +102,7 @@ pub fn separate_fragments_by_haplotype(
     Ok((h1, h2))
 }
 
+// tag reads with haplotype and write to output bam file
 pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
     bamfile_name: &String,
     interval: &Option<GenomicInterval>,
@@ -125,7 +126,7 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
             .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
-        for r in bam_ix.records() {
+        for r in bam_ix.records() { // iterate over the reads overlapping the interval 'iv'
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
             record.remove_aux(b"HP"); // remove HP tag before setting it
             record.remove_aux(b"PS"); // remove PS tag as well
@@ -141,7 +142,7 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                 out_bam
                     .write(&record)
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
-                continue;
+                continue; // write filtered reads to bam file and continue
             }
 
             if h1.contains_key(&qname) {

@@ -1,10 +1,6 @@
 //! Longshot
-//!
 //! Longshot is a diploid SNV caller for single molecule sequencing (SMS) reads such as PacBio
-//!
 //! Author: Peter Edge
-//!
-//! Contact: edge.peterj@gmail.com
 
 #![allow(dead_code)]
 // `error_chain!` can recurse deeply
@@ -874,7 +870,7 @@ fn run() -> Result<()> {
     match out_bam {
         Some(filename) => {
             eprintln!(
-                "{} Calculating fraction of reads assigned to either haplotype...",
+                "{} Calculating number of reads (filtered reads only) assigned to either haplotype...",
                 print_time()
             );
             // h1 and h2 are hash-maps keyed on qnames of the reads assigned to haplotype 1 and 2 respectively.

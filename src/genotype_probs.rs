@@ -4,7 +4,7 @@
 use bio::stats::*;
 use errors::*;
 use hashbrown::HashMap;
-use util::*;
+//use util::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Genotype(pub u8, pub u8);
@@ -361,13 +361,12 @@ impl GenotypePriors {
                 }
             }
         }
-
+	/*
         eprintln!("{} GENOTYPE PRIORS:", SPACER);
         eprintln!("{} REF G1/G2 PROB", SPACER);
-
         for (&(ref ra, (ref g1, ref g2)), &p) in &diploid_genotype_priors {
             eprintln!("{} {} {}/{} {}", SPACER, ra, g1, g2, *Prob::from(p));
-        }
+        }*/
 
         Ok(GenotypePriors {
             priors_dict: diploid_genotype_priors,
