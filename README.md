@@ -94,6 +94,7 @@ FLAGS:
     -F, --force_overwrite     If output files (VCF or variant debug directory) exist, delete and overwrite them.
     -x, --max_alignment       Use max scoring alignment algorithm rather than pair HMM forward algorithm.
     -n, --no_haps             Don't call HapCUT2 to phase variants.
+	--output-ref          print reference genotypes (non-variant), use this option only in combination with -v option.
     -h, --help                Prints help information
     -V, --version             Prints version information
 
@@ -117,7 +118,7 @@ OPTIONS:
                                                potential SNV. [default: 6]
     -C, --max_cov <int>                        Maximum coverage (of reads passing filters) to consider position as a
                                                potential SNV. [default: 8000]
-    -q, --min_mapq <int>                       Minimum mapping quality to use a read. [default: 30]
+    -q, --min_mapq <int>                       Minimum mapping quality to use a read. [default: 20]
     -a, --min_allele_qual <float>              Minimum estimated quality (Phred-scaled) of allele observation on read to
                                                use for genotyping/haplotyping. [default: 7.0]
     -y, --hap_assignment_qual <float>          Minimum quality (Phred-scaled) of read->haplotype assignment (for read
@@ -182,7 +183,6 @@ If a read has an assigned haplotype, it will get a tag `HP:i:1` or `HP:i:2` and 
 - Longshot has only been tested using data from humans. Results may vary with organisms with significantly higher or lower SNV rate.
 - It is important to set a reasonable max read coverage cutoff (```-C``` option) to filter out sites coinciding with genomic features such as CNVs which can be problematic for variant calling. If the ```-A``` option is used, Longshot will estimate the mean read coverage and set the max coverage to ```mean_cov+5*sqrt(mean_cov)```, which we have found to be a reasonable filter in practice for humans.
 - CNVs and mapping issues can result in dense clusters of false positive SNVs. Longshot will attempt to find clusters like this and mark them as "dn" in the FILTER field. The ```--density_params``` option is used to control which variants are flagged as "dn". The default parameters have been found to be effective for human sequencing data, but this option may need to be tweaked for other organisms with SNV rates significantly different from human.
-- Longshot is likely to work with PacBio CCS reads but at this time only CLR reads have been tested.
 - Oxford Nanopore Technology (ONT) SMS reads are now officially supported. It is recommended to use the default ```--strand_bias_pvalue_cutoff``` of 0.01 for ONT reads, since this option filters out false SNV sites prior to variant calling.
 
 ## installation troubleshooting
