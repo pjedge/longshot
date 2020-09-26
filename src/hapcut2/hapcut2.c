@@ -1,5 +1,3 @@
-// CODE STARTED SEPT 10 2007 4pm //  april 8 2008 this code used for producing results in ECCB 2008 paper //
-// author: VIKAS BANSAL (vbansal@scripps.edu) last modified December 23, 2010
 
 #include<stdio.h>
 #include<stdlib.h>

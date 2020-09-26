@@ -207,6 +207,13 @@ pub fn generate_flist_buffer(
         for u in fid.clone().into_bytes() {
             line.push(u as u8);
         }
+        line.push(':' as u8);
+	if frag.reverse_strand { 
+		line.push('+' as u8);
+	}
+	else { 
+		line.push('-' as u8);
+	}
         //line.push(' ' as u8);
 
         let mut prev_call = phase_variant.len() + 1;
