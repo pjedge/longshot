@@ -133,7 +133,7 @@ pub fn print_vcf(
             .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
     }
     // last part of the header
-    let headerstr3 = format!("##INFO=<ID=PH,Number=G,Type=Integer,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
+    let headerstr3 = format!("##INFO=<ID=PH,Number=G,Type=Float,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
 ##INFO=<ID=SC,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
 ##FILTER=<ID=dn,Description=\"In a dense cluster of variants\">
 ##FILTER=<ID=dp,Description=\"Exceeds maximum depth\">
