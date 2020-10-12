@@ -105,11 +105,11 @@ fn run() -> Result<()> {
 
     eprintln!("");
 
-    let input_args = App::new("Longshot")
-        .version(crate_version!())
-        .author("Peter Edge <edge.peterj@gmail.com>")
-        .about("SNV caller for Third-Generation Sequencing reads")
-        .arg(Arg::with_name("Input BAM")
+    let input_args = App::new("Longshot: variant caller (SNVs) for long-read sequencing data")
+        //.version(crate_version!())
+        //.author("Peter Edge <edge.peterj@gmail.com>")
+        //.about("variant caller (SNVs) for long-read sequencing data")
+        .arg(Arg::with_name("Input BAM or CRAM")
                 .short("b")
                 .long("bam")
                 .value_name("BAM")

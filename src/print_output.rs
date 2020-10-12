@@ -23,7 +23,7 @@ pub fn print_vcf_header(
 
     // first part of the header
     let headerstr1 = "##fileformat=VCFv4.2
-##source=Longshot v0.4.1
+##source=Longshot v0.4.2
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
@@ -59,6 +59,7 @@ pub fn print_vcf_header(
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=UG,Number=1,Type=String,Description=\"Unphased Genotype (pre-haplotype-assembly)\">
 ##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
 
     writeln!(file, "{}", headerstr3)
@@ -106,7 +107,7 @@ pub fn print_vcf(
 
     // first part of the header
     let headerstr1 = "##fileformat=VCFv4.2
-##source=Longshot v0.4.1
+##source=Longshot v0.4.2
 ##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
@@ -142,6 +143,7 @@ pub fn print_vcf(
 ##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
 ##FORMAT=<ID=UG,Number=1,Type=String,Description=\"Unphased Genotype (pre-haplotype-assembly)\">
 ##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
 
 
@@ -287,11 +289,11 @@ pub fn print_vcf(
                      var.mq50_frac).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
         }
         writeln!(file,
-                 "PH={};SC={};\tGT:GQ:DP:PS:UG:UQ\t{}:{:.2}:{}:{}:{}:{:.2}",
+                 "PH={};SC={};\tGT:GQ:DP:PS:UG:UQ\t{}:{:.0}:{}:{}:{}:{:.2}",
                  post_str,
                  sequence_context,
                  genotype_str,
-                 var.gq,
+                 var.gq+0.4999, // round off to integer
 		 var.dp,
                  ps,
                  unphased_genotype_str,
