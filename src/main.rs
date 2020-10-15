@@ -109,7 +109,7 @@ fn run() -> Result<()> {
         //.version(crate_version!())
         //.author("Peter Edge <edge.peterj@gmail.com>")
         //.about("variant caller (SNVs) for long-read sequencing data")
-        .arg(Arg::with_name("Input BAM or CRAM")
+        .arg(Arg::with_name("Input BAM")
                 .short("b")
                 .long("bam")
                 .value_name("BAM")
