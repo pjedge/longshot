@@ -9,7 +9,6 @@
 // external crates
 extern crate bio;
 extern crate chrono;
-#[macro_use]
 extern crate clap;
 extern crate core;
 extern crate rand;
@@ -45,7 +44,7 @@ use extract_fragments::ExtractFragmentParameters;
 use fishers_exact::fishers_exact;
 use genotype_probs::{Genotype, GenotypePriors};
 use haplotype_assembly::*;
-use print_output::{print_variant_debug, print_vcf,print_vcf_header};
+use print_output::{print_variant_debug, print_vcf, print_vcf_header};
 use realignment::AlignmentType;
 use std::fs::create_dir;
 use std::fs::remove_dir_all;
@@ -351,7 +350,7 @@ fn run() -> Result<()> {
 
     // parse the input arguments and throw errors if inputs are invalid
     let bamfile_name = input_args
-        .value_of("Input BAM")
+        .value_of("Input BAM or CRAM")
         .chain_err(|| "Input BAM file not defined.")?
         .to_string();
     let fasta_file = input_args
@@ -368,11 +367,11 @@ fn run() -> Result<()> {
     let force = parse_flag(&input_args, "Force overwrite")?;
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let output_refgenotypes = parse_flag(&input_args, "print reference_genotypes")?; // added 09/04/2020
-    let mut output_rg: bool = false; 
-    if output_refgenotypes 
+    let mut output_rg: bool = false;
+    if output_refgenotypes
     {
        output_rg = true;
-    } 
+    }
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
     let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
     let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
@@ -524,10 +523,17 @@ fn run() -> Result<()> {
         eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
     } else {
         // should print empty VCF file here before bailing 09/04/2020
+
+        let vcf_path = Path::new(&output_vcf_file);
+        let vcf_display = vcf_path.display();
+        // Open a file in write-only mode, returns `io::Result<File>`
+        let mut file = File::create(&vcf_path)
+            .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
         print_vcf_header(
-            &output_vcf_file,
+            &mut file,
+            &vcf_display,
             &sample_name,
-            potential_variants_file != None,
+            potential_variants_file.is_some(),
         )
         .chain_err(|| "Error printing VCF output.")?;
         bail!("{} ERROR: Max read coverage set to 0. printing empty VCF file");

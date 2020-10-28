@@ -10,17 +10,12 @@ use std::path::Path;
 use util::*; //{MAX_VCF_QUAL, ln_sum_matrix, GenotypePriors, VarList, Fragment, FragCall, GenomicInterval};
 use variants_and_fragments::{var_filter, VarList};
 
-pub fn print_vcf_header(
-    output_vcf_file: &String,
-    sample_name: &String,
-    used_potential_variants_vcf: bool
+pub fn print_vcf_header<W: Write>(
+    mut output_file: W,
+    filename: &std::path::Display,
+    sample_name: &str,
+    used_potential_variants_vcf: bool,
 ) -> Result<()> {
-    let vcf_path = Path::new(output_vcf_file);
-    let vcf_display = vcf_path.display();
-    // Open a file in write-only mode, returns `io::Result<File>`
-    let mut file = File::create(&vcf_path)
-        .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
-
     // first part of the header
     let headerstr1 = "##fileformat=VCFv4.2
 ##source=Longshot v0.4.2
@@ -33,8 +28,8 @@ pub fn print_vcf_header(
 ##INFO=<ID=AQ,Number=1,Type=Float,Description=\"Mean Allele Quality value (PHRED-scaled).\">
 ##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">".to_string();
 
-    writeln!(file, "{}", headerstr1)
-        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+    writeln!(output_file, "{}", headerstr1)
+        .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
 
     // these header lines are not printed if a potential variants input VCF is used
     if !used_potential_variants_vcf {
@@ -45,8 +40,8 @@ pub fn print_vcf_header(
 ##INFO=<ID=MQ40,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=40.\">
 ##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">".to_string();
 
-        writeln!(file, "{}", headerstr2)
-            .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+        writeln!(output_file, "{}", headerstr2)
+            .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
     }
     // last part of the header
     let headerstr3 = format!("##INFO=<ID=PH,Number=G,Type=Float,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
@@ -62,10 +57,9 @@ pub fn print_vcf_header(
 ##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
 
-    writeln!(file, "{}", headerstr3)
-        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+    writeln!(output_file, "{}", headerstr3)
+        .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
     Ok(())
-
 }
 
 pub fn print_vcf(
@@ -105,52 +99,7 @@ pub fn print_vcf(
     let mut file = File::create(&vcf_path)
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
-    // first part of the header
-    let headerstr1 = "##fileformat=VCFv4.2
-##source=Longshot v0.4.2
-##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
-##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
-##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
-##INFO=<ID=MC,Number=1,Type=Integer,Description=\"Minimum Error Correction (MEC) for this single variant\">
-##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
-##INFO=<ID=MB,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant's haplotype block.\">
-##INFO=<ID=AQ,Number=1,Type=Float,Description=\"Mean Allele Quality value (PHRED-scaled).\">
-##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">".to_string();
-
-    writeln!(file, "{}", headerstr1)
-        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
-
-    // these header lines are not printed if a potential variants input VCF is used
-    if !used_potential_variants_vcf {
-        let headerstr2 = "##INFO=<ID=DA,Number=1,Type=Integer,Description=\"Total Depth of reads at any MAPQ (but passing samtools filter 0xF00).\">
-##INFO=<ID=MQ10,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=10.\">
-##INFO=<ID=MQ20,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=20.\">
-##INFO=<ID=MQ30,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=30.\">
-##INFO=<ID=MQ40,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=40.\">
-##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">".to_string();
-
-        writeln!(file, "{}", headerstr2)
-            .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
-    }
-    // last part of the header
-    let headerstr3 = format!("##INFO=<ID=PH,Number=G,Type=Float,Description=\"PHRED-scaled Probabilities of Phased Genotypes\">
-##INFO=<ID=SC,Number=1,Type=String,Description=\"Reference Sequence in 21-bp window around variant.\">
-##FILTER=<ID=dn,Description=\"In a dense cluster of variants\">
-##FILTER=<ID=dp,Description=\"Exceeds maximum depth\">
-##FILTER=<ID=sb,Description=\"Allelic strand bias\">
-##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">
-##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">
-##FORMAT=<ID=PS,Number=1,Type=Integer,Description=\"Phase Set\">
-##FORMAT=<ID=UG,Number=1,Type=String,Description=\"Unphased Genotype (pre-haplotype-assembly)\">
-##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
-##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">
-#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
-
-
-    writeln!(file, "{}", headerstr3)
-        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
-
-    //print_vcf_header(output_vcf_file,sample_name,used_potential_variants_vcf);
+    print_vcf_header(&mut file, &vcf_display, sample_name, used_potential_variants_vcf)?;
 
     for var in &varlist.lst {
         assert!(var.alleles.len() >= 2);
