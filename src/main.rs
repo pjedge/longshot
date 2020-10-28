@@ -35,6 +35,7 @@ mod variants_and_fragments;
 
 // use declarations
 use bio::stats::{LogProb, PHREDProb, Prob};
+use bio::io::fasta::IndexedReader;
 use call_genotypes::*;
 use clap::{App, Arg};
 use errors::*;
@@ -529,11 +530,15 @@ fn run() -> Result<()> {
         // Open a file in write-only mode, returns `io::Result<File>`
         let mut file = File::create(&vcf_path)
             .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
+
+        let fasta = IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
+
         print_vcf_header(
             &mut file,
             &vcf_display,
             &sample_name,
             potential_variants_file.is_some(),
+            &Some(fasta),
         )
         .chain_err(|| "Error printing VCF output.")?;
         bail!("{} ERROR: Max read coverage set to 0. printing empty VCF file");

@@ -1,6 +1,6 @@
 //! Print Longshot output in VCF format
 
-use bio::io::fasta;
+use bio::io::fasta::IndexedReader;
 use bio::stats::PHREDProb;
 use errors::*;
 use genotype_probs::Genotype;
@@ -15,31 +15,37 @@ pub fn print_vcf_header<W: Write>(
     filename: &std::path::Display,
     sample_name: &str,
     used_potential_variants_vcf: bool,
+    fasta_file: &Option<IndexedReader<File>>,
 ) -> Result<()> {
-    // first part of the header
-    let headerstr1 = "##fileformat=VCFv4.2
-##source=Longshot v0.4.2
-##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
+    writeln!(output_file, "##fileformat=VCFv4.2\n##source=Longshot v0.4.2")
+        .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
+
+    if let Some(fasta_reader) = &fasta_file {
+        for sequence in fasta_reader.index.sequences().iter() {
+            writeln!(output_file, "##contig=<ID={},length={}>", sequence.name, sequence.len)
+                .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
+        }
+    }
+
+    let headerstr1 = &"##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
 ##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
 ##INFO=<ID=MC,Number=1,Type=Integer,Description=\"Minimum Error Correction (MEC) for this single variant\">
 ##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
 ##INFO=<ID=MB,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant's haplotype block.\">
 ##INFO=<ID=AQ,Number=1,Type=Float,Description=\"Mean Allele Quality value (PHRED-scaled).\">
-##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">".to_string();
-
+##INFO=<ID=GM,Number=1,Type=Integer,Description=\"Phased genotype matches unphased genotype (boolean).\">";
     writeln!(output_file, "{}", headerstr1)
         .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
 
     // these header lines are not printed if a potential variants input VCF is used
     if !used_potential_variants_vcf {
-        let headerstr2 = "##INFO=<ID=DA,Number=1,Type=Integer,Description=\"Total Depth of reads at any MAPQ (but passing samtools filter 0xF00).\">
+        let headerstr2 = &"##INFO=<ID=DA,Number=1,Type=Integer,Description=\"Total Depth of reads at any MAPQ (but passing samtools filter 0xF00).\">
 ##INFO=<ID=MQ10,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=10.\">
 ##INFO=<ID=MQ20,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=20.\">
 ##INFO=<ID=MQ30,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=30.\">
 ##INFO=<ID=MQ40,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=40.\">
-##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">".to_string();
-
+##INFO=<ID=MQ50,Number=1,Type=Float,Description=\"Fraction of reads (passing 0xF00) with MAPQ>=50.\">";
         writeln!(output_file, "{}", headerstr2)
             .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
     }
@@ -56,7 +62,6 @@ pub fn print_vcf_header<W: Write>(
 ##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
 ##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
-
     writeln!(output_file, "{}", headerstr3)
         .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
     Ok(())
@@ -85,7 +90,7 @@ pub fn print_vcf(
 
     let mut fasta = match fasta_file {
         &Some(ref ff) => Some(
-            fasta::IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?,
+            IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?,
         ),
         None => None,
     };
@@ -99,7 +104,7 @@ pub fn print_vcf(
     let mut file = File::create(&vcf_path)
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
-    print_vcf_header(&mut file, &vcf_display, sample_name, used_potential_variants_vcf)?;
+    print_vcf_header(&mut file, &vcf_display, sample_name, used_potential_variants_vcf, &fasta)?;
 
     for var in &varlist.lst {
         assert!(var.alleles.len() >= 2);
