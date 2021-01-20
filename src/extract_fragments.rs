@@ -36,6 +36,7 @@ use util::*;
 use variants_and_fragments::*;
 use std::u32;
 use std::usize;
+use std::convert::TryInto;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -276,8 +277,8 @@ pub fn find_anchors(
         || (var_interval.start_pos as i32)
             >= bam_record
                 .cigar()
-                .end_pos()
-        || (var_interval.end_pos as i32) < bam_record.pos()
+                .end_pos().try_into().unwrap()
+        || (var_interval.end_pos as i32) < bam_record.pos().try_into().unwrap()
     {
         eprintln!(
             "var_interval: {}\t{}\t{}",
