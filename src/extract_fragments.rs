@@ -273,11 +273,11 @@ pub fn find_anchors(
     }
 
     if var_interval.chrom != target_names[bam_record.tid() as usize]
-        || (var_interval.start_pos as i32)
+        || (var_interval.start_pos as i64)
             >= bam_record
                 .cigar()
                 .end_pos()
-        || (var_interval.end_pos as i32) < bam_record.pos()
+        || (var_interval.end_pos as i64) < bam_record.pos()
     {
         eprintln!(
             "var_interval: {}\t{}\t{}",
