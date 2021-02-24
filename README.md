@@ -78,9 +78,7 @@ Execution should take around 5 to 10 seconds on a typical desktop machine. The o
 ```
 $ longshot --help
 
-Longshot 0.4.1
-Peter Edge <edge.peterj@gmail.com>
-SNV caller for Third-Generation Sequencing reads
+Longshot: variant caller (SNVs) for long-read sequencing data 
 
 USAGE:
     longshot [FLAGS] [OPTIONS] --bam <BAM> --ref <FASTA> --out <VCF>
@@ -94,7 +92,8 @@ FLAGS:
     -F, --force_overwrite     If output files (VCF or variant debug directory) exist, delete and overwrite them.
     -x, --max_alignment       Use max scoring alignment algorithm rather than pair HMM forward algorithm.
     -n, --no_haps             Don't call HapCUT2 to phase variants.
-	--output-ref          print reference genotypes (non-variant), use this option only in combination with -v option.
+        --output-ref          print reference genotypes (non-variant), use this option only in combination with -v
+                              option.
     -h, --help                Prints help information
     -V, --version             Prints version information
 

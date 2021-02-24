@@ -17,7 +17,7 @@ pub fn print_vcf_header<W: Write>(
     used_potential_variants_vcf: bool,
     fasta_file: &Option<IndexedReader<File>>,
 ) -> Result<()> {
-    writeln!(output_file, "##fileformat=VCFv4.2\n##source=Longshot v0.4.2")
+    writeln!(output_file, "##fileformat=VCFv4.2\n##source=Longshot v0.4.3")
         .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
 
     if let Some(fasta_reader) = &fasta_file {
