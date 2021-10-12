@@ -139,7 +139,7 @@ pub fn call_potential_snvs(
     // genomic intervals for each chromosome covering the entire genome
     for iv in interval_lst {
         bam_ix
-            .fetch(iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1)
+            .fetch((iv.tid as u32, iv.start_pos as u32, iv.end_pos as u32 + 1))
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
         let bam_pileup = bam_ix.pileup();
 

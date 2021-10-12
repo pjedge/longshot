@@ -411,7 +411,7 @@ pub fn estimate_alignment_parameters(
 
     for iv in interval_lst {
         bam_ix
-            .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
+            .fetch((iv.tid, iv.start_pos, iv.end_pos + 1))
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() {
