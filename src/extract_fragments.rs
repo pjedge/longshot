@@ -972,7 +972,7 @@ pub fn extract_fragments(
 
     for iv in interval_lst {
         bam_ix
-            .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
+            .fetch((iv.tid, iv.start_pos, iv.end_pos + 1))
             .chain_err(|| "Error seeking BAM file while extracting fragments.")?;
 
         for (_, r) in bam_ix.records().enumerate() {

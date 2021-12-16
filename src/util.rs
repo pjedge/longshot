@@ -141,11 +141,11 @@ pub fn parse_region_string(
                 "--region start position must be greater than 0."
             );
             ensure!(
-                iv_start < tlen,
+                iv_start < tlen as u32,
                 "--region start position exceeds the length of the contig."
             );
             ensure!(
-                iv_end <= tlen,
+                iv_end <= tlen as u32,
                 "--region end position exceeds the length of the contig."
             );
 
@@ -177,7 +177,7 @@ pub fn parse_region_string(
                 tid: tid,
                 chrom: r_str,
                 start_pos: 0,
-                end_pos: tlen - 1,
+                end_pos: (tlen - 1) as u32,
             }))
         }
         None => Ok(None),
@@ -270,10 +270,10 @@ pub fn get_whole_genome_intervals(bam_file: &String) -> Result<Vec<GenomicInterv
             tid: tid as u32,
             chrom: name_string,
             start_pos: 0,
-            end_pos: header_view
+            end_pos: (header_view
                 .target_len(tid as u32)
                 .chain_err(|| format!("Error accessing target len for tid {}", tid))?
-                - 1,
+                - 1) as u32,
         });
     }
 

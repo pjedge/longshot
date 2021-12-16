@@ -56,7 +56,7 @@ pub fn calculate_mean_coverage(
 
     for iv in interval_lst {
         bam_ix
-            .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
+            .fetch((iv.tid, iv.start_pos, iv.end_pos + 1))
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         // iterate over the BAM pileups for every position in this interval

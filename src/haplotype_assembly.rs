@@ -118,12 +118,12 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
         bam::IndexedReader::from_path(bamfile_name).chain_err(|| ErrorKind::IndexedBamOpenError)?;
 
     let header = bam::Header::from_template(&bam_ix.header());
-    let mut out_bam = bam::Writer::from_path(&out_bam_file, &header, bam::Format::BAM)
+    let mut out_bam = bam::Writer::from_path(&out_bam_file, &header, bam::Format::Bam)
         .chain_err(|| ErrorKind::BamWriterOpenError(out_bam_file.as_ref().display().to_string()))?;
 
     for iv in interval_lst {
         bam_ix
-            .fetch(iv.tid, iv.start_pos, iv.end_pos + 1)
+            .fetch((iv.tid, iv.start_pos, iv.end_pos + 1))
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
         for r in bam_ix.records() { // iterate over the reads overlapping the interval 'iv'
@@ -144,15 +144,14 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                     .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
                 continue; // write filtered reads to bam file and continue
             }
-
             if h1.contains_key(&qname) {
-                record.push_aux(b"HP", &bam::record::Aux::Integer(1));
+                record.push_aux(b"HP", bam::record::Aux::I32(1));
                 record.push_aux(b"PS",
-                    &bam::record::Aux::Integer(*h1.get(&qname).unwrap() as i64));
+                    bam::record::Aux::I32(*h1.get(&qname).unwrap() as i32));
             } else if h2.contains_key(&qname) {
-                record.push_aux(b"HP", &bam::record::Aux::Integer(2));
+                record.push_aux(b"HP", bam::record::Aux::I32(2));
                 record.push_aux(b"PS",
-                    &bam::record::Aux::Integer(*h2.get(&qname).unwrap() as i64));
+                    bam::record::Aux::I32(*h2.get(&qname).unwrap() as i32));
             }
             out_bam
                 .write(&record)

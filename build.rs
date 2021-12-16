@@ -31,5 +31,5 @@ fn main() {
 
         println!("cargo:rustc-flags=-L src/poa/spoa/build/lib/ -L /home/pedge/anaconda3/envs/tscc/lib -l spoa");
     */
-    println!("cargo:rustc-flags=-L /home/pedge/anaconda3/envs/tscc/lib");
+    // println!("cargo:rustc-flags=-L /home/pedge/anaconda3/envs/tscc/lib");
 }
