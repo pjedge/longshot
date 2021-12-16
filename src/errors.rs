@@ -19,6 +19,10 @@ error_chain! {
         BamHeaderTargetLenAccessError {
             description("Error accessing target len for a contig in bam header.")
         }
+        BamAuxError(tag: &'static str) {
+            description("Cannot set/remove BAM record tag")
+            display(x) -> ("{}: {}", x.description(), tag)
+        }
         // Indexed BAM errors
         IndexedBamOpenError {
             description("Error opening indexed BAM file.")

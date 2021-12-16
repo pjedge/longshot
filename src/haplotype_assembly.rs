@@ -128,8 +128,8 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
 
         for r in bam_ix.records() { // iterate over the reads overlapping the interval 'iv'
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
-            record.remove_aux(b"HP"); // remove HP tag before setting it
-            record.remove_aux(b"PS"); // remove PS tag as well
+            record.remove_aux(b"HP").chain_err(|| ErrorKind::BamAuxError("HP"))?; // remove HP tag before setting it
+            record.remove_aux(b"PS").chain_err(|| ErrorKind::BamAuxError("PS"))?; // remove PS tag as well
 
             let qname = u8_to_string(record.qname())?;
             if record.is_quality_check_failed()
@@ -145,13 +145,13 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                 continue; // write filtered reads to bam file and continue
             }
             if h1.contains_key(&qname) {
-                record.push_aux(b"HP", bam::record::Aux::I32(1));
-                record.push_aux(b"PS",
-                    bam::record::Aux::I32(*h1.get(&qname).unwrap() as i32));
+                record.push_aux(b"HP", bam::record::Aux::U8(1)).chain_err(|| ErrorKind::BamAuxError("HP"))?;
+                record.push_aux(b"PS", bam::record::Aux::U32(*h1.get(&qname).unwrap() as u32))
+                    .chain_err(|| ErrorKind::BamAuxError("PS"))?;
             } else if h2.contains_key(&qname) {
-                record.push_aux(b"HP", bam::record::Aux::I32(2));
-                record.push_aux(b"PS",
-                    bam::record::Aux::I32(*h2.get(&qname).unwrap() as i32));
+                record.push_aux(b"HP", bam::record::Aux::U8(2)).chain_err(|| ErrorKind::BamAuxError("HP"))?;
+                record.push_aux(b"PS", bam::record::Aux::U32(*h2.get(&qname).unwrap() as u32))
+                    .chain_err(|| ErrorKind::BamAuxError("PS"))?;
             }
             out_bam
                 .write(&record)
@@ -207,13 +207,13 @@ pub fn generate_flist_buffer(
             line.push(u as u8);
         }
         line.push(':' as u8);
-	if frag.reverse_strand { 
-		line.push('+' as u8);
-	}
-	else { 
-		line.push('-' as u8);
-	}
-        //line.push(' ' as u8);
+
+        if frag.reverse_strand {
+            line.push('+' as u8);
+        }
+        else {
+            line.push('-' as u8);
+        }
 
         let mut prev_call = phase_variant.len() + 1;
 
