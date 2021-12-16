@@ -11,7 +11,7 @@ chrono = "0.4"
 rand = { version = "0.8", features = ["std_rng"] }
 error-chain = "0.12.0"
 fishers_exact = "1.0.1"
-hashbrown = "0.1.8"
+hashbrown = "0.11"
 
 [build-dependencies]
 cc = "1.0"
