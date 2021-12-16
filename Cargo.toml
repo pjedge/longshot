@@ -8,7 +8,7 @@ bio = "0.25.0"
 rust-htslib = "0.38.2"
 clap = "2.26.2"
 chrono = "0.4"
-rand = "0.4"
+rand = { version = "0.8", features = ["std_rng"] }
 error-chain = "0.12.0"
 fishers_exact = "1.0.1"
 hashbrown = "0.1.8"

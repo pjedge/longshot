@@ -408,7 +408,7 @@ pub fn find_anchors(
                             found_anchor_left = true;
                             break;
                         }
-                        
+
                         if (left_anchor_ref ==  0 ) || ( left_anchor_read == 0 ) {
                             break;
                         }
@@ -480,7 +480,7 @@ pub fn find_anchors(
                     // the var_interval.end_pos we are trying to anchor is just inside one huge match
                     right_anchor_ref = var_interval.end_pos + anchor_length;
                     right_anchor_read = cigarpos_list[i].read_pos
-                        + (var_interval.end_pos + anchor_length - cigarpos_list[i].ref_pos);
+                        + var_interval.end_pos + anchor_length - cigarpos_list[i].ref_pos;
                     potential_anchor = true;
                 }
 

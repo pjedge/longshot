@@ -7,7 +7,9 @@
 // use declarations
 use bio::stats::{LogProb, PHREDProb, Prob};
 use chrono::prelude::*;
-use rand::{Rng, SeedableRng, StdRng};
+use rand::{Rng, SeedableRng};
+use rand::seq::SliceRandom;
+use rand::rngs::StdRng;
 
 use errors::*;
 use genotype_probs::*;
@@ -296,7 +298,7 @@ pub fn call_genotypes_with_haplotypes(
 
     let max_iterations: usize = 1000000;
     let ln_half = LogProb::from(Prob(0.5));
-    let mut rng: StdRng = StdRng::from_seed(&[0]);
+    let mut rng: StdRng = StdRng::seed_from_u64(0);
     let print_time: fn() -> String = || Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     let hap_ixs = vec![0, 1];
@@ -324,7 +326,7 @@ pub fn call_genotypes_with_haplotypes(
             && var.alleles[0].len() == 1
             && var.alleles[1].len() == 1
         {
-            if rng.next_f64() < 0.5 {
+            if rng.gen::<f64>() < 0.5 {
                 var.genotype = Genotype(0, 1);
             } else {
                 var.genotype = Genotype(1, 0);
@@ -563,7 +565,7 @@ pub fn call_genotypes_with_haplotypes(
             // loop over the set of variants v in random order
             let mut ixvec: Vec<usize> = (0..varlist.lst.len()).collect();
             let ixslice: &mut [usize] = ixvec.as_mut_slice();
-            rng.shuffle(ixslice);
+            ixslice.shuffle(&mut rng);
 
             for v_r in ixslice {
                 let v = *v_r;
