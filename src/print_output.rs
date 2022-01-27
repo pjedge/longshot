@@ -77,6 +77,7 @@ pub fn print_vcf(
     density_params: &DensityParameters,
     sample_name: &String,
     print_outside_region: bool,
+    trim_unused_alts: bool,
     used_potential_variants_vcf: bool
 ) -> Result<()> {
     // first, add filter flags for variant density
@@ -152,13 +153,6 @@ pub fn print_vcf(
             None => ".".to_string(),
         };
 
-        let allele_counts_str = var
-            .allele_counts
-            .clone()
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>()
-            .join(",");
         let mut post_vec: Vec<String> = vec![];
         for g in var.possible_genotypes() {
             let mut p = *PHREDProb::from(var.genotype_post.get(g));
@@ -167,31 +161,65 @@ pub fn print_vcf(
             }
             post_vec.push(format!("{:.2}", p));
         }
-
         let post_str = post_vec.join(",");
 
         let mut var_alleles: Vec<String> = vec![];
-        for allele in var.alleles[1..].iter() {
-            var_alleles.push(allele.clone());
+        let mut allele_counts: Vec<String> = vec![var.allele_counts[0].to_string()]; //reference counts
+        if trim_unused_alts {
+            // limit alt alleles and counts to those that appear in the genotype
+            for i in 1..var.alleles.len() {
+                if vec![var.genotype.0.into(),
+                        var.genotype.1.into(),
+                        var.unphased_genotype.0.into(),
+                        var.unphased_genotype.1.into()].contains(&i) {
+                    var_alleles.push(var.alleles[i].clone());
+                    allele_counts.push(var.allele_counts[i].to_string());
+                }
+            }
+        } else {
+            for allele in var.alleles[1..].iter() {
+                var_alleles.push(allele.clone());
+            }
+            assert!(var_alleles.len() == var.alleles.len() - 1);
+            allele_counts = var
+                .allele_counts
+                .clone()
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<String>>();
         }
-
-        assert!(var_alleles.len() == var.alleles.len() - 1);
+        let allele_counts_str = allele_counts.join(",");
 
         let sep = match var.phase_set {
             Some(_) => "|",
             None => "/",
         };
 
-        let genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
-        let unphased_genotype_str = vec![
+        let mut genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
+        let mut unphased_genotype_str = vec![
             var.unphased_genotype.0.to_string(),
             var.unphased_genotype.1.to_string(),
         ]
         .join("/");
-
         let genotypes_match: usize = (var.genotype == var.unphased_genotype
             || Genotype(var.genotype.1, var.genotype.0) == var.unphased_genotype)
             as usize;
+
+        if trim_unused_alts {
+            // handle corner case where both phased and unphased genotype contain alt allele 2
+            // but not 1 so only one alt is listed
+            if vec![var.genotype.0,
+                    var.genotype.1,
+                    var.unphased_genotype.0,
+                    var.unphased_genotype.1].contains(&2) &&
+               ! vec![var.genotype.0,
+                    var.genotype.1,
+                    var.unphased_genotype.0,
+                    var.unphased_genotype.1].contains(&1) {
+                genotype_str = genotype_str.replace("2", "1");
+                unphased_genotype_str = unphased_genotype_str.replace("2", "1");
+            }
+        }
 
         // we want to save the sequence context (21 bp window around variant on reference)
         // this will be printed to the VCF later and may help diagnose variant calling
@@ -284,7 +312,8 @@ pub fn print_variant_debug(
                 density_params,
                 sample_name,
                 true,
-                true // don't print MQ statistics in VCF because they may or may not be present
+                false, // include all candidate alts
+                true   // don't print MQ statistics in VCF because they may or may not be present
             )
             .chain_err(|| "Error printing debug VCF file.")?;
         }

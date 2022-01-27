@@ -10,6 +10,7 @@ use chrono::prelude::*;
 use rand::{Rng, SeedableRng};
 use rand::seq::SliceRandom;
 use rand::rngs::StdRng;
+use std::cmp::{max, min};
 
 use errors::*;
 use genotype_probs::*;
@@ -321,15 +322,15 @@ pub fn call_genotypes_with_haplotypes(
     // randomly shuffle the phase of the variant
     for i in 0..varlist.lst.len() {
         let var = &mut varlist.lst[i];
-        if var.alleles.len() == 2
-            && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+        if var.alleles.len() >= 2
+            && (var.genotype.0 != var.genotype.1)
             && var.alleles[0].len() == 1
             && var.alleles[1].len() == 1
         {
             if rng.gen::<f64>() < 0.5 {
-                var.genotype = Genotype(0, 1);
+                var.genotype = Genotype(var.genotype.0, var.genotype.1);
             } else {
-                var.genotype = Genotype(1, 0);
+                var.genotype = Genotype(var.genotype.1, var.genotype.0);
             }
         }
     }
@@ -349,8 +350,8 @@ pub fn call_genotypes_with_haplotypes(
         // count how many variants meet the criteria for "phased"
         let mut num_phased = 0;
         for var in varlist.lst.iter() {
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+            if var.alleles.len() >= 2
+                && (var.genotype.0 != var.genotype.1)
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
             {
@@ -409,15 +410,15 @@ pub fn call_genotypes_with_haplotypes(
             // set its bit to true in var_phased (so that it will be used in HapCUT2 assembly)
             // and take the haplotype information from the current haplotypes
             // so that the HapCUT2 assembly isn't starting from a random haplotype
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+            if var.alleles.len() >= 2
+                && (var.genotype.0 != var.genotype.1)
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1 {
                 var_phased[i] = true;
 
-                if var.genotype == Genotype(0, 1) {
+                if var.genotype.1 > var.genotype.0 {
                     hap1[i] = '0' as u8;
-                } else if var.genotype == Genotype(1, 0) {
+                } else if var.genotype.1 < var.genotype.0 {
                     hap1[i] = '1' as u8;
                 }
             }
@@ -463,9 +464,11 @@ pub fn call_genotypes_with_haplotypes(
         // we copy over the genotypes and use min_pos_ps to convert the phase set/block information
         // into PS field values.
         for i in 0..hap1.len() {
+            let gtmax = max(varlist.lst[i].genotype.0, varlist.lst[i].genotype.1);
+            let gtmin = min(varlist.lst[i].genotype.0, varlist.lst[i].genotype.1);
             match hap1[i] as char {
                 '0' => {
-                    varlist.lst[i].genotype = Genotype(0, 1);
+                    varlist.lst[i].genotype = Genotype(gtmin, gtmax);
 
                     if phase_sets[i] >= 0 {
                         varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
@@ -474,7 +477,7 @@ pub fn call_genotypes_with_haplotypes(
                     }
                 }
                 '1' => {
-                    varlist.lst[i].genotype = Genotype(1, 0);
+                    varlist.lst[i].genotype = Genotype(gtmax, gtmin);
 
                     if phase_sets[i] >= 0 {
                         varlist.lst[i].phase_set = Some(min_pos_ps[phase_sets[i] as usize]);
@@ -494,8 +497,8 @@ pub fn call_genotypes_with_haplotypes(
         // count how many variants meet the criteria for "phased"
         num_phased = 0;
         for var in varlist.lst.iter() {
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+            if var.alleles.len() >= 2
+                && (var.genotype.0 != var.genotype.1)
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
             //&& !var.unphased
@@ -695,8 +698,8 @@ pub fn call_genotypes_with_haplotypes(
         // count how many variants meet the criteria for "phased"
         num_phased = 0;
         for var in varlist.lst.iter() {
-            if var.alleles.len() == 2
-                && (var.genotype == Genotype(0, 1) || var.genotype == Genotype(1, 0))
+            if var.alleles.len() >= 2
+                && (var.genotype.0 != var.genotype.1 )
                 && var.alleles[0].len() == 1
                 && var.alleles[1].len() == 1
             {

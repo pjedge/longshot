@@ -221,7 +221,7 @@ pub fn generate_flist_buffer(
             if phase_variant[c.var_ix as usize] && c.qual < LogProb::from(Prob(max_p_miscall)) {
                 if prev_call < c.var_ix && c.var_ix - prev_call == 1 {
                     ensure!(
-                        c.allele == 0 as u8 || c.allele == 1 as u8,
+                        c.allele == 0 as u8 || c.allele == 1 as u8 || c.allele == 2 as u8,
                         "Allele is not valid for incorporation into fragment file."
                     );
                     line.push(
@@ -236,7 +236,7 @@ pub fn generate_flist_buffer(
                     }
                     line.push(' ' as u8);
                     ensure!(
-                        c.allele == 0 as u8 || c.allele == 1 as u8,
+                        c.allele == 0 as u8 || c.allele == 1 as u8 || c.allele == 2 as u8,
                         "Allele is not valid for incorporation into fragment file."
                     );
                     line.push(
