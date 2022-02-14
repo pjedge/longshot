@@ -324,6 +324,9 @@ pub fn call_potential_snvs(
                 var_allele2 = 'N';
             }
 
+            // use a basic genotype likelihood calculation to call SNVs
+            // snv_qual is the LogProb probability of a non-reference base observation
+
             let (prior_00, prior_01, prior_11) =
                 genotype_priors_table[ref_allele_ix][var_allele1_ix];
             let mut prior_02, prior_22, prior_12 = LogProb::ln_zero(), LogProb::ln_zero(), LogProb::ln_zero();
