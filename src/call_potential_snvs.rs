@@ -329,13 +329,15 @@ pub fn call_potential_snvs(
 
             let (prior_00, prior_01, prior_11) =
                 genotype_priors_table[ref_allele_ix][var_allele1_ix];
-            let mut prior_02, prior_22, prior_12 = LogProb::ln_zero(), LogProb::ln_zero(), LogProb::ln_zero();
-            if var_allele2 != 'N' {
-                (_, prior_02, prior_22) = genotype_priors_table[ref_allele_ix][var_allele2_ix]; 
-                // prior_12 = prior_01 + prior_02;
-                prior_12 = genotype_priors.get_prior(&vec![ref_allele, var_allele1, var_allele2], (1, 2))
-                eprintln!("{} {}", prior_01 + prior_02, prior_12);
-            }
+            let ((_, prior_02, prior_22), prior_12) =
+                if var_allele2 == 'N' {
+                    ((LogProb::ln_one(), LogProb::ln_zero(), LogProb::ln_zero()), LogProb::ln_zero())
+                } else {
+                    (genotype_priors_table[ref_allele_ix][var_allele2_ix],
+                     genotype_priors
+                        .get_prior(&vec![ref_allele.to_string(), var_allele1.to_string(), var_allele2.to_string()], Genotype(1, 2))
+                        .chain_err(|| "Error getting genotype priors for second allele when calculating genotypes.")?)
+                };
 
             // we dereference these so that they are f64 but in natural log space
             // we want to be able to multiply them by some integer (raise to power),
