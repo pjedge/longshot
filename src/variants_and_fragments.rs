@@ -239,14 +239,6 @@ pub fn parse_vcf_potential_variants(
 
         if non_acgt || too_big_indel {continue;}
 
-        if alleles.len() > 2 {
-            eprintln!(
-                "WARNING: Triallelic variant at {}:{} in input VCF will be ignored (not currently supported).",
-                &chrom,
-                record.pos()+1);
-            continue;
-        }
-
         let new_var = Var {
             ix: 0,
             tid: *chrom2tid
