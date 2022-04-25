@@ -661,7 +661,8 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
-            potential_variants_file != None,
+            false,
+            potential_variants_file != None
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -786,7 +787,8 @@ fn run() -> Result<()> {
             &density_params,
             &sample_name,
             false,
-            potential_variants_file != None,
+            true,
+            potential_variants_file != None
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -924,7 +926,8 @@ fn run() -> Result<()> {
         &density_params,
         &sample_name,
         false,
-        potential_variants_file != None,
+        true,
+        potential_variants_file != None
     )
     .chain_err(|| "Error printing VCF output.")?;
 

@@ -282,11 +282,14 @@ pub fn call_potential_snvs(
                 continue;
             }
 
-            let mut var_count = 0;
+            let mut var_count1 = 0;
+            let mut var_count2 = 0;
             let mut ref_count = 0;
-            let mut var_allele = 'N';
+            let mut var_allele1 = 'N';
+            let mut var_allele2 = 'N';
             let mut ref_allele_ix = 0;
-            let mut var_allele_ix = 0;
+            let mut var_allele1_ix = 0;
+            let mut var_allele2_ix = 0;
 
             for i in 0..5 {
                 //base_cov += counts[i];
@@ -294,28 +297,47 @@ pub fn call_potential_snvs(
                     ref_count = counts[i];
                     ref_allele_ix = i;
                 }
-                if counts[i] > var_count && bases[i] != ref_allele {
-                    var_count = counts[i];
-                    var_allele = bases[i];
-                    var_allele_ix = i;
+                if counts[i] > var_count1 && bases[i] != ref_allele {
+                    var_count2 = var_count1;
+                    var_allele2 = var_allele1;
+                    var_allele2_ix = var_allele1_ix;
+                    var_count1 = counts[i];
+                    var_allele1 = bases[i];
+                    var_allele1_ix = i;
+                } else if counts[i] > var_count2 && bases[i] != ref_allele {
+                    var_count2 = counts[i];
+                    var_allele2 = bases[i];
+                    var_allele2_ix = i;
                 }
             }
 
-            let alt_frac: f64 = (var_count as f64) / (depth as f64);
+            let alt_frac: f64 = (var_count1 as f64) / (depth as f64);
 
-            if var_count < min_alt_count || alt_frac < min_alt_frac {
+            if var_count1 < min_alt_count || alt_frac < min_alt_frac {
                 continue;
             }
-
-            if var_allele == 'N' {
+            if var_allele1 == 'N' {
                 continue;
+            }
+            if var_count2 < min_alt_count {
+                var_count2 = 0;
+                var_allele2 = 'N';
             }
 
             // use a basic genotype likelihood calculation to call SNVs
             // snv_qual is the LogProb probability of a non-reference base observation
 
             let (prior_00, prior_01, prior_11) =
-                genotype_priors_table[ref_allele_ix][var_allele_ix];
+                genotype_priors_table[ref_allele_ix][var_allele1_ix];
+            let ((_, prior_02, prior_22), prior_12) =
+                if var_allele2 == 'N' {
+                    ((LogProb::ln_one(), LogProb::ln_zero(), LogProb::ln_zero()), LogProb::ln_zero())
+                } else {
+                    (genotype_priors_table[ref_allele_ix][var_allele2_ix],
+                     genotype_priors
+                        .get_prior(&vec![ref_allele.to_string(), var_allele1.to_string(), var_allele2.to_string()], Genotype(1, 2))
+                        .chain_err(|| "Error getting genotype priors for second allele when calculating genotypes.")?)
+                };
 
             // we dereference these so that they are f64 but in natural log space
             // we want to be able to multiply them by some integer (raise to power),
@@ -330,31 +352,43 @@ pub fn call_potential_snvs(
             // raise the probability of observing allele to the power of number of times we observed that allele
             // fastest way of multiplying probabilities for independent events, where the
             // probabilities are all the same (either quality score or 1 - quality score)
-            let p00 = LogProb(*prior_00 + p_call * ref_count as f64 + p_miscall * var_count as f64);
-            let p01 = LogProb(ln_two + *prior_01 + p_het * (ref_count + var_count) as f64);
-            let p11 = LogProb(*prior_11 + p_call * var_count as f64 + p_miscall * ref_count as f64);
+            let p00 = LogProb(*prior_00 + p_call * ref_count as f64 + p_miscall * (var_count1 + var_count2) as f64);
+            let p01 = LogProb(ln_two + *prior_01 + p_het * (ref_count + var_count1) as f64 + p_miscall * var_count2 as f64);
+            let p02 = LogProb(ln_two + *prior_02 + p_het * (ref_count + var_count2) as f64 + p_miscall * var_count1 as f64);
+            let p11 = LogProb(*prior_11 + p_call * var_count1 as f64 + p_miscall * (ref_count + var_count2) as f64);
+            let p12 = LogProb(ln_two + *prior_12 + p_het * (var_count1 + var_count2) as f64 + p_miscall * ref_count as f64);
+            let p22 = LogProb(*prior_22 + p_call * var_count2 as f64 + p_miscall * (ref_count + var_count1) as f64);
 
             // calculate the posterior probability of 0/0 genotype
-            let p_total = LogProb::ln_sum_exp(&[p00, p01, p11]);
+            let p_total = LogProb::ln_sum_exp(&[p00, p01, p02, p11, p12, p22]);
             //let post_00 = p00 - p_total;
-            let snv_qual = LogProb::ln_add_exp(p01, p11) - p_total; //LogProb::ln_one_minus_exp(&post_00);
+            let snv_qual = LogProb::ln_sum_exp(&[p01, p02, p11, p12, p22]) - p_total; //LogProb::ln_one_minus_exp(&post_00);
 
             next_valid_pos = (pos + 1) as u32;
 
             // check if SNV meets our quality criteria for a potential SNV
             // if it does, make a new variant and add it to the list of potential SNVs.
-            if snv_qual > potential_snv_cutoff && ref_allele != 'N' && var_allele != 'N' {
+            if snv_qual > potential_snv_cutoff && ref_allele != 'N' && var_allele1 != 'N' {
+                let allele_vec;
+                let allele_num;
+                if var_allele2 == 'N' {
+                    allele_vec = vec![ref_allele.to_string(), var_allele1.to_string()];
+                    allele_num = 2;
+                } else {
+                    allele_vec = vec![ref_allele.to_string(), var_allele1.to_string(), var_allele2.to_string()];
+                    allele_num = 3;
+                }
                 let tid: usize = pileup.tid() as usize;
                 let new_var = Var {
                     ix: 0,
                     // these will be set automatically,
                     tid: tid as u32,
                     pos0: pos,
-                    alleles: vec![ref_allele.to_string(), var_allele.to_string()],
+                    alleles: allele_vec,
                     dp: depth,
-                    allele_counts: vec![0, 0],
-                    allele_counts_forward: vec![0, 0],
-                    allele_counts_reverse: vec![0, 0],
+                    allele_counts: vec![0; allele_num],
+                    allele_counts_forward: vec![0; allele_num],
+                    allele_counts_reverse: vec![0; allele_num],
                     ambiguous_count: 0,
                     qual: 0.0,
                     filter: VarFilter::Pass,
@@ -363,7 +397,7 @@ pub fn call_potential_snvs(
                     gq: 0.0,
                     unphased_genotype: Genotype(0, 0),
                     unphased_gq: 0.0,
-                    genotype_post: GenotypeProbs::uniform(2),
+                    genotype_post: GenotypeProbs::uniform(allele_num),
                     phase_set: None,
                     strand_bias_pvalue: 0.0,
                     mec: 0,
