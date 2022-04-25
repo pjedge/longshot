@@ -109,8 +109,7 @@ OPTIONS:
                                                potential variants can lead to inaccurate results. Every variant is used
                                                and only the allele fields are considered -- Genotypes, filters,
                                                qualities etc are ignored. Indel variants will be genotyped but not
-                                               phased. Triallelic variants and structural variants are currently not
-                                               supported.
+                                               phased. Structural variants (length > 50 bp) are currently not supported.
     -O, --out_bam <BAM>                        Write new bam file with haplotype tags (HP:i:1 and HP:i:2) for reads
                                                assigned to each haplotype, any existing HP and PS tags are removed
     -c, --min_cov <int>                        Minimum coverage (of reads passing filters) to consider position as a
