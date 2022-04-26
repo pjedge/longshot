@@ -255,6 +255,13 @@ fn run() -> Result<()> {
                 .default_value("20")
                 .help("Throw away a read-variant during allelotyping if there is a CIGAR indel (I/D/N) longer than this amount in its window.")
                 .display_order(151))
+        .arg(Arg::with_name("Max Reads estimation")
+                .short("R")
+                .long("max_reads_estimation")
+                .value_name("int")
+                .default_value("500000")
+                .help("number of reads used for estimating alignment parameters, -1 for using all reads")
+                .display_order(153))
         .arg(Arg::with_name("Numerically stable alignment")
             .short("S")
             .long("stable_alignment")
@@ -378,6 +385,7 @@ fn run() -> Result<()> {
     let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
     let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
     let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
+    let max_reads_estimation: usize = parse_usize(&input_args, "Max Reads estimation")?;
     let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
     let strand_bias_pvalue_cutoff: f64 =
         parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
@@ -567,6 +575,7 @@ fn run() -> Result<()> {
         &interval,
         min_mapq,
         max_cigar_indel as u32,
+        max_reads_estimation as u32,
     )
     .chain_err(|| "Error estimating alignment parameters.")?;
 
@@ -586,6 +595,8 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
     /***********************************************************************************************/
+
+	// let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
 
     //let bam_file: String = "test_data/test.bam".to_string();
     let mut varlist = match potential_variants_file {

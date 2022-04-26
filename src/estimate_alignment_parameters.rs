@@ -378,6 +378,7 @@ pub fn estimate_alignment_parameters(
     interval: &Option<GenomicInterval>,
     min_mapq: u8,
     max_cigar_indel: u32,
+    max_reads_estimation: u32, // maximum reads for estimation
 ) -> Result<AlignmentParameters> {
     let t_names = parse_target_names(&bam_file)?;
 
@@ -402,6 +403,8 @@ pub fn estimate_alignment_parameters(
         equal: 1,
         not_equal: 1,
     };
+
+    let mut nreads = 0;
 
     // interval_lst has either the single specified genomic region, or list of regions covering all chromosomes
     // for more information about this design decision, see get_interval_lst implementation in util.rs
@@ -462,6 +465,14 @@ pub fn estimate_alignment_parameters(
             emission_counts.add(read_emission_counts);
 
             prev_tid = tid;
+            nreads +=1;
+	    if nreads >= max_reads_estimation && max_reads_estimation > 0 { break; } 
+
+	    }
+	    if nreads >= max_reads_estimation && max_reads_estimation > 0 { 
+	    //if nreads%10000==0 { eprintln!("processed {} reads", nreads); } 
+		eprintln!("using {} reads for estimating HMM parameters",nreads); 
+		break;
         }
     }
 

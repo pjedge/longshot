@@ -129,7 +129,7 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
         for r in bam_ix.records() { // iterate over the reads overlapping the interval 'iv'
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
-	    // new rust raises error if tag does not exist
+	    // check if tag exists before removing, 04/25/2022
 	    if record.aux(b"HP").is_ok() { 
 	            record.remove_aux(b"HP").chain_err(|| ErrorKind::BamAuxError("HP"))?; // remove HP tag before setting it
 	    }
@@ -164,6 +164,12 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                 .chain_err(|| ErrorKind::BamRecordWriteError(qname))?;
         }
     }
+    drop(out_bam); // close out_bam writer
+    //let indexfile = format!("{}.bai",out_bam_file).to_owned();
+    // create index for bam file 
+    let indexfile = format!("{}.bai",out_bam_file.as_ref().display().to_string());
+    println!("Writing index file for output bam file -> {}",indexfile);
+    bam::index::build(&out_bam_file.as_ref().display().to_string(),Some(&indexfile),bam::index::Type::Bai,1).unwrap();
 
     Ok(())
 }
