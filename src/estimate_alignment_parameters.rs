@@ -470,13 +470,12 @@ pub fn estimate_alignment_parameters(
 
 	    }
 	    if nreads >= max_reads_estimation && max_reads_estimation > 0 { 
-	    //if nreads%10000==0 { eprintln!("processed {} reads", nreads); } 
-		eprintln!("using {} reads for estimating HMM parameters",nreads); 
+		eprintln!("using first {} reads for estimating HMM parameters",nreads); 
 		break;
         }
     }
     if nreads <= 1000 { 
-	eprintln!("low number of reads for estimating HMM parameters {}",nreads);
+//	eprintln!("low number of reads for estimating HMM parameters {}",nreads);
     }
 
     // place the transition and emission counts together in an AlignmentCounts struct
