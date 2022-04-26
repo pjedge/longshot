@@ -475,6 +475,9 @@ pub fn estimate_alignment_parameters(
 		break;
         }
     }
+    if nreads <= 1000 { 
+	eprintln!("low number of reads for estimating HMM parameters {}",nreads);
+    }
 
     // place the transition and emission counts together in an AlignmentCounts struct
     let alignment_counts = AlignmentCounts {

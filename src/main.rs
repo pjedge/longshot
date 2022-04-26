@@ -256,11 +256,11 @@ fn run() -> Result<()> {
                 .help("Throw away a read-variant during allelotyping if there is a CIGAR indel (I/D/N) longer than this amount in its window.")
                 .display_order(151))
         .arg(Arg::with_name("Max Reads estimation")
-                .short("R")
+                //.short("R")
                 .long("max_reads_estimation")
                 .value_name("int")
-                .default_value("500000")
-                .help("number of reads used for estimating alignment parameters, -1 for using all reads")
+                .default_value("1000000")
+                .help("number of reads used for estimating alignment parameters, 0 for using all reads")
                 .display_order(153))
         .arg(Arg::with_name("Numerically stable alignment")
             .short("S")
@@ -595,7 +595,6 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
     /***********************************************************************************************/
-
 	// let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
 
     //let bam_file: String = "test_data/test.bam".to_string();
