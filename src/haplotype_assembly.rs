@@ -128,8 +128,14 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
 
         for r in bam_ix.records() { // iterate over the reads overlapping the interval 'iv'
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
-            record.remove_aux(b"HP").chain_err(|| ErrorKind::BamAuxError("HP"))?; // remove HP tag before setting it
+
+	    // new rust raises error if tag does not exist
+	    if record.aux(b"HP").is_ok() { 
+	            record.remove_aux(b"HP").chain_err(|| ErrorKind::BamAuxError("HP"))?; // remove HP tag before setting it
+	    }
+	    if record.aux(b"PS").is_ok() { 
             record.remove_aux(b"PS").chain_err(|| ErrorKind::BamAuxError("PS"))?; // remove PS tag as well
+	    }
 
             let qname = u8_to_string(record.qname())?;
             if record.is_quality_check_failed()
