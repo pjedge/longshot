@@ -1,6 +1,6 @@
 # longshot
 
-Longshot is a variant calling tool for diploid genomes using long error prone reads such as Pacific Biosciences (PacBio) SMRT and Oxford Nanopore Technologies (ONT). It takes as input an aligned BAM file and outputs a phased VCF file with variants and haplotype information. It can also genotype and phase input VCF files. It can output haplotype-separated BAM files that can be used for downstream analysis. Currently, it only calls single nucleotide variants (SNVs), but it can genotype indels if they are given in an input VCF.
+Longshot is a variant calling tool for diploid genomes using long error prone reads such as Pacific Biosciences (PacBio) SMRT and Oxford Nanopore Technologies (ONT). It takes as input an aligned BAM/CRAM file and outputs a phased VCF file with variants and haplotype information. It can also genotype and phase input VCF files. It can output haplotype-separated BAM files that can be used for downstream analysis. Currently, it only calls single nucleotide variants (SNVs), but it can genotype indels if they are given in an input VCF.
 
 ## citation
 If you use Longshot, please cite the publication:
@@ -58,7 +58,7 @@ It is recommended to add the line ```export PATH=$PATH:/home/$USER/.cargo/bin```
 ## usage:
 After installation, execute the longshot binary as so:
 ```
-$ longshot [FLAGS] [OPTIONS] --bam <BAM> --ref <FASTA> --out <VCF>
+$ longshot [FLAGS] [OPTIONS] --bam <BAM/CRAM> --ref <FASTA> --out <VCF>
 ```
 
 ## execution on an example dataset
@@ -81,7 +81,7 @@ $ longshot --help
 Longshot: variant caller (SNVs) for long-read sequencing data 
 
 USAGE:
-    longshot [FLAGS] [OPTIONS] --bam <BAM> --ref <FASTA> --out <VCF>
+    longshot [FLAGS] [OPTIONS] --bam <BAM/CRAM> --ref <FASTA> --out <VCF>
 
 FLAGS:
     -A, --auto_max_cov        Automatically calculate mean coverage for region and set max coverage to mean_coverage +
@@ -98,7 +98,7 @@ FLAGS:
     -V, --version             Prints version information
 
 OPTIONS:
-    -b, --bam <BAM>                            sorted, indexed BAM file with error-prone reads
+    -b, --bam <BAM>                            sorted, indexed BAM file with error-prone reads (CRAM files also supported)
     -f, --ref <FASTA>                          indexed FASTA reference that BAM file is aligned to
     -o, --out <VCF>                            output VCF file with called variants.
     -r, --region <string>                      Region in format <chrom> or <chrom:start-stop> in which to call variants
