@@ -239,6 +239,15 @@ pub fn parse_vcf_potential_variants(
 
         if non_acgt || too_big_indel {continue;}
 
+	// ignore variants with more than three alleles (REF + 3 or more ALTs), 04/27/22
+	if alleles.len() > 3 {
+            eprintln!(
+                "WARNING: variant at {}:{} has more than three alleles, will be ignored.",
+                &chrom,
+                record.pos()+1);
+                continue;
+        }
+
         let new_var = Var {
             ix: 0,
             tid: *chrom2tid
