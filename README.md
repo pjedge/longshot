@@ -46,7 +46,7 @@ conda config --add channels conda-forge
 If you are using Ubuntu 18.04, you can install the dependencies using apt. Then, the Rust cargo package manager is used to compile Longshot. 
 ```
 sudo apt-get install cargo zlib1g-dev xz-utils \
-         libclang-dev clang build-essential curl git  # install dependencies 
+         libclang-dev clang cmake build-essential curl git  # install dependencies 
 git clone https://github.com/pjedge/longshot          # clone the Longshot repository
 cd longshot                                           # change directory
 cargo install --path .                                # install Longshot
