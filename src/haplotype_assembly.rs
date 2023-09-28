@@ -325,7 +325,7 @@ pub fn calculate_mec(
     let hap_ixs = vec![0, 1];
     let ln_max_p_miscall = LogProb::from(Prob(max_p_miscall));
 
-    for mut var in &mut varlist.lst {
+    for var in &mut varlist.lst {
         var.mec = 0;
         var.mec_frac_variant = 0.0;
         var.mec_frac_block = 0.0;
@@ -382,7 +382,7 @@ pub fn calculate_mec(
         }
     }
 
-    for mut var in &mut varlist.lst {
+    for var in &mut varlist.lst {
         match var.phase_set {
             Some(ps) => {
                 var.mec_frac_block = *block_mec

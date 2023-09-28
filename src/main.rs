@@ -740,7 +740,7 @@ fn run() -> Result<()> {
         .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
 
     // use Fishers exact test to check if allele observations are biased toward one strand or the other
-    for mut var in &mut varlist.lst {
+    for var in &mut varlist.lst {
         if !var.alleles.len() == 2 {
             continue;
         }
@@ -768,7 +768,7 @@ fn run() -> Result<()> {
     }
 
     for f in 0..flist.len() {
-        &flist[f].calls.retain(|&c| {
+        flist[f].calls.retain(|&c| {
             !varlist.lst[c.var_ix as usize]
                 .filter
                 .has_filter(VarFilter::StrandBias)

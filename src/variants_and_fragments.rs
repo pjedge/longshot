@@ -518,7 +518,7 @@ impl VarList {
         //        at the beginning with enough ref chars to match this position, and
         //        update their position so all the positions are the same.
 
-        for mut v in var_group.iter_mut() {
+        for v in var_group.iter_mut() {
             if v.pos0 > min_pos0 {
                 let diff = v.pos0 - min_pos0;
                 // we need to steal the first diff bases from refseq
