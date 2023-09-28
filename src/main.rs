@@ -378,20 +378,6 @@ fn run() -> Result<()> {
             .chain_err(|| "Error calling potential SNVs.")?
         }
     };
-    /*let mut varlist = call_potential_snvs::call_potential_snvs(
-        &bamfile_name,
-        &fasta_file,
-        &interval,
-        &genotype_priors,
-        min_cov,
-        max_cov,
-        potential_snv_min_alt_count,
-        potential_snv_min_alt_frac,
-        min_mapq,
-        alignment_parameters.ln(),
-        potential_snv_cutoff,
-    )
-    .chain_err(|| "Error calling potential SNVs.")?;*/
 
     print_variant_debug(
         &mut varlist,

@@ -1,0 +1,59 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'longshot'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=longshot",
+                    "--package=longshot"
+                ],
+                "filter": {
+                    "name": "longshot",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "--bam",
+                "example_data/pacbio_reads_30x.bam",
+                "--ref",
+                "example_data/genome.fa",
+                "--out",
+                "example_data/longshot_output.vcf"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'longshot'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=longshot",
+                    "--package=longshot"
+                ],
+                "filter": {
+                    "name": "longshot",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "--bam",
+                "example_data/pacbio_reads_30x.bam",
+                "--ref",
+                "example_data/genome.fa",
+                "--out",
+                "example_data/longshot_output.vcf"
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
