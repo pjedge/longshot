@@ -34,10 +34,10 @@ mod variants_and_fragments;
 //mod spoa;
 
 // use declarations
-use bio::stats::{LogProb, PHREDProb, Prob};
 use bio::io::fasta::IndexedReader;
+use bio::stats::{LogProb, PHREDProb, Prob};
 use call_genotypes::*;
-use clap::{App, Arg};
+use clap::{crate_version, App, Arg};
 use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
@@ -127,9 +127,8 @@ fn run() -> Result<()> {
     let no_haps = parse_flag(&input_args, "No haplotypes")?;
     let output_refgenotypes = parse_flag(&input_args, "print reference_genotypes")?; // added 09/04/2020
     let mut output_rg: bool = false;
-    if output_refgenotypes
-    {
-       output_rg = true;
+    if output_refgenotypes {
+        output_rg = true;
     }
     let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
     let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
@@ -181,7 +180,6 @@ fn run() -> Result<()> {
             "Output bam file already exists. Rerun with -F option to force overwrite."
         );
     }
-
 
     // ensure that FASTA file is indexed
     let fai_str = fasta_file.clone() + ".fai";
@@ -290,7 +288,8 @@ fn run() -> Result<()> {
         let mut file = File::create(&vcf_path)
             .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
-        let fasta = IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
+        let fasta =
+            IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
 
         print_vcf_header(
             &mut file,
@@ -346,7 +345,7 @@ fn run() -> Result<()> {
     /***********************************************************************************************/
     // FIND INITIAL SNVS WITH READ PILEUP
     /***********************************************************************************************/
-	// let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
+    // let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
 
     //let bam_file: String = "test_data/test.bam".to_string();
     let mut varlist = match potential_variants_file {
@@ -409,7 +408,7 @@ fn run() -> Result<()> {
             &sample_name,
             false,
             false,
-            potential_variants_file != None
+            potential_variants_file != None,
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -535,7 +534,7 @@ fn run() -> Result<()> {
             &sample_name,
             false,
             true,
-            potential_variants_file != None
+            potential_variants_file != None,
         )
         .chain_err(|| "Error printing VCF output.")?;
         return Ok(());
@@ -674,7 +673,7 @@ fn run() -> Result<()> {
         &sample_name,
         false,
         true,
-        potential_variants_file != None
+        potential_variants_file != None,
     )
     .chain_err(|| "Error printing VCF output.")?;
 
@@ -683,7 +682,7 @@ fn run() -> Result<()> {
 
 fn parse_cmdline_args<'input_args_>() -> clap::ArgMatches<'input_args_> {
     let input_args = App::new("Longshot: variant caller (SNVs) for long-read sequencing data")
-        //.version(crate_version!())
+        .version(crate_version!())
         //.author("Peter Edge <edge.peterj@gmail.com>")
         //.about("variant caller (SNVs) for long-read sequencing data")
         .arg(Arg::with_name("Input BAM or CRAM")

@@ -32,10 +32,10 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::record::CigarStringView;
 use rust_htslib::bam::record::Record;
 use rust_htslib::bam::Read;
-use util::*;
-use variants_and_fragments::*;
 use std::u32;
 use std::usize;
+use util::*;
+use variants_and_fragments::*;
 
 static VERBOSE: bool = false;
 static IGNORE_INDEL_ONLY_CLUSTERS: bool = false;
@@ -66,7 +66,7 @@ pub struct ExtractFragmentParameters {
     pub max_cigar_indel: usize,
     /// whether or not to store the read id.
     /// we store the read ID if we'll be separating reads by haplotype and otherwise we don't
-    pub store_read_id: bool
+    pub store_read_id: bool,
 }
 
 /// an extension of the rust-htslib cigar representation that has the cigar operation and length as
@@ -273,10 +273,7 @@ pub fn find_anchors(
     }
 
     if var_interval.chrom != target_names[bam_record.tid() as usize]
-        || (var_interval.start_pos as i64)
-            >= bam_record
-                .cigar()
-                .end_pos()
+        || (var_interval.start_pos as i64) >= bam_record.cigar().end_pos()
         || (var_interval.end_pos as i64) < bam_record.pos()
     {
         eprintln!(
@@ -287,9 +284,7 @@ pub fn find_anchors(
             "bam_record:   {}\t{}\t{}",
             target_names[bam_record.tid() as usize],
             bam_record.pos(),
-            bam_record
-                .cigar()
-                .end_pos()
+            bam_record.cigar().end_pos()
         );
 
         bail!(ErrorKind::AnchorRangeOutsideRead);
@@ -409,7 +404,7 @@ pub fn find_anchors(
                             break;
                         }
 
-                        if (left_anchor_ref ==  0 ) || ( left_anchor_read == 0 ) {
+                        if (left_anchor_ref == 0) || (left_anchor_read == 0) {
                             break;
                         }
                         left_anchor_ref -= 1;
@@ -479,8 +474,9 @@ pub fn find_anchors(
                     // we have found a sufficiently long match but it's the cigar ops surrounding var_interval.end_pos
                     // the var_interval.end_pos we are trying to anchor is just inside one huge match
                     right_anchor_ref = var_interval.end_pos + anchor_length;
-                    right_anchor_read = cigarpos_list[i].read_pos
-                        + var_interval.end_pos + anchor_length - cigarpos_list[i].ref_pos;
+                    right_anchor_read =
+                        cigarpos_list[i].read_pos + var_interval.end_pos + anchor_length
+                            - cigarpos_list[i].ref_pos;
                     potential_anchor = true;
                 }
 
@@ -765,8 +761,9 @@ fn extract_var_cluster(
     for v in 0..n_vars {
         let best_allele = max_hap[v];
         assert_ne!(allele_scores[v][best_allele as usize], LogProb::ln_zero());
-        let mut qual =
-            LogProb::ln_one_minus_exp(&(allele_scores[v][best_allele as usize] - LogProb::ln_sum_exp(&allele_scores[v])));
+        let mut qual = LogProb::ln_one_minus_exp(
+            &(allele_scores[v][best_allele as usize] - LogProb::ln_sum_exp(&allele_scores[v])),
+        );
 
         //assert_ne!(qual, LogProb::ln_zero());
 
@@ -795,7 +792,7 @@ fn extract_var_cluster(
             var_ix: var_cluster[v as usize].ix,
             allele: best_allele,
             qual: qual,
-            one_minus_qual: LogProb::ln_one_minus_exp(&qual)
+            one_minus_qual: LogProb::ln_one_minus_exp(&qual),
         });
     }
 
@@ -831,9 +828,8 @@ pub fn extract_fragment(
         id: Some(id),
         calls: vec![],
         // ln(0.5) stored as f16 for compactness
-        p_read_hap: [LogProb::from(Prob(0.5)),
-                     LogProb::from(Prob(0.5))],
-        reverse_strand: bam_record.is_reverse()
+        p_read_hap: [LogProb::from(Prob(0.5)), LogProb::from(Prob(0.5))],
+        reverse_strand: bam_record.is_reverse(),
     };
 
     if bam_record.is_quality_check_failed()
@@ -1003,10 +999,7 @@ pub fn extract_fragments(
             }
 
             let start_pos = record.pos();
-            let end_pos = record
-                .cigar()
-                .end_pos()
-                - 1;
+            let end_pos = record.cigar().end_pos() - 1;
 
             let bam_cig: CigarStringView = record.cigar();
             let cigarpos_list: Vec<CigarPos> =

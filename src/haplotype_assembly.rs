@@ -48,7 +48,9 @@ pub fn separate_fragments_by_haplotype(
                 && var.phase_set.is_some()
                 && call.qual < ln_max_p_miscall
             {
-                *fragment_phase_sets.entry(var.phase_set.unwrap()).or_insert(0) += 1;
+                *fragment_phase_sets
+                    .entry(var.phase_set.unwrap())
+                    .or_insert(0) += 1;
             }
         }
         if fragment_phase_sets.is_empty() {
@@ -126,16 +128,21 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
             .fetch((iv.tid, iv.start_pos, iv.end_pos + 1))
             .chain_err(|| ErrorKind::IndexedBamFetchError)?;
 
-        for r in bam_ix.records() { // iterate over the reads overlapping the interval 'iv'
+        for r in bam_ix.records() {
+            // iterate over the reads overlapping the interval 'iv'
             let mut record = r.chain_err(|| ErrorKind::IndexedBamRecordReadError)?;
 
-	    // check if tag exists before removing, 04/25/2022
-	    if record.aux(b"HP").is_ok() { 
-	            record.remove_aux(b"HP").chain_err(|| ErrorKind::BamAuxError("HP"))?; // remove HP tag before setting it
-	    }
-	    if record.aux(b"PS").is_ok() { 
-            record.remove_aux(b"PS").chain_err(|| ErrorKind::BamAuxError("PS"))?; // remove PS tag as well
-	    }
+            // check if tag exists before removing, 04/25/2022
+            if record.aux(b"HP").is_ok() {
+                record
+                    .remove_aux(b"HP")
+                    .chain_err(|| ErrorKind::BamAuxError("HP"))?; // remove HP tag before setting it
+            }
+            if record.aux(b"PS").is_ok() {
+                record
+                    .remove_aux(b"PS")
+                    .chain_err(|| ErrorKind::BamAuxError("PS"))?; // remove PS tag as well
+            }
 
             let qname = u8_to_string(record.qname())?;
             if record.is_quality_check_failed()
@@ -151,12 +158,24 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
                 continue; // write filtered reads to bam file and continue
             }
             if h1.contains_key(&qname) {
-                record.push_aux(b"HP", bam::record::Aux::U8(1)).chain_err(|| ErrorKind::BamAuxError("HP"))?;
-                record.push_aux(b"PS", bam::record::Aux::U32(*h1.get(&qname).unwrap() as u32))
+                record
+                    .push_aux(b"HP", bam::record::Aux::U8(1))
+                    .chain_err(|| ErrorKind::BamAuxError("HP"))?;
+                record
+                    .push_aux(
+                        b"PS",
+                        bam::record::Aux::U32(*h1.get(&qname).unwrap() as u32),
+                    )
                     .chain_err(|| ErrorKind::BamAuxError("PS"))?;
             } else if h2.contains_key(&qname) {
-                record.push_aux(b"HP", bam::record::Aux::U8(2)).chain_err(|| ErrorKind::BamAuxError("HP"))?;
-                record.push_aux(b"PS", bam::record::Aux::U32(*h2.get(&qname).unwrap() as u32))
+                record
+                    .push_aux(b"HP", bam::record::Aux::U8(2))
+                    .chain_err(|| ErrorKind::BamAuxError("HP"))?;
+                record
+                    .push_aux(
+                        b"PS",
+                        bam::record::Aux::U32(*h2.get(&qname).unwrap() as u32),
+                    )
                     .chain_err(|| ErrorKind::BamAuxError("PS"))?;
             }
             out_bam
@@ -165,11 +184,17 @@ pub fn separate_bam_reads_by_haplotype<P: AsRef<std::path::Path>>(
         }
     }
     drop(out_bam); // close out_bam writer
-    //let indexfile = format!("{}.bai",out_bam_file).to_owned();
-    // create index for bam file 
-    let indexfile = format!("{}.bai",out_bam_file.as_ref().display().to_string());
-    println!("Writing index file for output bam file -> {}",indexfile);
-    bam::index::build(&out_bam_file.as_ref().display().to_string(),Some(&indexfile),bam::index::Type::Bai,1).unwrap();
+                   //let indexfile = format!("{}.bai",out_bam_file).to_owned();
+                   // create index for bam file
+    let indexfile = format!("{}.bai", out_bam_file.as_ref().display().to_string());
+    println!("Writing index file for output bam file -> {}", indexfile);
+    bam::index::build(
+        &out_bam_file.as_ref().display().to_string(),
+        Some(&indexfile),
+        bam::index::Type::Bai,
+        1,
+    )
+    .unwrap();
 
     Ok(())
 }
@@ -222,8 +247,7 @@ pub fn generate_flist_buffer(
 
         if frag.reverse_strand {
             line.push('+' as u8);
-        }
-        else {
+        } else {
             line.push('-' as u8);
         }
 

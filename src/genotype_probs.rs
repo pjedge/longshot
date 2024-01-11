@@ -47,7 +47,6 @@ impl GenotypeProbs {
 
         for i in 0..self.n_alleles() {
             for j in 0..self.n_alleles() {
-
                 let post: LogProb = self.tab[i][j];
 
                 if post > max_post {
@@ -361,7 +360,7 @@ impl GenotypePriors {
                 }
             }
         }
-	/*
+        /*
         eprintln!("{} GENOTYPE PRIORS:", SPACER);
         eprintln!("{} REF G1/G2 PROB", SPACER);
         for (&(ref ra, (ref g1, ref g2)), &p) in &diploid_genotype_priors {
@@ -484,5 +483,4 @@ mod tests {
     //fn test_max_prob (){
     //
     //}
-
 }
