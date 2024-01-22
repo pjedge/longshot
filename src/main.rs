@@ -34,10 +34,10 @@ mod variants_and_fragments;
 //mod spoa;
 
 // use declarations
-use bio::stats::{LogProb, PHREDProb, Prob};
 use bio::io::fasta::IndexedReader;
+use bio::stats::{LogProb, PHREDProb, Prob};
 use call_genotypes::*;
-use clap::{App, Arg};
+use clap::{crate_version, App, Arg};
 use errors::*;
 use estimate_alignment_parameters::estimate_alignment_parameters;
 use estimate_read_coverage::calculate_mean_coverage;
@@ -105,8 +105,584 @@ fn run() -> Result<()> {
 
     eprintln!("");
 
+    let input_args = parse_cmdline_args();
+
+    // parse the input arguments and throw errors if inputs are invalid
+    let bamfile_name = input_args
+        .value_of("Input BAM or CRAM")
+        .chain_err(|| "Input BAM file not defined.")?
+        .to_string();
+    let fasta_file = input_args
+        .value_of("Input FASTA")
+        .chain_err(|| "Input FASTA file not defined.")?
+        .to_string();
+    let output_vcf_file = input_args
+        .value_of("Output VCF")
+        .chain_err(|| "Output VCF file not defined.")?
+        .to_string();
+    let interval: Option<GenomicInterval> =
+        parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
+    let out_bam: Option<&str> = input_args.value_of("Bam Output");
+    let force = parse_flag(&input_args, "Force overwrite")?;
+    let no_haps = parse_flag(&input_args, "No haplotypes")?;
+    let output_refgenotypes = parse_flag(&input_args, "print reference_genotypes")?; // added 09/04/2020
+    let mut output_rg: bool = false;
+    if output_refgenotypes {
+        output_rg = true;
+    }
+    let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
+    let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
+    let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
+    let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
+    let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
+    let max_reads_estimation: usize = parse_usize(&input_args, "Max Reads estimation")?;
+    let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
+    let strand_bias_pvalue_cutoff: f64 =
+        parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
+    let hap_assignment_qual: f64 =
+        parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
+    let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
+    let potential_snv_cutoff_phred = parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
+    let potential_snv_min_alt_count: usize =
+        parse_usize(&input_args, "Potential SNV Min Alt Count")?;
+    let potential_snv_min_alt_frac: f64 =
+        parse_nonnegative_f64(&input_args, "Potential SNV Min Alt Fraction")?;
+    let hom_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous SNV Rate")?;
+    let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
+    let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
+    let het_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous Indel Rate")?;
+    let sample_name: String = input_args
+        .value_of(&"Sample ID")
+        .chain_err(|| "Sample ID not defined.")?
+        .to_string();
+    let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
+
+    // sanity checks on values that aren't covered by parsing functions
+    ensure!(
+        ll_delta < 1.0,
+        format!("Haplotype Convergence Delta must be less than 1.0!")
+    );
+
+    // manipulations to get some of the option values into forms we want
+    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
+    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(hap_assignment_qual));
+    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(potential_snv_cutoff_phred));
+
+    // if VCF file exists, throw error unless --force_overwrite option is set
+    let vcf = Path::new(&output_vcf_file);
+    ensure!(
+        !vcf.is_file() || force,
+        "Variant output file already exists. Rerun with -F option to force overwrite."
+    );
+    if let Some(filename) = out_bam {
+        ensure!(
+            !Path::new(filename).is_file() || force,
+            "Output bam file already exists. Rerun with -F option to force overwrite."
+        );
+    }
+
+    // ensure that FASTA file is indexed
+    let fai_str = fasta_file.clone() + ".fai";
+    ensure!(Path::new(&fai_str).is_file(), "FASTA reference file must be indexed with samtools faidx. Index file should have same name as FASTA file with .fai appended.");
+
+    // check if variant debug directory exists
+    // if it does, delete the directory if --force_overwrite option is set or throw an error
+    let variant_debug_directory: Option<String> = match input_args
+        .value_of("Variant debug directory")
+    {
+        Some(dir) => {
+            let p = Path::new(&dir);
+            if p.exists() {
+                if force {
+                    remove_dir_all(p).chain_err(|| "Error removing variant debug directory.")?;
+                } else {
+                    bail!("Variant debug directory already exists. Rerun with -F option to force overwrite.");
+                }
+            }
+            create_dir(&dir).chain_err(|| "Error creating variant debug directory.")?;
+            Some(dir.to_string())
+        }
+        None => None,
+    };
+
+    // multiply by 2.0 because internally we use this value as the probability of transition to
+    // a single transversion base, not the combined probability of transversion to either one
+    let ts_tv_ratio = 2.0 * parse_positive_f64(&input_args, "ts/tv Ratio")?;
+
+    let dn_params = input_args
+        .value_of("Density parameters")
+        .chain_err(|| "Density parameters not defined.")?
+        .split(":")
+        .collect::<Vec<&str>>();
+
+    if dn_params.len() != 3 {
+        bail!(
+            "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
+        );
+    }
+
+    let dn_count = dn_params[0].parse::<usize>().chain_err(|| {
+        "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
+    })?;
+    let dn_len = dn_params[1].parse::<usize>().chain_err(|| {
+        "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
+    })?;
+    let dn_gq = dn_params[2].parse::<usize>().chain_err(|| {
+        "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
+    })?;
+
+    let density_params = DensityParameters {
+        n: dn_count,
+        len: dn_len,
+        gq: dn_gq as f64,
+    };
+
+    let alignment_type = match (
+        parse_flag(&input_args, "Numerically stable alignment")?,
+        parse_flag(&input_args, "Max alignment")?,
+    ) {
+        (false, false) => AlignmentType::ForwardAlgorithmNonNumericallyStable,
+        (true, false) => AlignmentType::ForwardAlgorithmNumericallyStable,
+        (false, true) => AlignmentType::ViterbiMaxScoringAlignment,
+        (true, true) => {
+            bail!(
+                "Numerically stable alignment option and max alignment options are incompatible."
+            );
+        }
+    };
+
+    let band_width: usize = parse_usize(&input_args, "Band width")?;
+    //let use_poa = parse_flag(&input_args, "Use POA");
+    let min_cov: u32 = parse_u32(&input_args, "Min coverage")?;
+
+    let max_cov: u32 = match parse_flag(&input_args, "Auto max coverage")? {
+        false => {
+            // manually assigned coverage cutoff from user
+            parse_u32(&input_args, "Max coverage")?
+        }
+        true => {
+            eprintln!(
+                "{} Automatically determining max read coverage.",
+                print_time()
+            );
+            eprintln!("{} Estimating mean read coverage...", print_time());
+            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval)
+                .chain_err(|| "Error calculating mean coverage for BAM file.")?;
+            let calculated_max_cov =
+                (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
+            eprintln!("{} Mean read coverage: {:.2}", print_time(), mean_coverage);
+
+            calculated_max_cov
+        }
+    };
+
+    if max_cov > 0 {
+        eprintln!("{} Min read coverage set to {}.", print_time(), min_cov);
+        eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
+    } else {
+        // should print empty VCF file here before bailing 09/04/2020
+
+        let vcf_path = Path::new(&output_vcf_file);
+        let vcf_display = vcf_path.display();
+        // Open a file in write-only mode, returns `io::Result<File>`
+        let mut file = File::create(&vcf_path)
+            .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
+
+        let fasta =
+            IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
+
+        print_vcf_header(
+            &mut file,
+            &vcf_display,
+            &sample_name,
+            potential_variants_file.is_some(),
+            &Some(fasta),
+        )
+        .chain_err(|| "Error printing VCF output.")?;
+        bail!("{} ERROR: Max read coverage set to 0. printing empty VCF file");
+    }
+
+    // we store the read IDs if we will be separating the reads by haplotype
+    // we will compute sets holding the separated read IDs and then refer back to the original BAM
+    // and write to separate files based on set membership
+    let store_read_id = out_bam != None;
+
+    let extract_fragment_parameters = ExtractFragmentParameters {
+        min_mapq,
+        alignment_type,
+        band_width,
+        anchor_length,
+        variant_cluster_max_size: variant_cluster_max_size,
+        max_window_padding,
+        max_cigar_indel,
+        store_read_id,
+    };
+
+    eprintln!("{} Estimating alignment parameters...", print_time());
+    let alignment_parameters = estimate_alignment_parameters(
+        &bamfile_name,
+        &fasta_file,
+        &interval,
+        min_mapq,
+        max_cigar_indel as u32,
+        max_reads_estimation as u32,
+    )
+    .chain_err(|| "Error estimating alignment parameters.")?;
+
+    /***********************************************************************************************/
+    // GET GENOTYPE PRIORS
+    /***********************************************************************************************/
+
+    let genotype_priors = GenotypePriors::new(
+        hom_snv_rate,
+        het_snv_rate,
+        hom_indel_rate,
+        het_indel_rate,
+        ts_tv_ratio,
+    )
+    .chain_err(|| "Error estimating genotype priors.")?;
+
+    /***********************************************************************************************/
+    // FIND INITIAL SNVS WITH READ PILEUP
+    /***********************************************************************************************/
+    // let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
+
+    //let bam_file: String = "test_data/test.bam".to_string();
+    let mut varlist = match potential_variants_file {
+        Some(file) => {
+            eprintln!(
+                "{} Reading potential variants from input VCF...",
+                print_time()
+            );
+
+            parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
+                .chain_err(|| "Error reading potential variants VCF file.")?
+        }
+        None => {
+            eprintln!("{} Calling potential SNVs using pileup...", print_time());
+
+            call_potential_snvs::call_potential_snvs(
+                &bamfile_name,
+                &fasta_file,
+                &interval,
+                &genotype_priors,
+                min_cov,
+                max_cov,
+                potential_snv_min_alt_count,
+                potential_snv_min_alt_frac,
+                min_mapq,
+                alignment_parameters.ln(),
+                potential_snv_cutoff,
+            )
+            .chain_err(|| "Error calling potential SNVs.")?
+        }
+    };
+
+    print_variant_debug(
+        &mut varlist,
+        &interval,
+        &variant_debug_directory,
+        &"1.0.potential_SNVs.vcf",
+        max_cov,
+        &density_params,
+        &sample_name,
+    )?;
+
+    eprintln!(
+        "{} {} potential variants identified.",
+        print_time(),
+        varlist.lst.len()
+    );
+
+    if varlist.lst.len() == 0 {
+        /* no variants identified, but still print empty VCF file with header, 02/12/20 */
+        eprintln!("No candidate variants identified, printing empty VCF file...");
+        print_vcf(
+            &mut varlist,
+            &interval,
+            &Some(fasta_file),
+            &output_vcf_file,
+            false,
+            max_cov,
+            &density_params,
+            &sample_name,
+            false,
+            false,
+            potential_variants_file != None,
+        )
+        .chain_err(|| "Error printing VCF output.")?;
+        return Ok(());
+    }
+
+    /***********************************************************************************************/
+    // EXTRACT FRAGMENT INFORMATION FROM READS
+    /***********************************************************************************************/
+
+    eprintln!(
+        "{} Generating haplotype fragments from reads...",
+        print_time()
+    );
+    let mut flist = extract_fragments::extract_fragments(
+        &bamfile_name,
+        &fasta_file,
+        &mut varlist,
+        &interval,
+        extract_fragment_parameters,
+        alignment_parameters,
+    )
+    .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
+
+    // if we're printing out variant "debug" information, print out a fragment file to that debug directory
+    match &variant_debug_directory {
+        &Some(ref debug_dir) => {
+            let ffn = match Path::new(&debug_dir).join(&"fragments.txt").to_str() {
+                Some(s) => s.to_owned(),
+                None => {
+                    bail!("Invalid unicode provided for variant debug directory");
+                }
+            };
+            // normally phase_variant is used to select which variants are heterozygous, so that
+            // we only pass to HapCUT2 heterozygous variants
+            // in this case, we set them all to 1 so we generate fragments for all variants
+            let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
+            // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
+            // together the lines represent the contents of a fragment file in HapCUT-like format
+            let fragment_buffer =
+                generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true)
+                    .chain_err(|| "Error generating fragment list buffer.")?;
+
+            // convert the buffer of u8s into strings and print them to the fragment file
+            let fragment_file_path = Path::new(&ffn);
+            let mut fragment_file = File::create(&fragment_file_path)
+                .chain_err(|| "Could not open fragment file for writing.")?;
+            for mut line_u8 in fragment_buffer {
+                line_u8.pop();
+                writeln!(fragment_file, "{}", u8_to_string(&line_u8)?)
+                    .chain_err(|| "Error writing to fragment file.")?;
+            }
+        }
+        &None => {}
+    }
+
+    /***********************************************************************************************/
+    // CALL GENOTYPES USING REFINED QUALITY SCORES
+    /***********************************************************************************************/
+
+    eprintln!(
+        "{} Calling initial genotypes using pair-HMM realignment...",
+        print_time()
+    );
+    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall)
+        .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
+
+    // use Fishers exact test to check if allele observations are biased toward one strand or the other
+    for var in &mut varlist.lst {
+        if !var.alleles.len() == 2 {
+            continue;
+        }
+        let counts: [u32; 4] = [
+            var.allele_counts_forward[0] as u32,
+            var.allele_counts_reverse[0] as u32,
+            var.allele_counts_forward[1] as u32,
+            var.allele_counts_reverse[1] as u32,
+        ];
+        let fishers_exact_pvalues = fishers_exact(&counts)
+            .chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;
+
+        //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
+        var.strand_bias_pvalue = if fishers_exact_pvalues.two_tail_pvalue <= 500.0 {
+            *PHREDProb::from(Prob(fishers_exact_pvalues.two_tail_pvalue))
+        } else {
+            500.0
+        };
+
+        if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
+            var.filter.add_filter(VarFilter::StrandBias);
+            var.genotype = Genotype(0, 0);
+            var.gq = 0.0;
+        }
+    }
+
+    for f in 0..flist.len() {
+        flist[f].calls.retain(|&c| {
+            !varlist.lst[c.var_ix as usize]
+                .filter
+                .has_filter(VarFilter::StrandBias)
+        });
+    }
+
+    print_variant_debug(
+        &mut varlist,
+        &interval,
+        &variant_debug_directory,
+        &"2.0.realigned_genotypes.vcf",
+        max_cov,
+        &density_params,
+        &sample_name,
+    )?;
+
+    // if haplotype information usage is turned off, immediately print VCF and terminate.
+    if no_haps {
+        print_vcf(
+            &mut varlist,
+            &interval,
+            &None,
+            &output_vcf_file,
+            output_rg, // change to command line parameter output_ref
+            max_cov,
+            &density_params,
+            &sample_name,
+            false,
+            true,
+            potential_variants_file != None,
+        )
+        .chain_err(|| "Error printing VCF output.")?;
+        return Ok(());
+    }
+    /***********************************************************************************************/
+    // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
+    /***********************************************************************************************/
+
+    eprintln!(
+        "{} Iteratively assembling haplotypes and refining genotypes...",
+        print_time()
+    );
+    call_genotypes_with_haplotypes(
+        &mut flist,
+        &mut varlist,
+        &interval,
+        &genotype_priors,
+        &variant_debug_directory,
+        3,
+        max_cov,
+        &density_params,
+        max_p_miscall,
+        &sample_name,
+        ll_delta,
+    )
+    .chain_err(|| "Error during haplotype/genotype iteration procedure.")?;
+
+    /*
+    if use_poa {
+        /***********************************************************************************************/
+    // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
+    /***********************************************************************************************/
+    let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
+
+    eprintln!("{} Using Partial Order Alignment (POA) to find new variants...", print_time());
+
+    let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
+    &fasta_file,
+    &interval,
+    &h1,
+    &h2,
+    max_cov,
+    min_mapq,
+    alignment_parameters.ln());
+
+    eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
+
+    varlist.combine(&mut varlist_poa);
+
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &density_params, &sample_name);
+
+    eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
+
+    /***********************************************************************************************/
+    // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
+    /***********************************************************************************************/
+    eprintln!("{} Producing condensed read data for POA variants...",print_time());
+    let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
+    &fasta_file,
+    &varlist,
+    &interval,
+    extract_fragment_parameters,
+    alignment_parameters,
+    None);  // Some(flist)
+
+    call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
+    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &density_params, &sample_name);
+
+    eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
+    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
+    &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name, ll_delta);
+
+    /***********************************************************************************************/
+    // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
+    /***********************************************************************************************/
+    //calculate_mec(&flist2, &mut varlist);
+    }
+
+    let debug_filename = if use_poa {
+    "7.0.final_genotypes.vcf"
+    } else {
+    "4.0.final_genotypes.vcf"
+    };
+     */
+
+    // calculate MEC-based statistics for variants and blocks
+    calculate_mec(&flist, &mut varlist, max_p_miscall)
+        .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
+
+    // if haplotype-based read separation is turned on,
+    // write BAM files for h1,h2, and unassigned
+    match out_bam {
+        Some(filename) => {
+            eprintln!(
+                "{} Calculating number of reads (filtered reads only) assigned to either haplotype...",
+                print_time()
+            );
+            // h1 and h2 are hash-maps keyed on qnames of the reads assigned to haplotype 1 and 2 respectively.
+            // the values are the phase set that it belongs to
+            let (h1, h2) = separate_fragments_by_haplotype(
+                &flist,
+                &varlist,
+                LogProb::from(Prob(1.0 - hap_max_p_misassign)),
+                max_p_miscall,
+            )?;
+
+            eprintln!(
+                "{} Writing haplotype-assigned reads to bam files...",
+                print_time()
+            );
+            separate_bam_reads_by_haplotype(&bamfile_name, &interval, filename, &h1, &h2, min_mapq)
+                .chain_err(|| "Error separating BAM reads by haplotype.")?;
+        }
+        None => {}
+    }
+
+    // Print the final VCF output
+    eprintln!("{} Printing VCF file...", print_time());
+    print_variant_debug(
+        &mut varlist,
+        &interval,
+        &variant_debug_directory,
+        "4.0.final_genotypes.vcf",
+        max_cov,
+        &density_params,
+        &sample_name,
+    )?;
+    print_vcf(
+        &mut varlist,
+        &interval,
+        &Some(fasta_file),
+        &output_vcf_file,
+        output_rg, // change to command line parameter output_ref
+        max_cov,
+        &density_params,
+        &sample_name,
+        false,
+        true,
+        potential_variants_file != None,
+    )
+    .chain_err(|| "Error printing VCF output.")?;
+
+    Ok(())
+}
+
+fn parse_cmdline_args<'input_args_>() -> clap::ArgMatches<'input_args_> {
     let input_args = App::new("Longshot: variant caller (SNVs) for long-read sequencing data")
-        //.version(crate_version!())
+        .version(crate_version!())
         //.author("Peter Edge <edge.peterj@gmail.com>")
         //.about("variant caller (SNVs) for long-read sequencing data")
         .arg(Arg::with_name("Input BAM or CRAM")
@@ -355,591 +931,5 @@ fn run() -> Result<()> {
             .help("write out current information about variants at each step of algorithm to files in this directory")
             .display_order(230))
         .get_matches();
-
-    // parse the input arguments and throw errors if inputs are invalid
-    let bamfile_name = input_args
-        .value_of("Input BAM or CRAM")
-        .chain_err(|| "Input BAM file not defined.")?
-        .to_string();
-    let fasta_file = input_args
-        .value_of("Input FASTA")
-        .chain_err(|| "Input FASTA file not defined.")?
-        .to_string();
-    let output_vcf_file = input_args
-        .value_of("Output VCF")
-        .chain_err(|| "Output VCF file not defined.")?
-        .to_string();
-    let interval: Option<GenomicInterval> =
-        parse_region_string(input_args.value_of("Region"), &bamfile_name)?;
-    let out_bam: Option<&str> = input_args.value_of("Bam Output");
-    let force = parse_flag(&input_args, "Force overwrite")?;
-    let no_haps = parse_flag(&input_args, "No haplotypes")?;
-    let output_refgenotypes = parse_flag(&input_args, "print reference_genotypes")?; // added 09/04/2020
-    let mut output_rg: bool = false;
-    if output_refgenotypes
-    {
-       output_rg = true;
-    }
-    let min_mapq: u8 = parse_u8(&input_args, "Min mapq")?;
-    let anchor_length: usize = parse_usize(&input_args, "Anchor length")?;
-    let variant_cluster_max_size: usize = parse_usize(&input_args, "Variant cluster max size")?;
-    let max_window_padding: usize = parse_usize(&input_args, "Max window padding")?;
-    let max_cigar_indel: usize = parse_usize(&input_args, "Max CIGAR indel")?;
-    let max_reads_estimation: usize = parse_usize(&input_args, "Max Reads estimation")?;
-    let min_allele_qual: f64 = parse_nonnegative_f64(&input_args, "Min allele quality")?;
-    let strand_bias_pvalue_cutoff: f64 =
-        parse_nonnegative_f64(&input_args, "Strand Bias P-value cutoff")?;
-    let hap_assignment_qual: f64 =
-        parse_nonnegative_f64(&input_args, "Haplotype assignment quality")?;
-    let ll_delta: f64 = parse_positive_f64(&input_args, "Haplotype Convergence Delta")?;
-    let potential_snv_cutoff_phred = parse_positive_f64(&input_args, "Potential SNV Cutoff")?;
-    let potential_snv_min_alt_count: usize =
-        parse_usize(&input_args, "Potential SNV Min Alt Count")?;
-    let potential_snv_min_alt_frac: f64 =
-        parse_nonnegative_f64(&input_args, "Potential SNV Min Alt Fraction")?;
-    let hom_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous SNV Rate")?;
-    let het_snv_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous SNV Rate")?;
-    let hom_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Homozygous Indel Rate")?;
-    let het_indel_rate: LogProb = parse_prob_into_logprob(&input_args, "Heterozygous Indel Rate")?;
-    let sample_name: String = input_args
-        .value_of(&"Sample ID")
-        .chain_err(|| "Sample ID not defined.")?
-        .to_string();
-    let potential_variants_file: Option<&str> = input_args.value_of("Potential Variants VCF");
-
-    // sanity checks on values that aren't covered by parsing functions
-    ensure!(
-        ll_delta < 1.0,
-        format!("Haplotype Convergence Delta must be less than 1.0!")
-    );
-
-    // manipulations to get some of the option values into forms we want
-    let max_p_miscall: f64 = *Prob::from(PHREDProb(min_allele_qual));
-    let hap_max_p_misassign: f64 = *Prob::from(PHREDProb(hap_assignment_qual));
-    let potential_snv_cutoff: LogProb = LogProb::from(PHREDProb(potential_snv_cutoff_phred));
-
-    // if VCF file exists, throw error unless --force_overwrite option is set
-    let vcf = Path::new(&output_vcf_file);
-    ensure!(
-        !vcf.is_file() || force,
-        "Variant output file already exists. Rerun with -F option to force overwrite."
-    );
-    if let Some(filename) = out_bam {
-        ensure!(
-            !Path::new(filename).is_file() || force,
-            "Output bam file already exists. Rerun with -F option to force overwrite."
-        );
-    }
-
-
-    // ensure that FASTA file is indexed
-    let fai_str = fasta_file.clone() + ".fai";
-    ensure!(Path::new(&fai_str).is_file(), "FASTA reference file must be indexed with samtools faidx. Index file should have same name as FASTA file with .fai appended.");
-
-    // check if variant debug directory exists
-    // if it does, delete the directory if --force_overwrite option is set or throw an error
-    let variant_debug_directory: Option<String> = match input_args
-        .value_of("Variant debug directory")
-    {
-        Some(dir) => {
-            let p = Path::new(&dir);
-            if p.exists() {
-                if force {
-                    remove_dir_all(p).chain_err(|| "Error removing variant debug directory.")?;
-                } else {
-                    bail!("Variant debug directory already exists. Rerun with -F option to force overwrite.");
-                }
-            }
-            create_dir(&dir).chain_err(|| "Error creating variant debug directory.")?;
-            Some(dir.to_string())
-        }
-        None => None,
-    };
-
-    // multiply by 2.0 because internally we use this value as the probability of transition to
-    // a single transversion base, not the combined probability of transversion to either one
-    let ts_tv_ratio = 2.0 * parse_positive_f64(&input_args, "ts/tv Ratio")?;
-
-    let dn_params = input_args
-        .value_of("Density parameters")
-        .chain_err(|| "Density parameters not defined.")?
-        .split(":")
-        .collect::<Vec<&str>>();
-
-    if dn_params.len() != 3 {
-        bail!(
-            "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
-        );
-    }
-
-    let dn_count = dn_params[0].parse::<usize>().chain_err(|| {
-        "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
-    })?;
-    let dn_len = dn_params[1].parse::<usize>().chain_err(|| {
-        "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
-    })?;
-    let dn_gq = dn_params[2].parse::<usize>().chain_err(|| {
-        "Format for density params should be <n>:<l>:<gq>, with all 3 values being integers."
-    })?;
-
-    let density_params = DensityParameters {
-        n: dn_count,
-        len: dn_len,
-        gq: dn_gq as f64,
-    };
-
-    let alignment_type = match (
-        parse_flag(&input_args, "Numerically stable alignment")?,
-        parse_flag(&input_args, "Max alignment")?,
-    ) {
-        (false, false) => AlignmentType::ForwardAlgorithmNonNumericallyStable,
-        (true, false) => AlignmentType::ForwardAlgorithmNumericallyStable,
-        (false, true) => AlignmentType::ViterbiMaxScoringAlignment,
-        (true, true) => {
-            bail!(
-                "Numerically stable alignment option and max alignment options are incompatible."
-            );
-        }
-    };
-
-    let band_width: usize = parse_usize(&input_args, "Band width")?;
-    //let use_poa = parse_flag(&input_args, "Use POA");
-    let min_cov: u32 = parse_u32(&input_args, "Min coverage")?;
-
-    let max_cov: u32 = match parse_flag(&input_args, "Auto max coverage")? {
-        false => {
-            // manually assigned coverage cutoff from user
-            parse_u32(&input_args, "Max coverage")?
-        }
-        true => {
-            eprintln!(
-                "{} Automatically determining max read coverage.",
-                print_time()
-            );
-            eprintln!("{} Estimating mean read coverage...", print_time());
-            let mean_coverage: f64 = calculate_mean_coverage(&bamfile_name, &interval)
-                .chain_err(|| "Error calculating mean coverage for BAM file.")?;
-            let calculated_max_cov =
-                (mean_coverage as f64 + 5.0 * (mean_coverage as f64).sqrt()) as u32;
-            eprintln!("{} Mean read coverage: {:.2}", print_time(), mean_coverage);
-
-            calculated_max_cov
-        }
-    };
-
-    if max_cov > 0 {
-        eprintln!("{} Min read coverage set to {}.", print_time(), min_cov);
-        eprintln!("{} Max read coverage set to {}.", print_time(), max_cov);
-    } else {
-        // should print empty VCF file here before bailing 09/04/2020
-
-        let vcf_path = Path::new(&output_vcf_file);
-        let vcf_display = vcf_path.display();
-        // Open a file in write-only mode, returns `io::Result<File>`
-        let mut file = File::create(&vcf_path)
-            .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
-
-        let fasta = IndexedReader::from_file(&fasta_file).chain_err(|| ErrorKind::IndexedFastaOpenError)?;
-
-        print_vcf_header(
-            &mut file,
-            &vcf_display,
-            &sample_name,
-            potential_variants_file.is_some(),
-            &Some(fasta),
-        )
-        .chain_err(|| "Error printing VCF output.")?;
-        bail!("{} ERROR: Max read coverage set to 0. printing empty VCF file");
-    }
-
-    // we store the read IDs if we will be separating the reads by haplotype
-    // we will compute sets holding the separated read IDs and then refer back to the original BAM
-    // and write to separate files based on set membership
-    let store_read_id = out_bam != None;
-
-    let extract_fragment_parameters = ExtractFragmentParameters {
-        min_mapq,
-        alignment_type,
-        band_width,
-        anchor_length,
-        variant_cluster_max_size: variant_cluster_max_size,
-        max_window_padding,
-        max_cigar_indel,
-        store_read_id,
-    };
-
-    eprintln!("{} Estimating alignment parameters...", print_time());
-    let alignment_parameters = estimate_alignment_parameters(
-        &bamfile_name,
-        &fasta_file,
-        &interval,
-        min_mapq,
-        max_cigar_indel as u32,
-        max_reads_estimation as u32,
-    )
-    .chain_err(|| "Error estimating alignment parameters.")?;
-
-    /***********************************************************************************************/
-    // GET GENOTYPE PRIORS
-    /***********************************************************************************************/
-
-    let genotype_priors = GenotypePriors::new(
-        hom_snv_rate,
-        het_snv_rate,
-        hom_indel_rate,
-        het_indel_rate,
-        ts_tv_ratio,
-    )
-    .chain_err(|| "Error estimating genotype priors.")?;
-
-    /***********************************************************************************************/
-    // FIND INITIAL SNVS WITH READ PILEUP
-    /***********************************************************************************************/
-	// let interval_lst: Vec<GenomicInterval> = get_interval_lst(bam_file, interval)?;
-
-    //let bam_file: String = "test_data/test.bam".to_string();
-    let mut varlist = match potential_variants_file {
-        Some(file) => {
-            eprintln!(
-                "{} Reading potential variants from input VCF...",
-                print_time()
-            );
-
-            parse_vcf_potential_variants(&file.to_string(), &bamfile_name)
-                .chain_err(|| "Error reading potential variants VCF file.")?
-        }
-        None => {
-            eprintln!("{} Calling potential SNVs using pileup...", print_time());
-
-            call_potential_snvs::call_potential_snvs(
-                &bamfile_name,
-                &fasta_file,
-                &interval,
-                &genotype_priors,
-                min_cov,
-                max_cov,
-                potential_snv_min_alt_count,
-                potential_snv_min_alt_frac,
-                min_mapq,
-                alignment_parameters.ln(),
-                potential_snv_cutoff,
-            )
-            .chain_err(|| "Error calling potential SNVs.")?
-        }
-    };
-    /*let mut varlist = call_potential_snvs::call_potential_snvs(
-        &bamfile_name,
-        &fasta_file,
-        &interval,
-        &genotype_priors,
-        min_cov,
-        max_cov,
-        potential_snv_min_alt_count,
-        potential_snv_min_alt_frac,
-        min_mapq,
-        alignment_parameters.ln(),
-        potential_snv_cutoff,
-    )
-    .chain_err(|| "Error calling potential SNVs.")?;*/
-
-    print_variant_debug(
-        &mut varlist,
-        &interval,
-        &variant_debug_directory,
-        &"1.0.potential_SNVs.vcf",
-        max_cov,
-        &density_params,
-        &sample_name,
-    )?;
-
-    eprintln!(
-        "{} {} potential variants identified.",
-        print_time(),
-        varlist.lst.len()
-    );
-
-    if varlist.lst.len() == 0 {
-        /* no variants identified, but still print empty VCF file with header, 02/12/20 */
-        eprintln!("No candidate variants identified, printing empty VCF file...");
-        print_vcf(
-            &mut varlist,
-            &interval,
-            &Some(fasta_file),
-            &output_vcf_file,
-            false,
-            max_cov,
-            &density_params,
-            &sample_name,
-            false,
-            false,
-            potential_variants_file != None
-        )
-        .chain_err(|| "Error printing VCF output.")?;
-        return Ok(());
-    }
-
-    /***********************************************************************************************/
-    // EXTRACT FRAGMENT INFORMATION FROM READS
-    /***********************************************************************************************/
-
-    eprintln!(
-        "{} Generating haplotype fragments from reads...",
-        print_time()
-    );
-    let mut flist = extract_fragments::extract_fragments(
-        &bamfile_name,
-        &fasta_file,
-        &mut varlist,
-        &interval,
-        extract_fragment_parameters,
-        alignment_parameters,
-    )
-    .chain_err(|| "Error generating haplotype fragments from BAM reads.")?;
-
-    // if we're printing out variant "debug" information, print out a fragment file to that debug directory
-    match &variant_debug_directory {
-        &Some(ref debug_dir) => {
-            let ffn = match Path::new(&debug_dir).join(&"fragments.txt").to_str() {
-                Some(s) => s.to_owned(),
-                None => {
-                    bail!("Invalid unicode provided for variant debug directory");
-                }
-            };
-            // normally phase_variant is used to select which variants are heterozygous, so that
-            // we only pass to HapCUT2 heterozygous variants
-            // in this case, we set them all to 1 so we generate fragments for all variants
-            let phase_variant: Vec<bool> = vec![true; varlist.lst.len()];
-            // generate_flist_buffer generates a Vec<Vec<u8>> where each inner vector is a file line
-            // together the lines represent the contents of a fragment file in HapCUT-like format
-            let fragment_buffer =
-                generate_flist_buffer(&flist, &phase_variant, max_p_miscall, true)
-                    .chain_err(|| "Error generating fragment list buffer.")?;
-
-            // convert the buffer of u8s into strings and print them to the fragment file
-            let fragment_file_path = Path::new(&ffn);
-            let mut fragment_file = File::create(&fragment_file_path)
-                .chain_err(|| "Could not open fragment file for writing.")?;
-            for mut line_u8 in fragment_buffer {
-                line_u8.pop();
-                writeln!(fragment_file, "{}", u8_to_string(&line_u8)?)
-                    .chain_err(|| "Error writing to fragment file.")?;
-            }
-        }
-        &None => {}
-    }
-
-    /***********************************************************************************************/
-    // CALL GENOTYPES USING REFINED QUALITY SCORES
-    /***********************************************************************************************/
-
-    eprintln!(
-        "{} Calling initial genotypes using pair-HMM realignment...",
-        print_time()
-    );
-    call_genotypes_no_haplotypes(&flist, &mut varlist, &genotype_priors, max_p_miscall)
-        .chain_err(|| "Error calling initial genotypes with estimated allele qualities.")?;
-
-    // use Fishers exact test to check if allele observations are biased toward one strand or the other
-    for mut var in &mut varlist.lst {
-        if !var.alleles.len() == 2 {
-            continue;
-        }
-        let counts: [u32; 4] = [
-            var.allele_counts_forward[0] as u32,
-            var.allele_counts_reverse[0] as u32,
-            var.allele_counts_forward[1] as u32,
-            var.allele_counts_reverse[1] as u32,
-        ];
-        let fishers_exact_pvalues = fishers_exact(&counts)
-            .chain_err(|| "Error calculating Fisher's exact test for strand bias.")?;
-
-        //println!("{:?} {:?} {:?}  {:?}",&counts, fishers_exact_pvalues.two_tail_pvalue, fishers_exact_pvalues.less_pvalue, fishers_exact_pvalues.greater_pvalue);
-        var.strand_bias_pvalue = if fishers_exact_pvalues.two_tail_pvalue <= 500.0 {
-            *PHREDProb::from(Prob(fishers_exact_pvalues.two_tail_pvalue))
-        } else {
-            500.0
-        };
-
-        if fishers_exact_pvalues.two_tail_pvalue < strand_bias_pvalue_cutoff {
-            var.filter.add_filter(VarFilter::StrandBias);
-            var.genotype = Genotype(0, 0);
-            var.gq = 0.0;
-        }
-    }
-
-    for f in 0..flist.len() {
-        &flist[f].calls.retain(|&c| {
-            !varlist.lst[c.var_ix as usize]
-                .filter
-                .has_filter(VarFilter::StrandBias)
-        });
-    }
-
-    print_variant_debug(
-        &mut varlist,
-        &interval,
-        &variant_debug_directory,
-        &"2.0.realigned_genotypes.vcf",
-        max_cov,
-        &density_params,
-        &sample_name,
-    )?;
-
-    // if haplotype information usage is turned off, immediately print VCF and terminate.
-    if no_haps {
-        print_vcf(
-            &mut varlist,
-            &interval,
-            &None,
-            &output_vcf_file,
-            output_rg, // change to command line parameter output_ref
-            max_cov,
-            &density_params,
-            &sample_name,
-            false,
-            true,
-            potential_variants_file != None
-        )
-        .chain_err(|| "Error printing VCF output.")?;
-        return Ok(());
-    }
-    /***********************************************************************************************/
-    // ITERATIVELY ASSEMBLE HAPLOTYPES AND CALL GENOTYPES
-    /***********************************************************************************************/
-
-    eprintln!(
-        "{} Iteratively assembling haplotypes and refining genotypes...",
-        print_time()
-    );
-    call_genotypes_with_haplotypes(
-        &mut flist,
-        &mut varlist,
-        &interval,
-        &genotype_priors,
-        &variant_debug_directory,
-        3,
-        max_cov,
-        &density_params,
-        max_p_miscall,
-        &sample_name,
-        ll_delta,
-    )
-    .chain_err(|| "Error during haplotype/genotype iteration procedure.")?;
-
-    /*
-    if use_poa {
-        /***********************************************************************************************/
-    // PERFORM PARTIAL ORDER ALIGNMENT TO FIND NEW VARIANTS
-    /***********************************************************************************************/
-    let (h1,h2) = separate_reads_by_haplotype(&flist, LogProb::from(Prob(0.99)));
-
-    eprintln!("{} Using Partial Order Alignment (POA) to find new variants...", print_time());
-
-    let mut varlist_poa = call_potential_snvs::call_potential_variants_poa(&bamfile_name,
-    &fasta_file,
-    &interval,
-    &h1,
-    &h2,
-    max_cov,
-    min_mapq,
-    alignment_parameters.ln());
-
-    eprintln!("{} Merging POA variants with pileup SNVs...",print_time());
-
-    varlist.combine(&mut varlist_poa);
-
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"4.0.new_potential_SNVs_after_POA.vcf", max_cov, &density_params, &sample_name);
-
-    eprintln!("{} {} potential variants after POA.", print_time(),varlist.lst.len());
-
-    /***********************************************************************************************/
-    // PRODUCE FRAGMENT DATA FOR NEW VARIANTS
-    /***********************************************************************************************/
-    eprintln!("{} Producing condensed read data for POA variants...",print_time());
-    let mut flist2 = extract_fragments::extract_fragments(&bamfile_name,
-    &fasta_file,
-    &varlist,
-    &interval,
-    extract_fragment_parameters,
-    alignment_parameters,
-    None);  // Some(flist)
-
-    call_genotypes_no_haplotypes(&flist2, &mut varlist, &genotype_priors, max_p_miscall); // temporary
-    print_variant_debug(&mut varlist, &interval, &variant_debug_directory,&"5.0.realigned_genotypes_after_POA.vcf", max_cov, &density_params, &sample_name);
-
-    eprintln!("{} Iteratively assembling haplotypes and refining genotypes (with POA variants)...",print_time());
-    call_genotypes_with_haplotypes(&mut flist2, &mut varlist, &interval, &genotype_priors,
-    &variant_debug_directory, 6, max_cov, max_p_miscall, &sample_name, ll_delta);
-
-    /***********************************************************************************************/
-    // PERFORM FINAL FILTERING STEPS AND PRINT OUTPUT VCF
-    /***********************************************************************************************/
-    //calculate_mec(&flist2, &mut varlist);
-    }
-
-    let debug_filename = if use_poa {
-    "7.0.final_genotypes.vcf"
-    } else {
-    "4.0.final_genotypes.vcf"
-    };
-     */
-
-    // calculate MEC-based statistics for variants and blocks
-    calculate_mec(&flist, &mut varlist, max_p_miscall)
-        .chain_err(|| "Error calculating MEC for haplotype blocks.")?;
-
-    // if haplotype-based read separation is turned on,
-    // write BAM files for h1,h2, and unassigned
-    match out_bam {
-        Some(filename) => {
-            eprintln!(
-                "{} Calculating number of reads (filtered reads only) assigned to either haplotype...",
-                print_time()
-            );
-            // h1 and h2 are hash-maps keyed on qnames of the reads assigned to haplotype 1 and 2 respectively.
-            // the values are the phase set that it belongs to
-            let (h1, h2) = separate_fragments_by_haplotype(
-                &flist,
-                &varlist,
-                LogProb::from(Prob(1.0 - hap_max_p_misassign)),
-                max_p_miscall,
-            )?;
-
-            eprintln!(
-                "{} Writing haplotype-assigned reads to bam files...",
-                print_time()
-            );
-            separate_bam_reads_by_haplotype(&bamfile_name, &interval, filename, &h1, &h2, min_mapq)
-                .chain_err(|| "Error separating BAM reads by haplotype.")?;
-        }
-        None => {}
-    }
-
-    // Print the final VCF output
-    eprintln!("{} Printing VCF file...", print_time());
-    print_variant_debug(
-        &mut varlist,
-        &interval,
-        &variant_debug_directory,
-        "4.0.final_genotypes.vcf",
-        max_cov,
-        &density_params,
-        &sample_name,
-    )?;
-    print_vcf(
-        &mut varlist,
-        &interval,
-        &Some(fasta_file),
-        &output_vcf_file,
-        output_rg, // change to command line parameter output_ref
-        max_cov,
-        &density_params,
-        &sample_name,
-        false,
-        true,
-        potential_variants_file != None
-    )
-    .chain_err(|| "Error printing VCF output.")?;
-
-    Ok(())
+    input_args
 }

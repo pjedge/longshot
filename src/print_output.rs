@@ -17,18 +17,24 @@ pub fn print_vcf_header<W: Write>(
     used_potential_variants_vcf: bool,
     fasta_file: &Option<IndexedReader<File>>,
 ) -> Result<()> {
-    writeln!(output_file, "##fileformat=VCFv4.2\n##source=Longshot v0.4.3")
-        .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
+    writeln!(
+        output_file,
+        "##fileformat=VCFv4.2\n##source=Longshot v0.4.3"
+    )
+    .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
 
     if let Some(fasta_reader) = &fasta_file {
         for sequence in fasta_reader.index.sequences().iter() {
-            writeln!(output_file, "##contig=<ID={},length={}>", sequence.name, sequence.len)
-                .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
+            writeln!(
+                output_file,
+                "##contig=<ID={},length={}>",
+                sequence.name, sequence.len
+            )
+            .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
         }
     }
 
     let headerstr1 = &"##INFO=<ID=DP,Number=1,Type=Integer,Description=\"Total Depth of reads passing MAPQ filter\">
-##INFO=<ID=AC,Number=R,Type=Integer,Description=\"Number of Observations of Each Allele\">
 ##INFO=<ID=AM,Number=1,Type=Integer,Description=\"Number of Ambiguous Allele Observations\">
 ##INFO=<ID=MC,Number=1,Type=Integer,Description=\"Minimum Error Correction (MEC) for this single variant\">
 ##INFO=<ID=MF,Number=1,Type=Float,Description=\"Minimum Error Correction (MEC) Fraction for this variant.\">
@@ -61,6 +67,7 @@ pub fn print_vcf_header<W: Write>(
 ##FORMAT=<ID=UG,Number=1,Type=String,Description=\"Unphased Genotype (pre-haplotype-assembly)\">
 ##FORMAT=<ID=UQ,Number=1,Type=Float,Description=\"Unphased Genotype Quality (pre-haplotype-assembly)\">
 ##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth\">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description=\"Allelic depths for the ref and alt alleles in the order listed\">
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{}", sample_name);
     writeln!(output_file, "{}", headerstr3)
         .chain_err(|| ErrorKind::FileWriteError(filename.to_string()))?;
@@ -78,7 +85,7 @@ pub fn print_vcf(
     sample_name: &String,
     print_outside_region: bool,
     trim_unused_alts: bool,
-    used_potential_variants_vcf: bool
+    used_potential_variants_vcf: bool,
 ) -> Result<()> {
     // first, add filter flags for variant density
     var_filter(
@@ -90,9 +97,9 @@ pub fn print_vcf(
     );
 
     let mut fasta = match fasta_file {
-        &Some(ref ff) => Some(
-            IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?,
-        ),
+        &Some(ref ff) => {
+            Some(IndexedReader::from_file(&ff).chain_err(|| ErrorKind::IndexedFastaOpenError)?)
+        }
         None => None,
     };
 
@@ -105,7 +112,13 @@ pub fn print_vcf(
     let mut file = File::create(&vcf_path)
         .chain_err(|| ErrorKind::CreateFileError(vcf_display.to_string()))?;
 
-    print_vcf_header(&mut file, &vcf_display, sample_name, used_potential_variants_vcf, &fasta)?;
+    print_vcf_header(
+        &mut file,
+        &vcf_display,
+        sample_name,
+        used_potential_variants_vcf,
+        &fasta,
+    )?;
 
     for var in &varlist.lst {
         assert!(var.alleles.len() >= 2);
@@ -168,10 +181,14 @@ pub fn print_vcf(
         if trim_unused_alts {
             // limit alt alleles and counts to those that appear in the genotype
             for i in 1..var.alleles.len() {
-                if vec![var.genotype.0.into(),
-                        var.genotype.1.into(),
-                        var.unphased_genotype.0.into(),
-                        var.unphased_genotype.1.into()].contains(&i) {
+                if vec![
+                    var.genotype.0.into(),
+                    var.genotype.1.into(),
+                    var.unphased_genotype.0.into(),
+                    var.unphased_genotype.1.into(),
+                ]
+                .contains(&i)
+                {
                     var_alleles.push(var.alleles[i].clone());
                     allele_counts.push(var.allele_counts[i].to_string());
                 }
@@ -195,7 +212,8 @@ pub fn print_vcf(
             None => "/",
         };
 
-        let mut genotype_str = vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
+        let mut genotype_str =
+            vec![var.genotype.0.to_string(), var.genotype.1.to_string()].join(sep);
         let mut unphased_genotype_str = vec![
             var.unphased_genotype.0.to_string(),
             var.unphased_genotype.1.to_string(),
@@ -208,14 +226,21 @@ pub fn print_vcf(
         if trim_unused_alts {
             // handle corner case where both phased and unphased genotype contain alt allele 2
             // but not 1 so only one alt is listed
-            if vec![var.genotype.0,
+            if vec![
+                var.genotype.0,
+                var.genotype.1,
+                var.unphased_genotype.0,
+                var.unphased_genotype.1,
+            ]
+            .contains(&2)
+                && !vec![
+                    var.genotype.0,
                     var.genotype.1,
                     var.unphased_genotype.0,
-                    var.unphased_genotype.1].contains(&2) &&
-               ! vec![var.genotype.0,
-                    var.genotype.1,
-                    var.unphased_genotype.0,
-                    var.unphased_genotype.1].contains(&1) {
+                    var.unphased_genotype.1,
+                ]
+                .contains(&1)
+            {
                 genotype_str = genotype_str.replace("2", "1");
                 unphased_genotype_str = unphased_genotype_str.replace("2", "1");
             }
@@ -243,44 +268,52 @@ pub fn print_vcf(
             None => "None".to_string(),
         };
 
-        write!(file,
-                       "{}\t{}\t.\t{}\t{}\t{:.0}\t{}\tDP={};AC={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};",
-                       varlist.target_names[var.tid as usize],
-                       var.pos0 + 1,
-                       var.alleles[0],
-                       var_alleles.join(","),
-                       var.qual+0.4999, // round off to integer, 09/04/2020
-                       var.filter,
-                       var.dp,
-                       allele_counts_str,
-                       var.ambiguous_count,
-                       var.mec,
-                       var.mec_frac_variant,
-                       var.mec_frac_block,
-                       var.mean_allele_qual,
-                       genotypes_match).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+        write!(
+            file,
+            "{}\t{}\t.\t{}\t{}\t{:.0}\t{}\tDP={};AM={};MC={};MF={:.3};MB={:.3};AQ={:.2};GM={};",
+            varlist.target_names[var.tid as usize],
+            var.pos0 + 1,
+            var.alleles[0],
+            var_alleles.join(","),
+            var.qual + 0.4999, // round off to integer, 09/04/2020
+            var.filter,
+            var.dp,
+            var.ambiguous_count,
+            var.mec,
+            var.mec_frac_variant,
+            var.mec_frac_block,
+            var.mean_allele_qual,
+            genotypes_match
+        )
+        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
 
         if !used_potential_variants_vcf {
-            write!(file,
-                     "DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};",
-                     var.dp_any_mq,
-                     var.mq10_frac,
-                     var.mq20_frac,
-                     var.mq30_frac,
-                     var.mq40_frac,
-                     var.mq50_frac).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
+            write!(
+                file,
+                "DA={};MQ10={:.2};MQ20={:.2};MQ30={:.2};MQ40={:.2};MQ50={:.2};",
+                var.dp_any_mq,
+                var.mq10_frac,
+                var.mq20_frac,
+                var.mq30_frac,
+                var.mq40_frac,
+                var.mq50_frac
+            )
+            .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
         }
-        writeln!(file,
-                 "PH={};SC={};\tGT:GQ:DP:PS:UG:UQ\t{}:{:.0}:{}:{}:{}:{:.2}",
-                 post_str,
-                 sequence_context,
-                 genotype_str,
-                 var.gq+0.4999, // round off to integer
-		 var.dp,
-                 ps,
-                 unphased_genotype_str,
-                 var.unphased_gq).chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
-
+        writeln!(
+            file,
+            "PH={};SC={};\tGT:GQ:DP:AD:PS:UG:UQ\t{}:{:.0}:{}:{}:{}:{}:{:.2}",
+            post_str,
+            sequence_context,
+            genotype_str,
+            var.gq + 0.4999, // round off to integer
+            var.dp,
+            allele_counts_str,
+            ps,
+            unphased_genotype_str,
+            var.unphased_gq
+        )
+        .chain_err(|| ErrorKind::FileWriteError(vcf_display.to_string()))?;
     }
     Ok(())
 }
@@ -313,7 +346,7 @@ pub fn print_variant_debug(
                 sample_name,
                 true,
                 false, // include all candidate alts
-                true   // don't print MQ statistics in VCF because they may or may not be present
+                true,  // don't print MQ statistics in VCF because they may or may not be present
             )
             .chain_err(|| "Error printing debug VCF file.")?;
         }

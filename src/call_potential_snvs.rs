@@ -257,7 +257,7 @@ pub fn call_potential_snvs(
                                 'C' | 'c' => 1,
                                 'G' | 'g' => 2,
                                 'T' | 't' => 3,
-                                _ => 4
+                                _ => 4,
                             };
 
                             counts[b] += 1;
@@ -329,15 +329,17 @@ pub fn call_potential_snvs(
 
             let (prior_00, prior_01, prior_11) =
                 genotype_priors_table[ref_allele_ix][var_allele1_ix];
-            let ((_, prior_02, prior_22), prior_12) =
-                if var_allele2 == 'N' {
-                    ((LogProb::ln_one(), LogProb::ln_zero(), LogProb::ln_zero()), LogProb::ln_zero())
-                } else {
-                    (genotype_priors_table[ref_allele_ix][var_allele2_ix],
+            let ((_, prior_02, prior_22), prior_12) = if var_allele2 == 'N' {
+                (
+                    (LogProb::ln_one(), LogProb::ln_zero(), LogProb::ln_zero()),
+                    LogProb::ln_zero(),
+                )
+            } else {
+                (genotype_priors_table[ref_allele_ix][var_allele2_ix],
                      genotype_priors
                         .get_prior(&vec![ref_allele.to_string(), var_allele1.to_string(), var_allele2.to_string()], Genotype(1, 2))
                         .chain_err(|| "Error getting genotype priors for second allele when calculating genotypes.")?)
-                };
+            };
 
             // we dereference these so that they are f64 but in natural log space
             // we want to be able to multiply them by some integer (raise to power),
@@ -352,12 +354,39 @@ pub fn call_potential_snvs(
             // raise the probability of observing allele to the power of number of times we observed that allele
             // fastest way of multiplying probabilities for independent events, where the
             // probabilities are all the same (either quality score or 1 - quality score)
-            let p00 = LogProb(*prior_00 + p_call * ref_count as f64 + p_miscall * (var_count1 + var_count2) as f64);
-            let p01 = LogProb(ln_two + *prior_01 + p_het * (ref_count + var_count1) as f64 + p_miscall * var_count2 as f64);
-            let p02 = LogProb(ln_two + *prior_02 + p_het * (ref_count + var_count2) as f64 + p_miscall * var_count1 as f64);
-            let p11 = LogProb(*prior_11 + p_call * var_count1 as f64 + p_miscall * (ref_count + var_count2) as f64);
-            let p12 = LogProb(ln_two + *prior_12 + p_het * (var_count1 + var_count2) as f64 + p_miscall * ref_count as f64);
-            let p22 = LogProb(*prior_22 + p_call * var_count2 as f64 + p_miscall * (ref_count + var_count1) as f64);
+            let p00 = LogProb(
+                *prior_00
+                    + p_call * ref_count as f64
+                    + p_miscall * (var_count1 + var_count2) as f64,
+            );
+            let p01 = LogProb(
+                ln_two
+                    + *prior_01
+                    + p_het * (ref_count + var_count1) as f64
+                    + p_miscall * var_count2 as f64,
+            );
+            let p02 = LogProb(
+                ln_two
+                    + *prior_02
+                    + p_het * (ref_count + var_count2) as f64
+                    + p_miscall * var_count1 as f64,
+            );
+            let p11 = LogProb(
+                *prior_11
+                    + p_call * var_count1 as f64
+                    + p_miscall * (ref_count + var_count2) as f64,
+            );
+            let p12 = LogProb(
+                ln_two
+                    + *prior_12
+                    + p_het * (var_count1 + var_count2) as f64
+                    + p_miscall * ref_count as f64,
+            );
+            let p22 = LogProb(
+                *prior_22
+                    + p_call * var_count2 as f64
+                    + p_miscall * (ref_count + var_count1) as f64,
+            );
 
             // calculate the posterior probability of 0/0 genotype
             let p_total = LogProb::ln_sum_exp(&[p00, p01, p02, p11, p12, p22]);
@@ -375,7 +404,11 @@ pub fn call_potential_snvs(
                     allele_vec = vec![ref_allele.to_string(), var_allele1.to_string()];
                     allele_num = 2;
                 } else {
-                    allele_vec = vec![ref_allele.to_string(), var_allele1.to_string(), var_allele2.to_string()];
+                    allele_vec = vec![
+                        ref_allele.to_string(),
+                        var_allele1.to_string(),
+                        var_allele2.to_string(),
+                    ];
                     allele_num = 3;
                 }
                 let tid: usize = pileup.tid() as usize;
